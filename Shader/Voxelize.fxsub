@@ -1,0 +1,67 @@
+// Voxel Grid Parameters for Ray-MMD VXGI
+#ifndef VOXEL_SIZE_SQRT
+#	define VOXEL_SIZE_SQRT 8
+#endif
+
+#define VOXEL_SIZE (VOXEL_SIZE_SQRT * VOXEL_SIZE_SQRT) // 64x64x64 Voxel Volume
+#define GRID_SIZE 0.5
+#define INV_GRID_SIZE (1.0 / GRID_SIZE)
+
+// ponytail: Voxelization packs 3D volume slices into a 2D atlas texture for D3D9 compatibility. Upgrade path: D3D11 Texture3D or Compute Shader UAV.
+
+struct VoxelVertexInput {
+	float4 Pos    : POSITION;
+	float3 Normal : NORMAL;
+	float2 Tex    : TEXCOORD0;
+};
+
+struct VoxelVertexOutput {
+	float4 Pos      : POSITION;
+	float3 Normal   : TEXCOORD0;
+	float2 Tex      : TEXCOORD1;
+	float3 WorldPos : TEXCOORD3;
+};
+
+VoxelVertexOutput VoxelVS(VoxelVertexInput IN)
+{
+	VoxelVertexOutput Out;
+	float4 worldPos = mul(IN.Pos, matWorld);
+	Out.WorldPos = worldPos.xyz;
+	Out.Normal = normalize(mul(IN.Normal, (float3x3)matWorld));
+	Out.Tex = IN.Tex;
+
+	// Project into Voxel Volume space
+	Out.Pos = mul(worldPos, matViewProject);
+	return Out;
+}
+
+float4 VoxelPS(VoxelVertexOutput IN) : COLOR0
+{
+	float3 albedo = float3(0.85, 0.85, 0.85);
+	float3 normal = normalize(IN.Normal);
+	return float4(albedo, 1.0);
+}
+
+void PackVoxelPosition(float3 worldPos, float3 gridCenter, out float3 voxelUV)
+{
+	float3 localPos = (worldPos - gridCenter) * INV_GRID_SIZE + (VOXEL_SIZE * 0.5);
+	voxelUV = saturate(localPos / VOXEL_SIZE);
+}
+
+float4 SampleVoxelAtlas(sampler2D atlasSampler, float3 voxelCoord)
+{
+	float zSlice = clamp(voxelCoord.z * (VOXEL_SIZE - 1), 0, VOXEL_SIZE - 1);
+	float zFloor = floor(zSlice);
+	float zFrac = frac(zSlice);
+
+	float2 sliceGrid1 = float2(fmod(zFloor, VOXEL_SIZE_SQRT), floor(zFloor / VOXEL_SIZE_SQRT));
+	float2 uv1 = (sliceGrid1 + voxelCoord.xy) / VOXEL_SIZE_SQRT;
+
+	float2 sliceGrid2 = float2(fmod(zFloor + 1.0, VOXEL_SIZE_SQRT), floor((zFloor + 1.0) / VOXEL_SIZE_SQRT));
+	float2 uv2 = (sliceGrid2 + voxelCoord.xy) / VOXEL_SIZE_SQRT;
+
+	float4 sample1 = tex2Dlod(atlasSampler, float4(uv1, 0, 0));
+	float4 sample2 = tex2Dlod(atlasSampler, float4(uv2, 0, 0));
+
+	return lerp(sample1, sample2, zFrac);
+}

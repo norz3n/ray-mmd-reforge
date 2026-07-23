@@ -427,16 +427,16 @@ sampler SSDOMapSampTemp = sampler_state {
 };
 #endif
 
-#if SSGI_QUALITY > 0
+#if GI_MODE == 1
 shared texture SSGIMap : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0, 1.0};
 	bool AntiAlias = false;
-	string Format = "A8R8G8B8";
+	string Format = "A16B16G16R16F";
 >;
 texture SSGIMapTemp : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0, 1.0};
 	bool AntiAlias = false;
-	string Format = "A8R8G8B8";
+	string Format = "A16B16G16R16F";
 >;
 sampler SSGIMapSamp = sampler_state {
 	texture = <SSGIMap>;
@@ -445,6 +445,48 @@ sampler SSGIMapSamp = sampler_state {
 };
 sampler SSGIMapSampTemp = sampler_state {
 	texture = <SSGIMapTemp>;
+	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
+	AddressU = CLAMP;  AddressV = CLAMP;
+};
+#elif GI_MODE == 2
+texture2D VoxelPackRT: OFFSCREENRENDERTARGET <
+	string Description = "Voxelization map for Ray-MMD VXGI";
+	int Width = 512;
+	int Height = 2048;
+	string Format = "A8R8G8B8";
+	int MipLevels = 1;
+	bool AntiAlias = false;
+	float4 ClearColor = { 0, 0, 0, 0 };
+	float ClearDepth = 1.0;
+	string DefaultEffect = 
+		"self = hide;"
+		"rayController.pmx = hide;"
+		"ray.x = hide;"
+		"* = Main/Voxelize.fx;";
+>;
+sampler2D VoxelPackSamp = sampler_state {
+	texture = <VoxelPackRT>;
+	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+
+shared texture VXGIMap : RENDERCOLORTARGET<
+	float2 ViewportRatio = {1.0, 1.0};
+	bool AntiAlias = false;
+	string Format = "A16B16G16R16F";
+>;
+texture VXGIMapTemp : RENDERCOLORTARGET<
+	float2 ViewportRatio = {1.0, 1.0};
+	bool AntiAlias = false;
+	string Format = "A16B16G16R16F";
+>;
+sampler VXGIMapSamp = sampler_state {
+	texture = <VXGIMap>;
+	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
+	AddressU = CLAMP;  AddressV = CLAMP;
+};
+sampler VXGIMapSampTemp = sampler_state {
+	texture = <VXGIMapTemp>;
 	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
 	AddressU = CLAMP;  AddressV = CLAMP;
 };
