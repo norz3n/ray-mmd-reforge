@@ -1,0 +1,166 @@
+#if SSGI_QUALITY == 1
+#	define SSGI_SAMPLER_COUNT 16
+#elif SSGI_QUALITY == 2
+#	define SSGI_SAMPLER_COUNT 24
+#elif SSGI_QUALITY >= 3
+#	define SSGI_SAMPLER_COUNT 32
+#else
+#	define SSGI_SAMPLER_COUNT 24
+#endif
+
+// ponytail: Screen-space ray sampling assumes single-layer depth from G-buffer; back-facing or off-screen surfaces cannot bounce light. Upgrade path: Screen-space tracing with Hi-Z mipmaps or radiance probes.
+
+float FetchLinearDepth(float2 uv)
+{
+	return tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).r;
+}
+
+float3 FetchViewNormal(float2 uv)
+{
+	float4 MRT6 = tex2Dlod(Gbuffer6Map, float4(uv, 0, 0));
+	return DecodeGBufferNormal(MRT6);
+}
+
+float4 ScreenSpaceGIPassPS(
+	in float4 coord : TEXCOORD0,
+	in float3 viewdir : TEXCOORD1) : COLOR
+{
+	float linearDepth = FetchLinearDepth(coord.xy);
+	if (linearDepth >= 1000.0) clip(-1);
+
+	float4 projConstant = GetProjConstant();
+	float3 viewNormal = FetchViewNormal(coord.xy);
+	float3 viewPosition = GetViewPosition(projConstant, coord.xy, linearDepth);
+
+	// Smooth per-pixel noise
+	float2 pixelPos = coord.xy * ViewportSize;
+	float jitter = PseudoRandom(pixelPos + float2(frac(time * 0.0314), frac(time * 0.0173)));
+
+	float3 accumIndirect = 0;
+	float accumWeight = 0.0001;
+
+	// Continuous Golden-Ratio Fibonacci Spiral in 2D Screen Space
+	[unroll]
+	for (int i = 0; i < SSGI_SAMPLER_COUNT; ++i)
+	{
+		float radiusNoise = frac(jitter * 7.123 + float(i) * 0.3183);
+		float normIndex = (float(i) + 0.5 + radiusNoise * 0.5) / float(SSGI_SAMPLER_COUNT);
+
+		// Smooth non-linear radius distribution (0.015 to 0.55 viewport UV distance)
+		float radiusScale = lerp(0.015, 0.55, pow(normIndex, 1.8));
+
+		// Golden ratio angle rotation
+		float angle = (float(i) * 2.399963229728) + (jitter * PI_2);
+
+		float2 dir = float2(cos(angle), sin(angle));
+		float2 sampleOffset = dir * radiusScale * float2(1.0, ViewportAspect);
+		float2 sampleUV = coord.xy + sampleOffset;
+
+		if (sampleUV.x < 0.001 || sampleUV.x > 0.999 || sampleUV.y < 0.001 || sampleUV.y > 0.999)
+			continue;
+
+		float hitDepth = FetchLinearDepth(sampleUV);
+		if (hitDepth >= 1000.0) continue;
+
+		float3 hitViewPos = GetViewPosition(projConstant, sampleUV, hitDepth);
+		float3 ray = hitViewPos - viewPosition;
+		float dist2 = dot(ray, ray);
+		float dist = sqrt(dist2);
+
+		if (dist < 0.01) continue;
+
+		float3 rayDir = ray / dist;
+		float rcvNdotL = saturate(dot(viewNormal, rayDir));
+
+		float3 hitNormal = FetchViewNormal(sampleUV);
+		float emtNdotL = saturate(dot(hitNormal, -rayDir) * 0.7 + 0.3);
+
+		float distAtten = 1.0 / (1.0 + dist2 * mSSGIFalloff);
+		float weight = rcvNdotL * emtNdotL * distAtten;
+
+		// Use Linear Sampler (ShadingMapSamp) for pre-filtered smooth scene colors
+		float3 hitColor = tex2Dlod(ShadingMapSamp, float4(sampleUV, 0, 0)).rgb;
+
+		// Firefly compression
+		float hitLum = dot(hitColor, float3(0.299, 0.587, 0.114));
+		hitColor /= (1.0 + hitLum * 0.25);
+
+		// Color Bleed Saturation Boost
+		float lum = dot(hitColor, float3(0.299, 0.587, 0.114));
+		hitColor = lerp(lum.rrr, hitColor, mSSGISaturation);
+
+		accumIndirect += hitColor * weight;
+		accumWeight += weight;
+	}
+
+	float3 finalGI = accumIndirect / accumWeight;
+	return float4(finalGI, saturate(accumWeight));
+}
+
+float4 ScreenSpaceGIBlurPS(
+	in float2 coord : TEXCOORD0,
+	uniform sampler source,
+	uniform float2 offset) : COLOR
+{
+	float centerDepth = FetchLinearDepth(coord);
+	float3 centerNormal = FetchViewNormal(coord);
+
+	float4 centerColor = tex2Dlod(source, float4(coord, 0, 0));
+	float totalWeight = 1.0;
+	float4 totalColor = centerColor;
+
+	// 8-tap wide bilateral filter for smooth GI
+	[unroll]
+	for (int r = 1; r <= 8; ++r)
+	{
+		float2 uvOffset = offset * (r * 2.0);
+
+		float2 uv1 = coord + uvOffset;
+		float2 uv2 = coord - uvOffset;
+
+		float depth1 = FetchLinearDepth(uv1);
+		float depth2 = FetchLinearDepth(uv2);
+
+		float3 normal1 = FetchViewNormal(uv1);
+		float3 normal2 = FetchViewNormal(uv2);
+
+		float depthDiff1 = abs(depth1 - centerDepth) / max(centerDepth, 0.1);
+		float depthDiff2 = abs(depth2 - centerDepth) / max(centerDepth, 0.1);
+
+		float w1 = exp(-r * r * 0.05 - depthDiff1 * mSSGIBlurSharpness) * saturate(dot(normal1, centerNormal));
+		float w2 = exp(-r * r * 0.05 - depthDiff2 * mSSGIBlurSharpness) * saturate(dot(normal2, centerNormal));
+
+		totalColor += tex2Dlod(source, float4(uv1, 0, 0)) * w1;
+		totalColor += tex2Dlod(source, float4(uv2, 0, 0)) * w2;
+
+		totalWeight += w1 + w2;
+	}
+
+	return totalColor / totalWeight;
+}
+
+float4 SSGIFinalCombinePS(in float2 coord : TEXCOORD0) : COLOR
+{
+	float4 MRT0 = tex2Dlod(Gbuffer5Map, float4(coord, 0, 0));
+	float4 MRT1 = tex2Dlod(Gbuffer6Map, float4(coord, 0, 0));
+	float4 MRT2 = tex2Dlod(Gbuffer7Map, float4(coord, 0, 0));
+	float4 MRT3 = tex2Dlod(Gbuffer8Map, float4(coord, 0, 0));
+
+	MaterialParam material;
+	DecodeGbuffer(MRT0, MRT1, MRT2, MRT3, material);
+
+	float4 gi = tex2Dlod(SSGIMapSamp, float4(coord, 0, 0));
+
+#if SSDO_QUALITY > 0
+	float ssao = tex2Dlod(SSDOMapSamp, float4(coord, 0, 0)).w;
+	ssao = (material.lightModel == SHADINGMODELID_GLASS) ? 1.0 : ssao;
+	ssao = min(ssao, material.visibility);
+#else
+	float ssao = material.visibility;
+#endif
+
+	// Combine SSGI indirect bounce with material albedo & visibility & SSAO
+	float3 indirectDiffuse = gi.rgb * material.albedo * mSSGIIntensity * ssao;
+
+	return float4(indirectDiffuse, 1.0);
+}

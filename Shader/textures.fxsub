@@ -426,3 +426,26 @@ sampler SSDOMapSampTemp = sampler_state {
 	AddressU = CLAMP;  AddressV = CLAMP;
 };
 #endif
+
+#if SSGI_QUALITY > 0
+shared texture SSGIMap : RENDERCOLORTARGET<
+	float2 ViewportRatio = {1.0, 1.0};
+	bool AntiAlias = false;
+	string Format = "A8R8G8B8";
+>;
+texture SSGIMapTemp : RENDERCOLORTARGET<
+	float2 ViewportRatio = {1.0, 1.0};
+	bool AntiAlias = false;
+	string Format = "A8R8G8B8";
+>;
+sampler SSGIMapSamp = sampler_state {
+	texture = <SSGIMap>;
+	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
+	AddressU = CLAMP;  AddressV = CLAMP;
+};
+sampler SSGIMapSampTemp = sampler_state {
+	texture = <SSGIMapTemp>;
+	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
+	AddressU = CLAMP;  AddressV = CLAMP;
+};
+#endif
