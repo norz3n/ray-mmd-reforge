@@ -54,7 +54,7 @@ float4 VoxelConeTracingPassPS(
 	float3 accumRadiance = 0;
 	float accumWeight = 0.0001;
 
-	// Fibonacci Hemisphere Cone Probing
+	// Fibonacci Hemisphere Cone Probing with Point-Emissive Variance Compression
 	[loop]
 	for (int i = 0; i < VXGI_CONE_COUNT; ++i)
 	{
@@ -98,10 +98,13 @@ float4 VoxelConeTracingPassPS(
 
 			float3 hitColor = tex2Dlod(ShadingMapSamp, float4(sampleUV, 0, 0)).rgb;
 
-			// Firefly compression
+			// Soft Reinhard-style luminance compression for small emissive objects / distant lights
 			float hitLum = dot(hitColor, float3(0.299, 0.587, 0.114));
-			if (hitLum > 1.5)
-				hitColor *= (1.5 + log(max(1.0, hitLum - 0.5))) / hitLum;
+			if (hitLum > 0.8)
+			{
+				float compressedLum = 0.8 + log(1.0 + (hitLum - 0.8) * 0.5);
+				hitColor *= (compressedLum / hitLum);
+			}
 
 			// Color Bleed Saturation Boost
 			hitColor = lerp(hitLum.rrr, hitColor, mSSGISaturation);
@@ -131,6 +134,11 @@ float4 VoxelGIBlurPS(
 	float3 centerNormal = FetchViewNormalVX(coord);
 
 	float4 centerColor = tex2Dlod(source, float4(coord, 0, 0));
+	float centerLum = dot(centerColor.rgb, float3(0.299, 0.587, 0.114));
+
+	// Relax depth sharpness in low-light dark areas for smooth point-emissive blur
+	float adaptiveSharpness = lerp(mSSGIBlurSharpness * 0.35, mSSGIBlurSharpness, saturate(centerLum * 4.0));
+
 	float totalWeight = 1.0;
 	float4 totalColor = centerColor;
 
@@ -151,8 +159,8 @@ float4 VoxelGIBlurPS(
 		float depthDiff1 = abs(depth1 - centerDepth) / max(centerDepth, 0.1);
 		float depthDiff2 = abs(depth2 - centerDepth) / max(centerDepth, 0.1);
 
-		float w1 = exp(-r * r * 0.04 - depthDiff1 * mSSGIBlurSharpness) * saturate(dot(normal1, centerNormal));
-		float w2 = exp(-r * r * 0.04 - depthDiff2 * mSSGIBlurSharpness) * saturate(dot(normal2, centerNormal));
+		float w1 = exp(-r * r * 0.03 - depthDiff1 * adaptiveSharpness) * saturate(dot(normal1, centerNormal));
+		float w2 = exp(-r * r * 0.03 - depthDiff2 * adaptiveSharpness) * saturate(dot(normal2, centerNormal));
 
 		totalColor += tex2Dlod(source, float4(uv1, 0, 0)) * w1;
 		totalColor += tex2Dlod(source, float4(uv2, 0, 0)) * w2;
