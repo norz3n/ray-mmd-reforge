@@ -16,10 +16,10 @@ float4x4 CreateOrthoProject(float width, float height, float near, float far)
 
 float4x4 CreateLightViewMatrix(float3 forward, float3 LightDirection, float LightDistance)
 {
-	float3 right = cross(float3(0.0f, 0.0f, 1.0f), forward);
+	float3 right = cross(float3(0.0f, 1.0f, 0.0f), forward);
 	float3 up;
 
-	if (any(right))
+	if (dot(right, right) > 1e-4)
 	{
 		right = normalize(right);
 		up = cross(forward, right);
@@ -40,13 +40,14 @@ float4x4 CreateLightViewMatrix(float3 forward, float3 LightDirection, float Ligh
 					mul(-LightDirection * LightDistance, rotation), 1);
 }
 
-float4 CreateFrustumSplitPoint(float n, float f, float lambda = 0.5)
+float4 CreateFrustumSplitPoint(float n, float f, float lambda = 0.75)
 {
-	float4 p = float4(1,2,3,4) / 4;
-	float4 p0 = n + (f - n) / n * p;
+	float4 p = float4(1, 2, 3, 4) / 4.0;
+	float4 p0 = n + (f - n) * p;
 	float4 p1 = n * pow(f / n, p);
 	return lerp(p0, p1, lambda);
 }
+
 
 float4 CreateFrustumFromProjInverse()
 {
