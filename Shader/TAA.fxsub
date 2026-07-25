@@ -1,0 +1,122 @@
+texture TAAHistoryMap : RENDERCOLORTARGET <
+	float2 ViewPortRatio = {1.0, 1.0};
+	bool AntiAlias = false;
+	string Format = "A8R8G8B8";
+>;
+sampler TAAHistoryMapSamp = sampler_state {
+	texture = <TAAHistoryMap>;
+	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+
+texture TAAMatrixMap : RENDERCOLORTARGET <
+	int2 Dimensions = {4, 1};
+	bool AntiAlias = false;
+	string Format = "A32B32G32R32F";
+>;
+sampler TAAMatrixMapSamp = sampler_state {
+	texture = <TAAMatrixMap>;
+	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+
+float4x4 GetPrevViewProject()
+{
+	float4 r0 = tex2Dlod(TAAMatrixMapSamp, float4(0.125, 0.5, 0, 0));
+	float4 r1 = tex2Dlod(TAAMatrixMapSamp, float4(0.375, 0.5, 0, 0));
+	float4 r2 = tex2Dlod(TAAMatrixMapSamp, float4(0.625, 0.5, 0, 0));
+	float4 r3 = tex2Dlod(TAAMatrixMapSamp, float4(0.875, 0.5, 0, 0));
+	return float4x4(r0, r1, r2, r3);
+}
+
+float3 RGB2YCoCg(float3 rgb)
+{
+	float Y  = dot(rgb, float3(0.25, 0.5, 0.25));
+	float Co = dot(rgb, float3(0.5, 0.0, -0.5));
+	float Cg = dot(rgb, float3(-0.25, 0.5, -0.25));
+	return float3(Y, Co, Cg);
+}
+
+float3 YCoCg2RGB(float3 ycocg)
+{
+	float Y  = ycocg.x;
+	float Co = ycocg.y;
+	float Cg = ycocg.z;
+	return float3(
+		Y + Co - Cg,
+		Y + Cg,
+		Y - Co - Cg
+	);
+}
+
+float3 ClipAABB(float3 history, float3 boxMin, float3 boxMax, float3 center)
+{
+	float3 p_coeff = (boxMax - center) / max(history - center, 1e-5);
+	float3 n_coeff = (boxMin - center) / max(history - center, 1e-5);
+	float3 coeff = max(p_coeff, n_coeff);
+	float t = saturate(min(coeff.x, min(coeff.y, coeff.z)));
+	return lerp(center, history, t);
+}
+
+float4 TAAPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1, uniform sampler2D source) : COLOR
+{
+	float2 uv = coord.xy;
+
+	float linearDepth = tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).r;
+
+	float3 view = normalize(viewdir);
+	float3 viewPosition = view * linearDepth / max(view.z, 1e-5);
+	float3 worldPosition = mul(float4(viewPosition, 1.0), matViewInverse).xyz;
+
+	float4x4 matViewProjectPrev = GetPrevViewProject();
+	float4 prevClipPos = mul(float4(worldPosition, 1.0), matViewProjectPrev);
+	float2 prevUV = (prevClipPos.xy / max(prevClipPos.w, 1e-5)) * float2(0.5, -0.5) + 0.5;
+
+	float3 currColor = tex2Dlod(source, float4(uv, 0, 0)).rgb;
+	float3 currYCoCg = RGB2YCoCg(currColor);
+
+	float3 boxMin = currYCoCg;
+	float3 boxMax = currYCoCg;
+
+	[unroll]
+	for (int x = -1; x <= 1; ++x)
+	{
+		[unroll]
+		for (int y = -1; y <= 1; ++y)
+		{
+			if (x == 0 && y == 0) continue;
+			float2 offsetUV = uv + float2(x, y) * ViewportOffset2;
+			float3 neighborColor = tex2Dlod(source, float4(offsetUV, 0, 0)).rgb;
+			float3 neighborYCoCg = RGB2YCoCg(neighborColor);
+			boxMin = min(boxMin, neighborYCoCg);
+			boxMax = max(boxMax, neighborYCoCg);
+		}
+	}
+
+	bool isValidPrev = all(prevUV >= 0.0) && all(prevUV <= 1.0);
+	float3 historyColor = isValidPrev ? tex2Dlod(TAAHistoryMapSamp, float4(prevUV, 0, 0)).rgb : currColor;
+	float3 historyYCoCg = RGB2YCoCg(historyColor);
+
+	historyYCoCg = ClipAABB(historyYCoCg, boxMin, boxMax, currYCoCg);
+
+	float blendFactor = isValidPrev ? 0.85 : 0.0;
+	float3 finalYCoCg = lerp(currYCoCg, historyYCoCg, blendFactor);
+	float3 finalColor = YCoCg2RGB(finalYCoCg);
+
+	return float4(finalColor, 1.0);
+}
+
+float4 TAAMatrixUpdatePS(in float2 coord : TEXCOORD0) : COLOR
+{
+	int index = (int)(coord.x * 4.0);
+	if (index == 0) return matViewProject[0];
+	if (index == 1) return matViewProject[1];
+	if (index == 2) return matViewProject[2];
+	return matViewProject[3];
+}
+
+float4 TAAFinalPS(in float2 coord : TEXCOORD0) : COLOR
+{
+	return tex2Dlod(TAAHistoryMapSamp, float4(coord, 0, 0));
+}
+

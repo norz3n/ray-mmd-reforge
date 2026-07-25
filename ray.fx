@@ -166,12 +166,9 @@ static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceB
 #endif
 
 #if AA_QUALITY == 6
-#	include "shader/CameraMotion.fxsub"
-#endif
-
-#if AA_QUALITY == 6
 #	include "shader/TAA.fxsub"
 #endif
+
 
 float4 ScreenSpaceQuadVS(
 	in float4 Position : POSITION,
@@ -404,6 +401,12 @@ technique DeferredLighting<
 	"RenderColorTarget=;"
 	"RenderDepthStencilTarget=;"
 	"Pass=SMAANeighborhoodBlendingFinal;"
+#endif
+
+#if AA_QUALITY == 6
+	"RenderColorTarget=TAAHistoryMap; Pass=TAAPass;"
+	"RenderColorTarget=TAAMatrixMap; Pass=TAAMatrixUpdatePass;"
+	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=TAAFinal;"
 #endif
 ;>
 {
@@ -1029,6 +1032,26 @@ technique DeferredLighting<
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 SMAANeighborhoodBlendingVS();
 		PixelShader  = compile ps_3_0 SMAANeighborhoodBlendingPS(ShadingMapSamp, true);
+	}
+#endif
+#if AA_QUALITY == 6
+	pass TAAPass<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 TAAPS(ShadingMapTempSamp);
+	}
+	pass TAAMatrixUpdatePass<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 TAAMatrixUpdatePS();
+	}
+	pass TAAFinal<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 TAAFinalPS();
 	}
 #endif
 }
