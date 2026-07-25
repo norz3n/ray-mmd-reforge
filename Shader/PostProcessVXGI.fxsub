@@ -10,11 +10,11 @@
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-#if VXGI_QUALITY == 1
-#	define VXGI_CONE_COUNT 8
-#elif VXGI_QUALITY == 2
+#if GI_QUALITY == 1
+#	define VXGI_CONE_COUNT 6
+#elif GI_QUALITY == 2
 #	define VXGI_CONE_COUNT 16
-#elif VXGI_QUALITY >= 3
+#elif GI_QUALITY >= 3
 #	define VXGI_CONE_COUNT 24
 #else
 #	define VXGI_CONE_COUNT 16
@@ -154,7 +154,7 @@ float4 VoxelConeTracingPassPS(
 			}
 
 			// Color Bleed Saturation Boost
-			hitColor = lerp(hitLum.rrr, hitColor, mSSGISaturation);
+			hitColor = lerp(hitLum.rrr, hitColor, mGISaturation);
 
 			float emtNdotL = saturate(dot(sampleNormal, -coneDirView) * 0.7 + 0.3);
 			float nearBoost = SSGINearDistanceBoost(dist, mVXGIScale * 35.0);
@@ -176,6 +176,7 @@ float4 VoxelConeTracingPassPS(
 
 float4 VoxelGIBlurPS(
 	in float2 coord : TEXCOORD0,
+	in float3 viewdir : TEXCOORD1,
 	uniform sampler source,
 	uniform float2 offset) : COLOR
 {
@@ -185,7 +186,7 @@ float4 VoxelGIBlurPS(
 	float4 centerColor = tex2Dlod(source, float4(coord, 0, 0));
 	float centerLum = dot(centerColor.rgb, float3(0.299, 0.587, 0.114));
 
-	float adaptiveSharpness = lerp(mSSGIBlurSharpness * 0.35, mSSGIBlurSharpness, saturate(centerLum * 4.0));
+	float adaptiveSharpness = lerp(mGIBlurSharpness * 0.35, mGIBlurSharpness, saturate(centerLum * 4.0));
 
 	float totalWeight = 1.0;
 	float4 totalColor = centerColor;

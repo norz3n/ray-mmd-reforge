@@ -108,9 +108,7 @@ static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceB
 #	include "shader/PostProcessSSR.fxsub"
 #endif
 
-#if GI_MODE == 1
-#	include "shader/PostProcessSSGI.fxsub"
-#elif GI_MODE == 2
+#if GI_ENABLE
 #	include "shader/PostProcessVXGI.fxsub"
 #endif
 
@@ -243,14 +241,7 @@ technique DeferredLighting<
 	"RenderColorTarget=ShadingMap; 		Pass=DiffusionBlurY;"
 #endif
 
-#if GI_MODE == 1
-	"RenderColorTarget=SSGIMap;     Clear=Color; Pass=SSGI;"
-	"RenderColorTarget=SSGIMapTemp; Pass=SSGIBlurX;"
-	"RenderColorTarget=SSGIMap;     Pass=SSGIBlurY;"
-	"RenderColorTarget=SSGIMapTemp; Pass=SSGIBlurX;"
-	"RenderColorTarget=SSGIMap;     Pass=SSGIBlurY;"
-	"RenderColorTarget=ShadingMap;  Pass=SSGIFinalCombine;"
-#elif GI_MODE == 2
+#if GI_ENABLE
 	"RenderColorTarget=VXGIMap;     Clear=Color; Pass=VXGI;"
 	"RenderColorTarget=VXGIMapTemp; Pass=VXGIBlurX;"
 	"RenderColorTarget=VXGIMap;     Pass=VXGIBlurY;"
@@ -589,33 +580,7 @@ technique DeferredLighting<
 		PixelShader  = compile ps_3_0 SSRFinalCombiePS();
 	}
 #endif
-#if GI_MODE == 1
-	pass SSGI<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 ScreenSpaceGIPassPS();
-	}
-	pass SSGIBlurX<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 ScreenSpaceGIBlurPS(SSGIMapSamp, float2(ViewportOffset2.x, 0.0f));
-	}
-	pass SSGIBlurY<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 ScreenSpaceGIBlurPS(SSGIMapSampTemp, float2(0.0f, ViewportOffset2.y));
-	}
-	pass SSGIFinalCombine<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = true; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		SrcBlend = ONE; DestBlend = ONE;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSGIFinalCombinePS();
-	}
-#elif GI_MODE == 2
+#if GI_ENABLE
 	pass VXGI<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;

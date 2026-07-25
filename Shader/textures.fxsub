@@ -427,28 +427,7 @@ sampler SSDOMapSampTemp = sampler_state {
 };
 #endif
 
-#if GI_MODE == 1
-shared texture SSGIMap : RENDERCOLORTARGET<
-	float2 ViewportRatio = {1.0, 1.0};
-	bool AntiAlias = false;
-	string Format = "A16B16G16R16F";
->;
-texture SSGIMapTemp : RENDERCOLORTARGET<
-	float2 ViewportRatio = {1.0, 1.0};
-	bool AntiAlias = false;
-	string Format = "A16B16G16R16F";
->;
-sampler SSGIMapSamp = sampler_state {
-	texture = <SSGIMap>;
-	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
-	AddressU = CLAMP;  AddressV = CLAMP;
-};
-sampler SSGIMapSampTemp = sampler_state {
-	texture = <SSGIMapTemp>;
-	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
-	AddressU = CLAMP;  AddressV = CLAMP;
-};
-#elif GI_MODE == 2
+#if GI_ENABLE > 0
 texture2D VoxelPackRT: OFFSCREENRENDERTARGET <
 	string Description = "Voxelization map for Ray-MMD VXGI";
 	int Width = 512;
