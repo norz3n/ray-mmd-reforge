@@ -1,3 +1,11 @@
+#ifndef CONTACT_QUALITY
+#	ifdef CONTACT_SHADOW_QUALITY
+#		define CONTACT_QUALITY CONTACT_SHADOW_QUALITY
+#	else
+#		define CONTACT_QUALITY 2
+#	endif
+#endif
+
 #if CONTACT_QUALITY == 1
 #	define CONTACT_SAMPLER_COUNT 32
 #elif CONTACT_QUALITY == 2
@@ -88,3 +96,10 @@ float4 ConstantShadowPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOOR
 
 	return TraceScreenSpaceShadow(viewPosition, L, sampleDistance, PseudoRandom(coord.zw));
 }
+
+float GetContactShadow(float3 viewPosition, float3 L, float2 screenCoord, float linearDepth)
+{
+	float sampleDistance = 0.05 * min(linearDepth, 50.0);
+	float jitter = PseudoRandom(screenCoord * ViewportSize);
+	return float(TraceScreenSpaceShadow(viewPosition, L, sampleDistance, jitter));
+}
