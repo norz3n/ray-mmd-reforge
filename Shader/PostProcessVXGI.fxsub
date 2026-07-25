@@ -92,8 +92,9 @@ float4 VoxelConeTracingPassPS(
 		float cosAngle = cos(angle);
 		float sinAngle = sin(angle);
 
-		float cosTheta = sqrt(1.0 - normIndex * 0.85);
-		float sinTheta = sqrt(normIndex * 0.85);
+		float coneSpread = saturate(0.85 * (mVXGIConeAngle * 2.0));
+		float cosTheta = sqrt(1.0 - normIndex * coneSpread);
+		float sinTheta = sqrt(normIndex * coneSpread);
 
 		float3 coneLocal = float3(cosAngle * sinTheta, sinAngle * sinTheta, cosTheta);
 		float3 coneDirWorld = coneLocal.x * T + coneLocal.y * B + coneLocal.z * worldNormal;
@@ -122,7 +123,7 @@ float4 VoxelConeTracingPassPS(
 			float sampleDepth = FetchLinearDepthVX(sampleUV);
 			float3 sampleNormal = FetchViewNormalVX(sampleUV);
 
-			float depthDelta = sampleViewPos.z - sampleDepth;
+			float depthDelta = (sampleViewPos.z - sampleDepth) - mVXGIBias;
 			float rawDepthWeight = SSGIDepthContinuityWeight(depthDelta, viewPosition.z, dist);
 			float depthWeight = lerp(1.0, rawDepthWeight, mVXGIThicknessWeight);
 			if (depthWeight <= 0.001) continue;

@@ -58,10 +58,29 @@ float mColBalanceBM : CONTROLOBJECT<string name="ray_controller.pmx"; string ite
 float mTemperatureP : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "Temperature+";>;
 float mTemperatureM : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "Temperature-";>;
 
+float mDbgVXGIIntensity1 : CONTROLOBJECT<string name="DebugController.pmx"; string item = "VXGIIntensity";>;
+float mDbgVXGIConeAngle1 : CONTROLOBJECT<string name="DebugController.pmx"; string item = "VXGIConeAngle";>;
+float mDbgVXGIBias1      : CONTROLOBJECT<string name="DebugController.pmx"; string item = "VXGIBias";>;
+
+float mDbgVXGIIntensity2 : CONTROLOBJECT<string name="DebugController"; string item = "VXGIIntensity";>;
+float mDbgVXGIConeAngle2 : CONTROLOBJECT<string name="DebugController"; string item = "VXGIConeAngle";>;
+float mDbgVXGIBias2      : CONTROLOBJECT<string name="DebugController"; string item = "VXGIBias";>;
+
+float mCtrlVXGIIntensity : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "VXGIIntensity";>;
+float mCtrlVXGIConeAngle : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "VXGIConeAngle";>;
+float mCtrlVXGIBias      : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "VXGIBias";>;
+
+static float mDbgVXGIIntensity = max(mDbgVXGIIntensity1, max(mDbgVXGIIntensity2, mCtrlVXGIIntensity));
+static float mDbgVXGIConeAngle = max(mDbgVXGIConeAngle1, max(mDbgVXGIConeAngle2, mCtrlVXGIConeAngle));
+static float mDbgVXGIBias      = max(mDbgVXGIBias1,      max(mDbgVXGIBias2,      mCtrlVXGIBias));
+
 static float mSSAOScale = lerp(lerp(mSSDOIntensityMin, mSSDOIntensityMax, mSSAOP), 0, mSSAOM);
 static float mSSAORadius = lerp(lerp(1.0, 2.0, mSSAORadiusP), 0.5, mSSAORadiusM);
 static float mSSDOScale = lerp(lerp(mSSDOIntensityMin, mSSDOIntensityMax, mSSDOP), 0, mSSDOM);
 static float mSSSSScale = lerp(lerp(mSSSSIntensityMin, mSSSSIntensityMax, mSSSSP), 0.25, mSSSSM);
+static float mVXGIIntensity = lerp(mVXGIIntensityDefault, 5.0, mDbgVXGIIntensity);
+static float mVXGIConeAngle = lerp(mVXGIConeAngleDefault, 1.8, mDbgVXGIConeAngle);
+static float mVXGIBias = lerp(mVXGIBiasDefault, 2.0, mDbgVXGIBias);
 static float mSunIntensity = lerp(lerp(mLightIntensityMin, mLightIntensityMax, mSunLightP), 0, mSunLightM);
 static float mExposure = lerp(lerp(mExposureMin, mExposureMax, mExposureP), 0, mExposureM);
 static float mBloomRadius = lerp(lerp(2.2, 10, mBloomRadiusP), 0.1, mBloomRadiusM);

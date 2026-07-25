@@ -30,6 +30,10 @@ float showSSDO : CONTROLOBJECT<string name="(self)"; string item = "SSDO";>;
 float showSSR : CONTROLOBJECT<string name="(self)"; string item = "SSR";>;
 float showPSSM : CONTROLOBJECT<string name="(self)"; string item = "PSSM";>;
 float showOutline : CONTROLOBJECT<string name="(self)"; string item = "Outline";>;
+float showVXGI : CONTROLOBJECT<string name="(self)"; string item = "VXGI";>;
+float showVXGIIntensity : CONTROLOBJECT<string name="(self)"; string item = "VXGIIntensity";>;
+float showVXGIConeAngle : CONTROLOBJECT<string name="(self)"; string item = "VXGIConeAngle";>;
+float showVXGIBias : CONTROLOBJECT<string name="(self)"; string item = "VXGIBias";>;
 
 texture2D ScnMap : RENDERCOLORTARGET<
 	float2 ViewPortRatio = {1.0,1.0};
@@ -55,6 +59,15 @@ sampler SSDOMapSamp = sampler_state {
 shared texture SSRayTracingMap: RENDERCOLORTARGET;
 sampler SSRayTracingSamp = sampler_state {
 	texture = <SSRayTracingMap>;
+	MinFilter = NONE; MagFilter = NONE; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+#endif
+
+#if GI_ENABLE
+shared texture VXGIMap : RENDERCOLORTARGET;
+sampler VXGIMapSamp = sampler_state {
+	texture = <VXGIMap>;
 	MinFilter = NONE; MagFilter = NONE; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
@@ -125,7 +138,7 @@ float4 DebugControllerPS(in float2 coord : TEXCOORD0) : COLOR
 
 	float showTotal = showAlbedo + showNormal + showSpecular + showSmoothness + showVisibility + showCustomID + showCustomDataB + showCustomDataA;
 	showTotal += showAlpha + showAlbedoAlpha + showSpecularAlpha + showNormalAlpha + showSmoothnessAlpha + showVisibilityAlpha + showCustomIDAlpha + showCustomDataAlphaB + showCustomDataAlphaA;
-	showTotal += showDepth + showDepthAlpha + showSSAO + showSSDO + showSSR + showPSSM + showOutline;
+	showTotal += showDepth + showDepthAlpha + showSSAO + showSSDO + showSSR + showPSSM + showOutline + showVXGI;
 
 	float3 result = srgb2linear_fast(tex2Dlod(ScnSamp, float4(coord, 0, 0)).rgb) * !any(showTotal);
 	result += material.albedo * showAlbedo;
@@ -173,6 +186,12 @@ float4 DebugControllerPS(in float2 coord : TEXCOORD0) : COLOR
 
 	#if SSR_QUALITY > 0
 		result += tex2Dlod(SSRayTracingSamp, float4(coord, 0, 0)).rgb * showSSR;
+	#endif
+
+	#if GI_ENABLE
+		float3 giDebug = tex2Dlod(VXGIMapSamp, float4(coord, 0, 0)).rgb;
+		giDebug *= lerp(1.2, 5.0, showVXGIIntensity);
+		result += giDebug * showVXGI;
 	#endif
 
 	#if SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE
