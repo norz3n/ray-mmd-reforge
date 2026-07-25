@@ -220,7 +220,9 @@ float4 VoxelGIBlurPS(
 	return totalColor / totalWeight;
 }
 
-float4 VXGIFinalCombinePS(in float2 coord : TEXCOORD0) : COLOR
+float4 VXGIFinalCombinePS(
+	in float2 coord : TEXCOORD0,
+	in float3 viewdir : TEXCOORD1) : COLOR
 {
 	float4 MRT0 = tex2Dlod(Gbuffer5Map, float4(coord, 0, 0));
 	float4 MRT1 = tex2Dlod(Gbuffer6Map, float4(coord, 0, 0));
@@ -240,6 +242,48 @@ float4 VXGIFinalCombinePS(in float2 coord : TEXCOORD0) : COLOR
 	float ssao = material.visibility;
 #endif
 
-	float3 indirectDiffuse = gi.rgb * material.albedo * mVXGIIntensity * ssao;
+	float3 V = normalize(viewdir);
+	float3 indirectDiffuse = gi.rgb;
+
+	// Material-Aware Indirect Lighting Response
+	if (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE)
+	{
+		float3 skinTint = lerp(material.albedo, material.albedo * float3(1.12, 0.88, 0.78), 0.35);
+		indirectDiffuse *= skinTint;
+	}
+	else if (material.lightModel == SHADINGMODELID_GLASS)
+	{
+		float fresnel = saturate(pow(1.0 - saturate(dot(material.normal, V)), 5.0));
+		float3 glassAlbedo = max(0.02, material.albedo);
+		indirectDiffuse *= glassAlbedo * (1.0 - fresnel) * material.alpha;
+	}
+	else if (material.lightModel == SHADINGMODELID_CLOTH)
+	{
+		float NdotV = saturate(dot(material.normal, V));
+		float sheen = pow(1.0 - NdotV, 4.0) * material.customDataA;
+		float3 clothAlbedo = material.albedo + material.customDataB * sheen;
+		indirectDiffuse *= clothAlbedo;
+	}
+	else if (material.lightModel == SHADINGMODELID_CLEAR_COAT)
+	{
+		float coat = material.customDataA;
+		float NdotV = saturate(dot(material.normal, V));
+		float coatFresnel = 0.04 + 0.96 * pow(1.0 - NdotV, 5.0);
+		float baseAtten = 1.0 - coat * coatFresnel;
+		indirectDiffuse *= material.albedo * baseAtten;
+	}
+	else if (material.lightModel == SHADINGMODELID_CEL || material.lightModel == SHADINGMODELID_TONEBASED)
+	{
+		float lum = dot(gi.rgb, float3(0.299, 0.587, 0.114));
+		float celLum = floor(lum * 4.0 + 0.5) / 4.0;
+		float3 celGI = (lum > 1e-4) ? gi.rgb * (celLum / lum) : gi.rgb;
+		indirectDiffuse = celGI * material.albedo;
+	}
+	else
+	{
+		indirectDiffuse *= material.albedo;
+	}
+
+	indirectDiffuse *= mVXGIIntensity * ssao;
 	return float4(indirectDiffuse, 1.0);
 }
