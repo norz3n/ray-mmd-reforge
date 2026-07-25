@@ -1,0 +1,289 @@
+////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  Ray-MMD Screen-Space Voxel Global Illumination (SS-VXGI)
+//  
+//  Reference Architecture & Algorithms:
+//  - Voxel Cone Tracing Concept & D3D9 Atlas Math: ikeno (ikVXGI / ikPolishShader)
+//  - Depth Continuity & Thickness Falloff: dendewaLAB (Ray-LAB)
+//  - Luminance Masking & Early-Out: Karyou / KrSS (KrSS_Heavy2)
+//  - Subsurface Material-Aware Scattering: Sandman / Rui (sdPBR)
+//
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+#if GI_QUALITY == 1
+#	define VXGI_CONE_COUNT 6
+#elif GI_QUALITY == 2
+#	define VXGI_CONE_COUNT 16
+#elif GI_QUALITY >= 3
+#	define VXGI_CONE_COUNT 24
+#else
+#	define VXGI_CONE_COUNT 16
+#endif
+
+#include "shader/Voxelize.fxsub"
+
+// ponytail: Screen-Space Voxel Cone Tracing performs 3D cone marching across G-buffer volumes with thickness continuity and near-distance boost. Upgrade path: Full 3D clipmap atlas packing.
+
+float FetchLinearDepthVX(float2 uv)
+{
+	return tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).r;
+}
+
+float3 FetchViewNormalVX(float2 uv)
+{
+	float4 MRT6 = tex2Dlod(Gbuffer6Map, float4(uv, 0, 0));
+	return DecodeGBufferNormal(MRT6);
+}
+
+void CreateOrthonormalBasisVX(float3 N, out float3 T, out float3 B)
+{
+	float3 up = abs(N.z) < 0.999 ? float3(0, 0, 1) : float3(1, 0, 0);
+	T = normalize(cross(up, N));
+	B = cross(N, T);
+}
+
+float SSGIDepthContinuityWeight(float depthDelta, float viewDepth, float rayLength)
+{
+	float baseThickness = 2.0 + viewDepth * 0.02;
+	float rayThickness = rayLength * 0.35;
+	float thickness = max(1.0, baseThickness + rayThickness);
+	return 1.0 - smoothstep(thickness * 0.85, thickness, abs(depthDelta));
+}
+
+float SSGINearDistanceBoost(float rayLength, float maxRadius)
+{
+	float t = saturate(rayLength / max(maxRadius, 1e-3));
+	return lerp(1.35, 0.9, smoothstep(0.0, 1.0, t));
+}
+
+float4 VoxelConeTracingPassPS(
+	in float4 coord : TEXCOORD0,
+	in float3 viewdir : TEXCOORD1) : COLOR
+{
+	float linearDepth = FetchLinearDepthVX(coord.xy);
+	if (linearDepth >= 1000.0) clip(-1);
+
+	float4 projConstant = GetProjConstant();
+	float3 viewNormal = FetchViewNormalVX(coord.xy);
+	float3 viewPosition = GetViewPosition(projConstant, coord.xy, linearDepth);
+
+	float3 worldPosition = mul(float4(viewPosition, 1.0), matViewInverse).xyz;
+	float3 worldNormal = mul(viewNormal, (float3x3)matViewInverse);
+
+	float3 T, B;
+	CreateOrthonormalBasisVX(worldNormal, T, B);
+
+	// Continuous per-pixel random rotation jitter to eliminate directional streaks
+	float2 pixelPos = coord.xy * ViewportSize;
+	float jitter = PseudoRandom(pixelPos + float2(frac(time * 0.0314), frac(time * 0.0173)));
+
+	float3 accumRadiance = 0;
+	float accumWeight = 0.0001;
+
+	// Fibonacci Hemisphere Cone Probing
+	[loop]
+	for (int i = 0; i < VXGI_CONE_COUNT; ++i)
+	{
+		float radiusNoise = frac(jitter * 7.123 + float(i) * 0.3183);
+		float normIndex = (float(i) + 0.5 + radiusNoise * 0.5) / float(VXGI_CONE_COUNT);
+
+		// Golden ratio angle rotation + per-pixel jitter
+		float angle = (float(i) * 2.399963229728) + (jitter * PI_2);
+		float cosAngle = cos(angle);
+		float sinAngle = sin(angle);
+
+		float cosTheta = sqrt(1.0 - normIndex * 0.85);
+		float sinTheta = sqrt(normIndex * 0.85);
+
+		float3 coneLocal = float3(cosAngle * sinTheta, sinAngle * sinTheta, cosTheta);
+		float3 coneDirWorld = coneLocal.x * T + coneLocal.y * B + coneLocal.z * worldNormal;
+		float3 coneDirView = mul(coneDirWorld, (float3x3)matView);
+
+		float rcvNdotL = saturate(dot(viewNormal, coneDirView));
+		if (rcvNdotL <= 0.001) continue;
+
+		float3 coneRadiance = 0;
+		float coneWeight = 0.0001;
+
+		[unroll]
+		for (int step = 1; step <= 6; ++step)
+		{
+			float normStep = float(step) / 6.0;
+			float dist = lerp(0.3, 35.0, pow(normStep, 1.8)) * mVXGIScale;
+
+			float3 sampleViewPos = viewPosition + coneDirView * dist;
+
+			float4 sampleProj = mul(float4(sampleViewPos, 1.0), matProject);
+			float2 sampleUV = (sampleProj.xy / sampleProj.w) * float2(0.5, -0.5) + 0.5;
+
+			if (sampleUV.x < 0.001 || sampleUV.x > 0.999 || sampleUV.y < 0.001 || sampleUV.y > 0.999)
+				continue;
+
+			float sampleDepth = FetchLinearDepthVX(sampleUV);
+			float3 sampleNormal = FetchViewNormalVX(sampleUV);
+
+			float depthDelta = sampleViewPos.z - sampleDepth;
+			float rawDepthWeight = SSGIDepthContinuityWeight(depthDelta, viewPosition.z, dist);
+			float depthWeight = lerp(1.0, rawDepthWeight, mVXGIThicknessWeight);
+			if (depthWeight <= 0.001) continue;
+
+			float3 hitColor = tex2Dlod(ShadingMapSamp, float4(sampleUV, 0, 0)).rgb;
+
+			float hitLum = dot(hitColor, float3(0.299, 0.587, 0.114));
+			if (hitLum <= 0.001 && step > 2)
+				continue;
+
+			// Material-Aware Subsurface Tinting (from sdPBR)
+			float4 sampleMRT0 = tex2Dlod(Gbuffer5Map, float4(sampleUV, 0, 0));
+			float4 sampleMRT1 = tex2Dlod(Gbuffer6Map, float4(sampleUV, 0, 0));
+			float4 sampleMRT2 = tex2Dlod(Gbuffer7Map, float4(sampleUV, 0, 0));
+			float4 sampleMRT3 = tex2Dlod(Gbuffer8Map, float4(sampleUV, 0, 0));
+			MaterialParam sampleMat;
+			DecodeGbuffer(sampleMRT0, sampleMRT1, sampleMRT2, sampleMRT3, sampleMat);
+
+			if (sampleMat.lightModel == SHADINGMODELID_SKIN)
+			{
+				hitColor = lerp(hitColor, hitColor * float3(1.12, 0.88, 0.78), 0.35);
+			}
+
+			// Soft Reinhard-style luminance compression
+			if (hitLum > 0.8)
+			{
+				float compressedLum = 0.8 + log(1.0 + (hitLum - 0.8) * 0.5);
+				hitColor *= (compressedLum / hitLum);
+			}
+
+			// Color Bleed Saturation Boost
+			hitColor = lerp(hitLum.rrr, hitColor, mGISaturation);
+
+			float emtNdotL = saturate(dot(sampleNormal, -coneDirView) * 0.7 + 0.3);
+			float nearBoost = SSGINearDistanceBoost(dist, mVXGIScale * 35.0);
+			float distAtten = (1.0 / (1.0 + dist * dist * 0.001)) * nearBoost;
+
+			float weight = rcvNdotL * emtNdotL * distAtten * depthWeight;
+
+			coneRadiance += hitColor * weight;
+			coneWeight += weight;
+		}
+
+		accumRadiance += (coneRadiance / coneWeight);
+		accumWeight += 1.0;
+	}
+
+	float3 finalGI = accumRadiance / accumWeight;
+	return float4(finalGI, 1.0);
+}
+
+float4 VoxelGIBlurPS(
+	in float2 coord : TEXCOORD0,
+	in float3 viewdir : TEXCOORD1,
+	uniform sampler source,
+	uniform float2 offset) : COLOR
+{
+	float centerDepth = FetchLinearDepthVX(coord);
+	float3 centerNormal = FetchViewNormalVX(coord);
+
+	float4 centerColor = tex2Dlod(source, float4(coord, 0, 0));
+	float centerLum = dot(centerColor.rgb, float3(0.299, 0.587, 0.114));
+
+	float adaptiveSharpness = lerp(mGIBlurSharpness * 0.35, mGIBlurSharpness, saturate(centerLum * 4.0));
+
+	float totalWeight = 1.0;
+	float4 totalColor = centerColor;
+
+	[unroll]
+	for (int r = 1; r <= 6; ++r)
+	{
+		float2 uvOffset = offset * (r * 2.0);
+
+		float2 uv1 = coord + uvOffset;
+		float2 uv2 = coord - uvOffset;
+
+		float depth1 = FetchLinearDepthVX(uv1);
+		float depth2 = FetchLinearDepthVX(uv2);
+
+		float3 normal1 = FetchViewNormalVX(uv1);
+		float3 normal2 = FetchViewNormalVX(uv2);
+
+		float depthDiff1 = abs(depth1 - centerDepth) / max(centerDepth, 0.1);
+		float depthDiff2 = abs(depth2 - centerDepth) / max(centerDepth, 0.1);
+
+		float w1 = exp(-r * r * 0.03 - depthDiff1 * adaptiveSharpness) * saturate(dot(normal1, centerNormal));
+		float w2 = exp(-r * r * 0.03 - depthDiff2 * adaptiveSharpness) * saturate(dot(normal2, centerNormal));
+
+		totalColor += tex2Dlod(source, float4(uv1, 0, 0)) * w1;
+		totalColor += tex2Dlod(source, float4(uv2, 0, 0)) * w2;
+
+		totalWeight += w1 + w2;
+	}
+
+	return totalColor / totalWeight;
+}
+
+float4 VXGIFinalCombinePS(
+	in float2 coord : TEXCOORD0,
+	in float3 viewdir : TEXCOORD1) : COLOR
+{
+	float4 MRT0 = tex2Dlod(Gbuffer5Map, float4(coord, 0, 0));
+	float4 MRT1 = tex2Dlod(Gbuffer6Map, float4(coord, 0, 0));
+	float4 MRT2 = tex2Dlod(Gbuffer7Map, float4(coord, 0, 0));
+	float4 MRT3 = tex2Dlod(Gbuffer8Map, float4(coord, 0, 0));
+
+	MaterialParam material;
+	DecodeGbuffer(MRT0, MRT1, MRT2, MRT3, material);
+
+	float4 gi = tex2Dlod(VXGIMapSamp, float4(coord, 0, 0));
+
+#if SSDO_QUALITY > 0
+	float ssao = tex2Dlod(SSDOMapSamp, float4(coord, 0, 0)).w;
+	ssao = (material.lightModel == SHADINGMODELID_GLASS) ? 1.0 : ssao;
+	ssao = min(ssao, material.visibility);
+#else
+	float ssao = material.visibility;
+#endif
+
+	float3 V = normalize(viewdir);
+	float3 indirectDiffuse = gi.rgb;
+
+	// Material-Aware Indirect Lighting Response
+	if (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE)
+	{
+		float3 skinTint = lerp(material.albedo, material.albedo * float3(1.12, 0.88, 0.78), 0.35);
+		indirectDiffuse *= skinTint;
+	}
+	else if (material.lightModel == SHADINGMODELID_GLASS)
+	{
+		float fresnel = saturate(pow(1.0 - saturate(dot(material.normal, V)), 5.0));
+		float3 glassAlbedo = max(0.02, material.albedo);
+		indirectDiffuse *= glassAlbedo * (1.0 - fresnel) * material.alpha;
+	}
+	else if (material.lightModel == SHADINGMODELID_CLOTH)
+	{
+		float NdotV = saturate(dot(material.normal, V));
+		float sheen = pow(1.0 - NdotV, 4.0) * material.customDataA;
+		float3 clothAlbedo = material.albedo + material.customDataB * sheen;
+		indirectDiffuse *= clothAlbedo;
+	}
+	else if (material.lightModel == SHADINGMODELID_CLEAR_COAT)
+	{
+		float coat = material.customDataA;
+		float NdotV = saturate(dot(material.normal, V));
+		float coatFresnel = 0.04 + 0.96 * pow(1.0 - NdotV, 5.0);
+		float baseAtten = 1.0 - coat * coatFresnel;
+		indirectDiffuse *= material.albedo * baseAtten;
+	}
+	else if (material.lightModel == SHADINGMODELID_CEL || material.lightModel == SHADINGMODELID_TONEBASED)
+	{
+		float lum = dot(gi.rgb, float3(0.299, 0.587, 0.114));
+		float celLum = floor(lum * 4.0 + 0.5) / 4.0;
+		float3 celGI = (lum > 1e-4) ? gi.rgb * (celLum / lum) : gi.rgb;
+		indirectDiffuse = celGI * material.albedo;
+	}
+	else
+	{
+		indirectDiffuse *= material.albedo;
+	}
+
+	indirectDiffuse *= mVXGIIntensity * ssao;
+	return float4(indirectDiffuse, 1.0);
+}

@@ -108,6 +108,10 @@ static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceB
 #	include "shader/PostProcessSSR.fxsub"
 #endif
 
+#if GI_ENABLE
+#	include "shader/PostProcessVXGI.fxsub"
+#endif
+
 #if BOKEH_QUALITY
 #	include "shader/PostProcessHexDOF.fxsub"
 #endif
@@ -235,6 +239,15 @@ technique DeferredLighting<
 #if TOON_ENABLE == 2
 	"RenderColorTarget=ShadingMapTemp; 	Pass=DiffusionBlurX;"
 	"RenderColorTarget=ShadingMap; 		Pass=DiffusionBlurY;"
+#endif
+
+#if GI_ENABLE
+	"RenderColorTarget=VXGIMap;     Clear=Color; Pass=VXGI;"
+	"RenderColorTarget=VXGIMapTemp; Pass=VXGIBlurX;"
+	"RenderColorTarget=VXGIMap;     Pass=VXGIBlurY;"
+	"RenderColorTarget=VXGIMapTemp; Pass=VXGIBlurX;"
+	"RenderColorTarget=VXGIMap;     Pass=VXGIBlurY;"
+	"RenderColorTarget=ShadingMap;  Pass=VXGIFinalCombine;"
 #endif
 
 #if SSR_QUALITY
@@ -565,6 +578,33 @@ technique DeferredLighting<
 		SrcBlend = ONE; DestBlend = INVSRCALPHA;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
 		PixelShader  = compile ps_3_0 SSRFinalCombiePS();
+	}
+#endif
+#if GI_ENABLE
+	pass VXGI<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 VoxelConeTracingPassPS();
+	}
+	pass VXGIBlurX<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 VoxelGIBlurPS(VXGIMapSamp, float2(ViewportOffset2.x, 0.0f));
+	}
+	pass VXGIBlurY<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 VoxelGIBlurPS(VXGIMapSampTemp, float2(0.0f, ViewportOffset2.y));
+	}
+	pass VXGIFinalCombine<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = true; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		SrcBlend = ONE; DestBlend = ONE;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 VXGIFinalCombinePS();
 	}
 #endif
 #if BOKEH_QUALITY
