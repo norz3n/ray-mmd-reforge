@@ -1,10 +1,11 @@
 /*
  * PostProcessOcclusionHBAO.fxsub - Hybrid Horizon-Based Screen-Space Directional Occlusion
  *
- * Based on dendewaLAB Ray-LAB (dendewa) HBAO implementation & extended with
- * Horizon Elevation Clipping & Analytical Micro-Field Spherical Occlusion for Ray-MMD Reforge.
+ * Based on dendewaLAB (Ray-LAB 1.5.2) HBAO architecture.
+ * Extended for Ray-MMD Reforge with Horizon Elevation Clipping, Temporal Jittering,
+ * and Normal-Plane Distance Bilateral Filtering.
  *
- * Credits: dendewa (Ray-LAB 1.5.2), Ray-MMD Reforge team
+ * Reference: dendewaLAB (Ray-LAB 1.5.2 by dendewa)
  */
 
 #if SSDO_QUALITY == 1
