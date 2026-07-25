@@ -1,0 +1,300 @@
+/*
+ * PostProcessOcclusionHBAO.fxsub - Hybrid Horizon-Based Screen-Space Directional Occlusion
+ *
+ * Based on dendewaLAB (Ray-LAB 1.5.2) HBAO architecture.
+ * Extended for Ray-MMD Reforge with Horizon Elevation Clipping, Temporal Jittering,
+ * and Normal-Plane Distance Bilateral Filtering.
+ *
+ * Reference: dendewaLAB (Ray-LAB 1.5.2 by dendewa)
+ */
+
+#if SSDO_QUALITY == 1
+#	define HBAO_DIRECTION_COUNT 4
+#	define HBAO_SAMPLER_COUNT 4
+#	define SSDO_BLUR_RADIUS 6
+#elif SSDO_QUALITY == 2
+#	define HBAO_DIRECTION_COUNT 6
+#	define HBAO_SAMPLER_COUNT 8
+#	define SSDO_BLUR_RADIUS 6
+#elif SSDO_QUALITY == 3
+#	define HBAO_DIRECTION_COUNT 8
+#	define HBAO_SAMPLER_COUNT 8
+#	define SSDO_BLUR_RADIUS 6
+#elif SSDO_QUALITY == 4
+#	define HBAO_DIRECTION_COUNT 8
+#	define HBAO_SAMPLER_COUNT 8
+#	define SSDO_BLUR_RADIUS 6
+#elif SSDO_QUALITY == 5
+#	define HBAO_DIRECTION_COUNT 12
+#	define HBAO_SAMPLER_COUNT 12
+#	define SSDO_BLUR_RADIUS 6
+#elif SSDO_QUALITY == 6
+#	define HBAO_DIRECTION_COUNT 16
+#	define HBAO_SAMPLER_COUNT 16
+#	define SSDO_BLUR_RADIUS 6
+#else
+#	define HBAO_DIRECTION_COUNT 0
+#	define HBAO_SAMPLER_COUNT 0
+#	define SSDO_BLUR_RADIUS 0
+#endif
+
+float InterleavedGradientNoise(float2 pixCoord, int frameCount = 0)
+{
+	const float3 magic = float3(0.06711056f, 0.00583715f, 52.9829189f);
+	float2 frameMagicScale = float2(2.083f, 4.867f);
+	pixCoord += frameCount * frameMagicScale;
+	return frac(magic.z * frac(dot(pixCoord, magic.xy)));
+}
+
+float linearizeDepth(float2 uv)
+{
+	return tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).r;
+}
+
+float3 GetNormal(float2 uv)
+{
+	float4 MRT6 = tex2Dlod(Gbuffer6Map, float4(uv, 0, 0));
+	return DecodeGBufferNormal(MRT6);
+}
+
+float3 ComputeViewSpacePosition(float2 uv, float linearEyeDepth)
+{
+	float3 V = normalize(-mul(float4(CoordToPos(uv), 0, 1), matProjectInverse).xyz);
+	float3 viewPosition = V * linearEyeDepth / V.z;
+	return viewPosition;
+}
+
+float Falloff(float distanceSquare, float maxRadius)
+{
+	float negInvRadius2 = -1.0 / (maxRadius * maxRadius);
+	return distanceSquare * negInvRadius2 + 1.0;
+}
+
+float AODepthContinuityWeight(float depthDelta, float viewDepth, float rayLength)
+{
+	float vd = abs(viewDepth);
+	float baseThickness = 1.2 + vd * 0.012;
+	float rayThickness = rayLength * 0.24;
+	float thickness = max(0.6, baseThickness + rayThickness);
+	return 1.0 - smoothstep(thickness * 0.65, thickness, depthDelta);
+}
+
+float AORangePropagationWeight(float rayLength, float localRadius)
+{
+	float t = saturate(rayLength / max(localRadius, 1e-3));
+	float w = 1.0 - smoothstep(0.45, 1.0, t);
+	return pow(saturate(w), 1.35);
+}
+
+float AONearDistanceBoost(float rayLength, float localRadius)
+{
+	float t = saturate(rayLength / max(localRadius, 1e-3));
+	return lerp(1.35, 0.9, smoothstep(0.0, 1.0, t));
+}
+
+float4 HorizonOcclusion(
+	float2 uv,
+	float3 viewNormal,
+	float3 viewPosition,
+	float2 direction,
+	float  maxRadius,
+	float  jitter,
+	float  bias)
+{
+	float2 sampleStepDelta = direction * maxRadius / HBAO_SAMPLER_COUNT;
+	float2 sampleDirection = direction + frac(jitter) * sampleStepDelta;
+	float2 sampleTexelSize = ViewportOffset.xy * (ViewportSize.y / 1080);
+
+	float4 sampleOcclusion = 0.0f;
+	float maxHorizonSin = 0.0f;
+
+	for (int j = 0; j < HBAO_SAMPLER_COUNT; j += 4)
+	{
+		float2 samplePoint[4];
+		samplePoint[0] = sampleDirection; sampleDirection += sampleStepDelta;
+		samplePoint[1] = sampleDirection; sampleDirection += sampleStepDelta;
+		samplePoint[2] = sampleDirection; sampleDirection += sampleStepDelta;
+		samplePoint[3] = sampleDirection; sampleDirection += sampleStepDelta;
+
+		float2 sampleOffset[4];
+		sampleOffset[0] = mad(samplePoint[0], sampleTexelSize, uv);
+		sampleOffset[1] = mad(samplePoint[1], sampleTexelSize, uv);
+		sampleOffset[2] = mad(samplePoint[2], sampleTexelSize, uv);
+		sampleOffset[3] = mad(samplePoint[3], sampleTexelSize, uv);
+
+		float3 samplePosition[4];
+		samplePosition[0] = ComputeViewSpacePosition(sampleOffset[0], linearizeDepth(sampleOffset[0] + ViewportOffset));
+		samplePosition[1] = ComputeViewSpacePosition(sampleOffset[1], linearizeDepth(sampleOffset[1] + ViewportOffset));
+		samplePosition[2] = ComputeViewSpacePosition(sampleOffset[2], linearizeDepth(sampleOffset[2] + ViewportOffset));
+		samplePosition[3] = ComputeViewSpacePosition(sampleOffset[3], linearizeDepth(sampleOffset[3] + ViewportOffset));
+
+		float3 sampleDir[4];
+		sampleDir[0] = samplePosition[0] - viewPosition;
+		sampleDir[1] = samplePosition[1] - viewPosition;
+		sampleDir[2] = samplePosition[2] - viewPosition;
+		sampleDir[3] = samplePosition[3] - viewPosition;
+
+		float4 sampleLength2 = float4(
+			dot(sampleDir[0], sampleDir[0]),
+			dot(sampleDir[1], sampleDir[1]),
+			dot(sampleDir[2], sampleDir[2]),
+			dot(sampleDir[3], sampleDir[3]));
+
+		float4 sampleLengthInv = rsqrt(sampleLength2);
+		float4 sampleLength = sampleLength2 * sampleLengthInv;
+
+		sampleDir[0] *= sampleLengthInv[0];
+		sampleDir[1] *= sampleLengthInv[1];
+		sampleDir[2] *= sampleLengthInv[2];
+		sampleDir[3] *= sampleLengthInv[3];
+
+		float4 sampleAngle = float4(
+			dot(sampleDir[0], viewNormal),
+			dot(sampleDir[1], viewNormal),
+			dot(sampleDir[2], viewNormal),
+			dot(sampleDir[3], viewNormal));
+
+		float4 sampleFalloff = float4(
+			Falloff(sampleLength2[0], maxRadius),
+			Falloff(sampleLength2[1], maxRadius),
+			Falloff(sampleLength2[2], maxRadius),
+			Falloff(sampleLength2[3], maxRadius)
+		);
+
+		float4 depthWeight = float4(
+			AODepthContinuityWeight(abs(samplePosition[0].z - viewPosition.z), viewPosition.z, sampleLength[0]),
+			AODepthContinuityWeight(abs(samplePosition[1].z - viewPosition.z), viewPosition.z, sampleLength[1]),
+			AODepthContinuityWeight(abs(samplePosition[2].z - viewPosition.z), viewPosition.z, sampleLength[2]),
+			AODepthContinuityWeight(abs(samplePosition[3].z - viewPosition.z), viewPosition.z, sampleLength[3])
+		);
+
+		float4 rangeWeight = float4(
+			AORangePropagationWeight(sampleLength[0], maxRadius),
+			AORangePropagationWeight(sampleLength[1], maxRadius),
+			AORangePropagationWeight(sampleLength[2], maxRadius),
+			AORangePropagationWeight(sampleLength[3], maxRadius)
+		);
+
+		float4 nearBoost = float4(
+			AONearDistanceBoost(sampleLength[0], maxRadius),
+			AONearDistanceBoost(sampleLength[1], maxRadius),
+			AONearDistanceBoost(sampleLength[2], maxRadius),
+			AONearDistanceBoost(sampleLength[3], maxRadius)
+		);
+
+		// Hybrid Horizon Elevation clipping: only consider samples that form a higher angle than current horizon
+		float4 horizonMask = float4(
+			sampleAngle.x > maxHorizonSin ? 1.0 : 0.0,
+			sampleAngle.y > maxHorizonSin ? 1.0 : 0.0,
+			sampleAngle.z > maxHorizonSin ? 1.0 : 0.0,
+			sampleAngle.w > maxHorizonSin ? 1.0 : 0.0
+		);
+
+		maxHorizonSin = max(maxHorizonSin, max(max(sampleAngle.x, sampleAngle.y), max(sampleAngle.z, sampleAngle.w)));
+
+		float4 sh = saturate(sampleAngle - bias) * saturate(sampleFalloff) * depthWeight * rangeWeight * nearBoost * horizonMask;
+
+		sampleOcclusion.w += sum(sh);
+		sampleOcclusion.xyz += sh.x * sampleDir[0];
+		sampleOcclusion.xyz += sh.y * sampleDir[1];
+		sampleOcclusion.xyz += sh.z * sampleDir[2];
+		sampleOcclusion.xyz += sh.w * sampleDir[3];
+	}
+
+	return sampleOcclusion;
+}
+
+float4 ScreenSpaceDirOccPassVS(
+	in float4 Position : POSITION,
+	in float4 Texcoord : TEXCOORD,
+	out float4 oTexcoord0 : TEXCOORD0) : POSITION
+{
+	oTexcoord0.xy = Texcoord.xy + ViewportOffset;
+	oTexcoord0.zw = Texcoord.xy * ViewportSize;
+	return Position;
+}
+
+float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_POSITION) : COLOR
+{
+	float maxRadius = lerp(lerp(20.0, 60.0, mSSAORadiusP), 2.0, mSSAORadiusM);
+
+	float2 samplePixel = screen / ViewportSize;
+	float3 sampleNormal = GetNormal(uv.xy);
+	float3 samplePosition = ComputeViewSpacePosition(samplePixel, linearizeDepth(uv.xy));
+	int frameCounter = (int)fmod(time * 60.0, 16.0);
+	float2 sampleRandom = float2(InterleavedGradientNoise(screen, frameCounter), PseudoRandom(screen + frameCounter));
+
+	float alpha = PI_2 / HBAO_DIRECTION_COUNT;
+	float maxRadiusPixels = 0.1f * ViewportSize.y;
+	float radius = clamp(maxRadius * log2(max(samplePosition.z, 1.001f)) * atan(matProject._m11), HBAO_SAMPLER_COUNT, maxRadiusPixels);
+
+	float4 occlusion = 0;
+
+	[loop]
+	for (int d = 0; d < HBAO_DIRECTION_COUNT; ++d)
+	{
+		float angle = alpha * (d + sampleRandom.x);
+
+		float2 direction = float2(cos(angle), sin(angle));
+
+		occlusion += HorizonOcclusion(samplePixel, sampleNormal, samplePosition, direction, radius, sampleRandom.y, mAmbientOcclusionBias);
+	}
+
+	occlusion *= (1.0f / (HBAO_SAMPLER_COUNT * HBAO_DIRECTION_COUNT));
+	occlusion.xyz = mad((occlusion.xyz * 2.2), 0.5, 0.5);
+
+	occlusion.w = occlusion.w * tex2Dlod(SSAOMapSamp, float4(uv.xy, 0, 0)).a;
+	occlusion.w = 1.0 - occlusion.w;
+	occlusion.w = pow(saturate(occlusion.w), mSSAOScale);
+
+	return occlusion;
+}
+
+float4 ScreenSpaceDirOccBlurPS(
+	in float2 uv : TEXCOORD0,
+	in float3 viewdir : TEXCOORD1,
+	uniform sampler source,
+	uniform float2 offset) : COLOR
+{
+	float center_d = linearizeDepth(uv);
+
+	float total_w = 1.0f;
+	float4 total_c = tex2Dlod(source, float4(uv, 0, 0));
+
+	float3 normal = GetNormal(uv);
+	float3 center_pos = ComputeViewSpacePosition(uv, center_d);
+
+	float angle = pow2(saturate(dot(normal, normalize(viewdir))));
+
+	float blurSigma = SSDO_BLUR_RADIUS * 0.5f;
+	float blurFalloff = 1.0f / (2.0f * blurSigma * blurSigma);
+
+	float2 offset1 = uv + offset;
+	float2 offset2 = uv - offset;
+
+	[unroll]
+	for (int r = 1; r < SSDO_BLUR_RADIUS; ++r)
+	{
+		float2 depth = float2(linearizeDepth(offset1), linearizeDepth(offset2));
+		float3 pos1 = ComputeViewSpacePosition(offset1, depth.x);
+		float3 pos2 = ComputeViewSpacePosition(offset2, depth.y);
+
+		float planeDist1 = abs(dot(normal, pos1 - center_pos));
+		float planeDist2 = abs(dot(normal, pos2 - center_pos));
+
+		float2 weight = exp2(-r * r * blurFalloff - pow2(float2(planeDist1, planeDist2) * mAmbientOcclusionBilateralSharpness));
+
+		weight.x *= saturate(dot(GetNormal(offset1), normal));
+		weight.y *= saturate(dot(GetNormal(offset2), normal));
+
+		total_c += tex2Dlod(source, float4(offset1, 0, 0)) * weight.x;
+		total_c += tex2Dlod(source, float4(offset2, 0, 0)) * weight.y;
+
+		total_w += sum(weight);
+
+		offset1 += offset;
+		offset2 -= offset;
+	}
+
+	return total_c / total_w;
+}

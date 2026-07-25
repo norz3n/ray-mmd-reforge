@@ -108,7 +108,11 @@ static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceB
 #endif
 
 #if SSDO_QUALITY && (IBL_QUALITY || SUN_LIGHT_ENABLE)
+#if SSAO_TYPE == 0
 #	include "shader/PostProcessOcclusion.fxsub"
+#elif SSAO_TYPE == 1
+#	include "shader/PostProcessOcclusionHBAO.fxsub"
+#endif
 #endif
 
 #if SSSS_QUALITY
