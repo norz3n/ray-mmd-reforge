@@ -1,0 +1,49 @@
+float mSunRadiusP : CONTROLOBJECT<string name="(self)"; string item = "SunRadius+";>;
+float mSunRadiusM : CONTROLOBJECT<string name="(self)"; string item = "SunRadius-";>;
+float mSunRadianceP : CONTROLOBJECT<string name="(self)"; string item = "SunRadiance+";>;
+float mSunRadianceM : CONTROLOBJECT<string name="(self)"; string item = "SunRadiance-";>;
+float mMiePhaseP : CONTROLOBJECT<string name="(self)"; string item = "MiePhase+";>;
+float mMiePhaseM : CONTROLOBJECT<string name="(self)"; string item = "MiePhase-";>;
+float mMieHeightP : CONTROLOBJECT<string name="(self)"; string item = "MieHeight+";>;
+float mMieHeightM : CONTROLOBJECT<string name="(self)"; string item = "MieHeight-";>;
+float mMieTurbidityP : CONTROLOBJECT<string name="(self)"; string item = "MieTurbidity+";>;
+float mMieTurbidityM : CONTROLOBJECT<string name="(self)"; string item = "MieTurbidity-";>;
+float mRayleighHeightP : CONTROLOBJECT<string name="(self)"; string item = "RayleighHeight+";>;
+float mRayleighHeightM : CONTROLOBJECT<string name="(self)"; string item = "RayleighHeight-";>;
+float mRayleighColorHP : CONTROLOBJECT<string name="(self)"; string item = "RayleighColorH+";>;
+float mRayleighColorSP : CONTROLOBJECT<string name="(self)"; string item = "RayleighColorS+";>;
+float mRayleighColorVP : CONTROLOBJECT<string name="(self)"; string item = "RayleighColorV+";>;
+float mRayleighColorVM : CONTROLOBJECT<string name="(self)"; string item = "RayleighColorV-";>;
+float mStarSaturationP : CONTROLOBJECT<string name="(self)"; string item = "StarSaturation+";>;
+float mStarSaturationM : CONTROLOBJECT<string name="(self)"; string item = "StarSaturation-";>;
+float mStarBrightnessP : CONTROLOBJECT<string name="(self)"; string item = "StarBrightness+";>;
+float mStarBrightnessM : CONTROLOBJECT<string name="(self)"; string item = "StarBrightness-";>;
+float mMeteorP : CONTROLOBJECT<string name="(self)"; string item = "Meteor+";>;
+float mMeteorM : CONTROLOBJECT<string name="(self)"; string item = "Meteor-";>;
+
+float mFogRangeP : CONTROLOBJECT<string name="(self)"; string item = "FogRange+";>;
+float mFogRangeM : CONTROLOBJECT<string name="(self)"; string item = "FogRange-";>;
+float mFogDensityP : CONTROLOBJECT<string name="(self)"; string item = "FogDensity+";>;
+float mFogDensityM : CONTROLOBJECT<string name="(self)"; string item = "FogDensity-";>;
+
+float mCloudP : CONTROLOBJECT<string name="(self)"; string item = "Cloud+";>;
+float mCloudM : CONTROLOBJECT<string name="(self)"; string item = "Cloud-";>;
+float mCloudSpeedP : CONTROLOBJECT<string name="(self)"; string item = "CloudSpeed+";>;
+float mCloudSpeedM : CONTROLOBJECT<string name="(self)"; string item = "CloudSpeed-";>;
+float mCloudBiasP : CONTROLOBJECT<string name="(self)"; string item = "CloudBias+";>;
+float mCloudBiasM : CONTROLOBJECT<string name="(self)"; string item = "CloudBias-";>;
+
+static float mSunRadius      = lerp(lerp(mSunRadiusParams.x, mSunRadiusParams.z, mSunRadiusP), mSunRadiusParams.y, mSunRadiusM);
+static float mSunRadiance    = lerp(lerp(mSunRadianceParams.x, mSunRadianceParams.z, mSunRadianceP), mSunRadianceParams.y, mSunRadianceM);
+static float mFogRange       = lerp(lerp(mFogRangeParams.x, mFogRangeParams.z, mFogRangeP), mFogRangeParams.y, mFogRangeM);
+static float mFogDensity     = lerp(lerp(mFogDensityParams.x, mFogDensityParams.z, mFogDensityP), mFogDensityParams.y, mFogDensityM);
+static float mMiePhase       = lerp(lerp(mMiePhaseParams.x, mMiePhaseParams.z, mMiePhaseP), mMiePhaseParams.y, mMiePhaseM);
+static float mMieHeight      = lerp(lerp(mMieHeightTopParams.x, mMieHeightTopParams.z, mMieHeightP), mMieHeightTopParams.y, mMieHeightM);
+static float mMieTurbidity   = lerp(lerp(mMieTurbidityParams.x, mMieTurbidityParams.z, mMieTurbidityP), mMieTurbidityParams.y, mMieTurbidityM);
+static float mRayleighHeight = lerp(lerp(mRayleighHeightTopParams.x, mRayleighHeightTopParams.z, mRayleighHeightP), mRayleighHeightTopParams.y, mRayleighHeightM);
+static float mStarSaturation = lerp(lerp(mStarSaturationParams.x, mStarSaturationParams.z, mStarSaturationP), mStarSaturationParams.y, mStarSaturationM);
+static float mStarBrightness = lerp(lerp(mStarBrightnessParams.x, mStarBrightnessParams.z, mStarBrightnessP), mStarBrightnessParams.y, mStarBrightnessM);
+static float mMeteor 		 = lerp(lerp(mMeteorParams.x, mMeteorParams.z, mMeteorP), mMeteorParams.y, mMeteorM);
+
+static float3 mMieColor = float3(0.686, 0.678, 0.666) * SunColor;
+static float3 mRayleighColor = hsv2rgb(float3(mRayleighColorHP, mRayleighColorSP, lerp(lerp(1, 2, mRayleighColorVP), 0, mRayleighColorVM)));
