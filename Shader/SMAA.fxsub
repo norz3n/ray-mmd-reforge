@@ -45,10 +45,6 @@
 #define SMAA_AREATEX_SUBTEX_SIZE (1.0 / 7.0)
 #define SMAA_SEARCHTEX_SIZE float2(66.0, 33.0)
 #define SMAA_SEARCHTEX_PACKED_SIZE float2(64.0, 16.0)
-#define SMAA_PREDICATION_SCALE 2.0
-#define SMAA_PREDICATION_THRESHOLD 0.01
-#define SMAA_PREDICATION_STRENGTH 0.4
-
 texture SMAAEdgeMap : RENDERCOLORTARGET <
 	float2 ViewPortRatio = {1.0, 1.0};
 	bool AntiAlias = false;
@@ -90,14 +86,6 @@ float3 SMAAGatherNeighbours(float2 coord, float4 offset[3], sampler source)
 	float Pleft = tex2Dlod(source, float4(offset[0].xy, 0, 0)).r;
 	float Ptop  = tex2Dlod(source, float4(offset[0].zw, 0, 0)).r;
 	return float3(P, Pleft, Ptop);
-}
-
-float2 SMAACalculatePredicatedThreshold(float2 coord, float4 offset[3], sampler source) 
-{
-    float3 neighbours = SMAAGatherNeighbours(coord, offset, source);
-    float2 delta = abs(neighbours.xx - neighbours.yz);
-    float2 edges = step(SMAA_PREDICATION_THRESHOLD, delta);
-    return SMAA_PREDICATION_SCALE * (1.0 - SMAA_PREDICATION_STRENGTH * edges) * SMAA_THRESHOLD;
 }
 
 float SMAASearchLength(sampler searchTex, float2 e, float offset) 
