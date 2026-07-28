@@ -73,6 +73,25 @@ float4 TAAPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1, uniform
 	float2 prevUV = (prevClipPos.xy / max(prevClipPos.w, 1e-5)) * float2(0.5, -0.5) + 0.5;
 
 	float3 currColor = tex2Dlod(source, float4(uv, 0, 0)).rgb;
+
+	// PONYTAIL: Depth-aware spatial edge anti-aliasing fallback for model silhouettes.
+	float dLeft  = tex2Dlod(Gbuffer8Map, float4(uv - float2(ViewportOffset2.x, 0), 0, 0)).r;
+	float dRight = tex2Dlod(Gbuffer8Map, float4(uv + float2(ViewportOffset2.x, 0), 0, 0)).r;
+	float dUp    = tex2Dlod(Gbuffer8Map, float4(uv - float2(0, ViewportOffset2.y), 0, 0)).r;
+	float dDown  = tex2Dlod(Gbuffer8Map, float4(uv + float2(0, ViewportOffset2.y), 0, 0)).r;
+
+	float depthDiff = max(max(abs(linearDepth - dLeft), abs(linearDepth - dRight)),
+	                      max(abs(linearDepth - dUp), abs(linearDepth - dDown))) / max(abs(linearDepth), 1e-3);
+
+	if (depthDiff > 0.005)
+	{
+		currColor = (currColor * 2.0 +
+			tex2Dlod(source, float4(uv + float2(ViewportOffset2.x, 0), 0, 0)).rgb +
+			tex2Dlod(source, float4(uv - float2(ViewportOffset2.x, 0), 0, 0)).rgb +
+			tex2Dlod(source, float4(uv + float2(0, ViewportOffset2.y), 0, 0)).rgb +
+			tex2Dlod(source, float4(uv - float2(0, ViewportOffset2.y), 0, 0)).rgb) * 0.1666667;
+	}
+
 	float3 currYCoCg = RGB2YCoCg(currColor);
 
 	float3 boxMin = currYCoCg;

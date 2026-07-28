@@ -384,6 +384,18 @@ float4 SMAALumaEdgeDetectionPS(
 	float Ltoptop   = tex2Dlod(source, float4(offset[2].zw, 0, 0)).a;
 
 	float4 delta = abs(Lcenter - float4(Lleft, Ltop, Lright, Lbottom));
+
+	// PONYTAIL: Depth-aware edge detection for 3D model silhouettes. Ceiling: ~4 texture fetches, 0 extra passes.
+	float Dcenter = abs(tex2Dlod(Gbuffer8Map, float4(coord0.xy, 0, 0)).r);
+	float Dleft   = abs(tex2Dlod(Gbuffer8Map, float4(offset[0].xy, 0, 0)).r);
+	float Dtop    = abs(tex2Dlod(Gbuffer8Map, float4(offset[0].zw, 0, 0)).r);
+	float Dright  = abs(tex2Dlod(Gbuffer8Map, float4(offset[1].xy, 0, 0)).r);
+	float Dbottom = abs(tex2Dlod(Gbuffer8Map, float4(offset[1].zw, 0, 0)).r);
+
+	float4 depthDelta = abs(Dcenter - float4(Dleft, Dtop, Dright, Dbottom)) / max(Dcenter, 1e-3);
+	float4 depthEdges = step(0.005, depthDelta);
+	delta = max(delta, depthEdges * 0.5);
+
 	float2 edges = step(threshold, delta.xy);
 	clip(sum(edges) - EPSILON);
 
