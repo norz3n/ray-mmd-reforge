@@ -1,11 +1,11 @@
 #if SSR_QUALITY == 1
-#	define SSR_SAMPLER_COUNT 32
+#	define SSR_SAMPLER_COUNT 8
 #elif SSR_QUALITY == 2
-#	define SSR_SAMPLER_COUNT 64
+#	define SSR_SAMPLER_COUNT 16
 #elif SSR_QUALITY >= 3
-#	define SSR_SAMPLER_COUNT 128
-#else
 #	define SSR_SAMPLER_COUNT 32
+#else
+#	define SSR_SAMPLER_COUNT 8
 #endif
 
 static const float2 SSRScale = 512 * float2(ViewportAspect, 1);
@@ -75,14 +75,33 @@ bool TraceScreenSpaceRay(float3 viewPosition, float3 viewReflect, float maxDista
 
 		float4 depthDiff = samplePosZ - abs(sampleDepth);
 
-		bool4 hit = abs(depthDiff) < bestIntervalSize;
+		// PONYTAIL: coarse linear + binary search used instead of Hi-Z to avoid depth mipmap boilerplate. Ceiling: worse performance on extremely long rays.
+		bool4 hit = (depthDiff >= 0.0) && (depthDiff <= bestIntervalSize);
 		if (any(hit))
 		{
 			float hitIndex = 3;
 			hitIndex = hit[2] ? 2 : hitIndex;
 			hitIndex = hit[1] ? 1 : hitIndex;
 			hitIndex = hit[0] ? 0 : hitIndex;
-			bestLen = stepLength + stepSize * hitIndex;
+			
+			float currentLen = stepLength + stepSize * hitIndex;
+			float searchStep = stepSize * 0.5;
+			currentLen -= searchStep;
+
+			for(int j = 0; j < 5; j++)
+			{
+				float4 searchPos = startScreenPos + deltaScreenPos * currentLen;
+				float searchDepth = tex2Dproj(Gbuffer8Map, searchPos).r;
+				float sDepthDiff = searchPos.w - abs(searchDepth);
+				
+				if(sDepthDiff >= 0.0) 
+					currentLen -= searchStep;
+				else
+					currentLen += searchStep;
+					
+				searchStep *= 0.5;
+			}
+			bestLen = currentLen;
 			break;
 		}
 
@@ -105,6 +124,10 @@ bool TraceScreenSpaceRay(float3 viewPosition, float3 viewReflect, float maxDista
 float4 SSRConeTracingPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) : COLOR 
 {
 	float4 MRT0 = tex2Dlod(Gbuffer5Map, float4(coord.xy, 0, 0));
+	
+	// PONYTAIL: early out on matte materials before reading other G-buffers
+	clip(MRT0.w - 1e-5); 
+
 	float4 MRT1 = tex2Dlod(Gbuffer6Map, float4(coord.xy, 0, 0));
 	float4 MRT2 = tex2Dlod(Gbuffer7Map, float4(coord.xy, 0, 0));
 	float4 MRT3 = tex2Dlod(Gbuffer8Map, float4(coord.xy, 0, 0));
@@ -122,7 +145,8 @@ float4 SSRConeTracingPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOOR
 	float atten = dot(viewReflect, -view);
 	clip(atten - 1e-5);
 
-	float sampleJitter = PseudoRandom(coord.zw);
+	// PONYTAIL: Interleaved Gradient Noise instead of white noise for better temporal/spatial stability
+	float sampleJitter = frac(52.9829189 * frac(dot(coord.xy * SSRScale, float2(0.06711056, 0.00583715))));
 	float sampleDistance = mSSRRangeScale;
 	sampleDistance *= max(0, mSSRRangeMax - material.linearDepth) +  material.linearDepth;
 	sampleDistance *= pow(1 - saturate(dot(view, material.normal)) * (1 - SSR_QUALITY * 0.1), 5 - SSR_QUALITY);
@@ -147,22 +171,25 @@ float4 SSRConeTracingPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOOR
 
 float4 SSRGaussionBlurPS(in float2 coord : TEXCOORD0, uniform sampler source, uniform float2 offset) : COLOR
 {
-	static const float weights[5] = {0.20236, 0.179044, 0.124009, 0.067234, 0.028532};
+	static const float weights[9] = {0.028532, 0.067234, 0.124009, 0.179044, 0.20236, 0.179044, 0.124009, 0.067234, 0.028532};
 
+	float centerDepth = abs(tex2Dlod(Gbuffer8Map, float4(coord, 0, 0)).r);
 	float2 start = coord - offset * 4;
 
 	float4 color = 0;
-	color += tex2Dlod(source, float4(start, 0, 0)) * weights[4]; start += offset;
-	color += tex2Dlod(source, float4(start, 0, 0)) * weights[3]; start += offset;
-	color += tex2Dlod(source, float4(start, 0, 0)) * weights[2]; start += offset;
-	color += tex2Dlod(source, float4(start, 0, 0)) * weights[1]; start += offset;
-	color += tex2Dlod(source, float4(start, 0, 0)) * weights[0]; start += offset;
-	color += tex2Dlod(source, float4(start, 0, 0)) * weights[1]; start += offset;
-	color += tex2Dlod(source, float4(start, 0, 0)) * weights[2]; start += offset;
-	color += tex2Dlod(source, float4(start, 0, 0)) * weights[3]; start += offset;
-	color += tex2Dlod(source, float4(start, 0, 0)) * weights[4];
+	float totalWeight = 0;
 
-	return color;
+	// PONYTAIL: depth-aware gaussian blur instead of SVGF/TAA accumulation. Ceiling: slight ghosting or noise on high roughness, but 0 state dependencies.
+	[unroll]
+	for (int i = 0; i < 9; i++) {
+		float2 c = start + offset * i;
+		float d = abs(tex2Dlod(Gbuffer8Map, float4(c, 0, 0)).r);
+		float w = weights[i] * exp(-abs(d - centerDepth) * 0.1);
+		color += tex2Dlod(source, float4(c, 0, 0)) * w;
+		totalWeight += w;
+	}
+
+	return color / max(totalWeight, 1e-5);
 }
 
 float4 SSRFinalCombiePS(in float2 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) : COLOR
