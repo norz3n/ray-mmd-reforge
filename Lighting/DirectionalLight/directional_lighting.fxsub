@@ -172,12 +172,11 @@ float2 ShadowPCF(sampler source, float2 coord, float receiverDepth)
 	return shadow;
 }
 
-float SampleCascadeShadowSingle(sampler source, float2 coord, float receiverDepth, float2 rotation)
-{
 #if PCSS_SHADOW_ENABLE
-	float searchRadius = 8.0 / SHADOW_MAP_SIZE;
-	float blockerSum = 0;
-	float blockerCount = 0;
+float2 FindBlocker(sampler source, float2 coord, float receiverDepth, float searchRadius, float2 rotation)
+{
+	float blockerWeight = 0;
+	float blockerDepthSum = 0.0;
 
 	[unroll]
 	for (int i = 0; i < PCSS_POISSON_SAMPLES; i++)
@@ -186,17 +185,31 @@ float SampleCascadeShadowSingle(sampler source, float2 coord, float receiverDept
 		float sampleDepth = tex2Dlod(source, float4(coord + offset, 0, 0)).r;
 		if (sampleDepth < receiverDepth - 0.0005)
 		{
-			blockerSum += sampleDepth;
-			blockerCount += 1.0;
+			blockerDepthSum += sampleDepth;
+			blockerWeight += 1.0;
 		}
 	}
 
-	if (blockerCount < 1.0)
+	return float2(blockerDepthSum / max(1e-5, blockerWeight), blockerWeight);
+}
+#endif
+
+float SampleCascadeShadowSingle(sampler source, float2 coord, float receiverDepth, float2 rotation, float lightSize)
+{
+#if PCSS_SHADOW_ENABLE
+	float linearDepth = receiverDepth * mPSSMDepthZMax;
+	float searchRadius = SearchRegionRadius(lightSize, linearDepth, mPSSMDepthZMin);
+	searchRadius = clamp(searchRadius, 2.0 / SHADOW_MAP_SIZE, 16.0 / SHADOW_MAP_SIZE);
+
+	float2 blocker = FindBlocker(source, coord, receiverDepth, searchRadius, rotation);
+
+	if (blocker.y <= 0.0)
 		return 1.0;
 
-	float avgBlockerDepth = blockerSum / blockerCount;
-	float penumbra = saturate((receiverDepth - avgBlockerDepth) / max(avgBlockerDepth, 1e-4));
-	float filterRadius = lerp(1.0 / SHADOW_MAP_SIZE, 12.0 / SHADOW_MAP_SIZE, penumbra);
+	float avgBlockerDepth = blocker.x;
+	float penumbraRatio = PenumbraRadius(lightSize, receiverDepth, avgBlockerDepth);
+	float filterSize = ProjectToLight(penumbraRatio, linearDepth, mPSSMDepthZMin);
+	float filterRadius = clamp(filterSize, 1.0 / SHADOW_MAP_SIZE, 32.0 / SHADOW_MAP_SIZE);
 
 	float2 momentsSum = 0;
 	[unroll]
@@ -217,13 +230,13 @@ float SampleCascadeShadowMap(int index, float2 coord, float receiverDepth, float
 {
 	[branch]
 	if (index == 0)
-		return SampleCascadeShadowSingle(PSSM1Samp, coord, receiverDepth, rotation);
+		return SampleCascadeShadowSingle(PSSM1Samp, coord, receiverDepth, rotation, 0.04);
 	else if (index == 1)
-		return SampleCascadeShadowSingle(PSSM2Samp, coord, receiverDepth, rotation);
+		return SampleCascadeShadowSingle(PSSM2Samp, coord, receiverDepth, rotation, 0.02);
 	else if (index == 2)
-		return SampleCascadeShadowSingle(PSSM3Samp, coord, receiverDepth, rotation);
+		return SampleCascadeShadowSingle(PSSM3Samp, coord, receiverDepth, rotation, 0.01);
 	else
-		return SampleCascadeShadowSingle(PSSM4Samp, coord, receiverDepth, rotation);
+		return SampleCascadeShadowSingle(PSSM4Samp, coord, receiverDepth, rotation, 0.003);
 }
 
 float ShadingShadow(MaterialParam material, float3 viewPosition)

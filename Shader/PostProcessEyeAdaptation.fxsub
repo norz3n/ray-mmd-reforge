@@ -18,9 +18,19 @@ sampler EyeLumAveMapSamp = sampler_state {
 	AddressU = CLAMP; AddressV = CLAMP;
 };
 
+/**
+ * Calculates time-adapted eye luminance with asymmetric adaptation speeds.
+ *
+ * @param adaptedLum Current frame's adapted luminance.
+ * @param lum Target frame luminance.
+ * @param delta Frame time delta.
+ * @return Adapted luminance value.
+ */
 float CalcAdaptedLum(float adaptedLum, float lum, float delta)
 {
-    return max(0, adaptedLum + (lum - adaptedLum) * (1.0f - exp2(-1.45 * delta)));
+	// Asymmetric adaptation speed: rapid pupil constriction in bright light, gradual dilation in darkness
+	float speed = (lum > adaptedLum) ? 2.5f : 0.8f;
+	return max(1e-4, adaptedLum + (lum - adaptedLum) * (1.0f - exp2(-speed * delta)));
 }
 
 float ComputeExposureISO(float avgLum, float middleGray = 12.5)
@@ -49,6 +59,9 @@ void EyeDownsampleVS(
 	oPosition = Position;
 }
 
+/**
+ * Downsamples scene luminance with HDR highlight firefly clamping.
+ */
 float4 EyeDownsamplePS(
 	in float2 coord1 : TEXCOORD0,
 	in float2 coord2 : TEXCOORD1,
@@ -56,25 +69,29 @@ float4 EyeDownsamplePS(
 	in float2 coord4 : TEXCOORD3,
 	uniform sampler source) : COLOR
 {
-	float color = log(max(luminance(tex2Dlod(source, float4(coord1, 0, 0)).rgb), 0.02));
-	color += log(max(luminance(tex2Dlod(source, float4(coord2, 0, 0)).rgb), 0.02));
-	color += log(max(luminance(tex2Dlod(source, float4(coord3, 0, 0)).rgb), 0.02));
-	color += log(max(luminance(tex2Dlod(source, float4(coord4, 0, 0)).rgb), 0.02));
-	color *= 0.25;
+	float l1 = clamp(luminance(tex2Dlod(source, float4(coord1, 0, 0)).rgb), 0.02, 100.0);
+	float l2 = clamp(luminance(tex2Dlod(source, float4(coord2, 0, 0)).rgb), 0.02, 100.0);
+	float l3 = clamp(luminance(tex2Dlod(source, float4(coord3, 0, 0)).rgb), 0.02, 100.0);
+	float l4 = clamp(luminance(tex2Dlod(source, float4(coord4, 0, 0)).rgb), 0.02, 100.0);
+
+	float color = (log(l1) + log(l2) + log(l3) + log(l4)) * 0.25;
 
 	return color;
 }
 
+/**
+ * Computes temporal adaptation with anti-flicker NaN guarding.
+ */
 float4 EyeAdapationPS(in float2 coord: TEXCOORD0) : COLOR
 {
 	float lum = exp(tex2Dlod(EyeLumMapSamp, float4(coord, 0, 20)).r);
 	float adaptedLum = tex2Dlod(EyeLumAveMapSamp, float4(float2(0.5, 0.5), 0, 0)).r;
 
-	if (!all(isfinite(lum)))
-		lum = 1.0f;
-
-	if (!all(isfinite(adaptedLum)))
+	if (!all(isfinite(adaptedLum)) || adaptedLum <= 0.0f)
 		adaptedLum = 1.0f;
+
+	if (!all(isfinite(lum)) || lum <= 0.0f)
+		lum = adaptedLum;
 
 	return CalcAdaptedLum(adaptedLum, lum, elapsed);
 }

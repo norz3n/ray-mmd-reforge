@@ -38,14 +38,6 @@
 #	define SSDO_BLUR_RADIUS 0
 #endif
 
-float InterleavedGradientNoise(float2 pixCoord, int frameCount = 0)
-{
-	const float3 magic = float3(0.06711056f, 0.00583715f, 52.9829189f);
-	float2 frameMagicScale = float2(2.083f, 4.867f);
-	pixCoord += frameCount * frameMagicScale;
-	return frac(magic.z * frac(dot(pixCoord, magic.xy)));
-}
-
 float linearizeDepth(float2 uv)
 {
 	return tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).r;

@@ -26,3 +26,4 @@ Fog/VolumetricFog
 /Shader/screenshots/logo.psd
 /ref-code
 .venv/
+.agents/

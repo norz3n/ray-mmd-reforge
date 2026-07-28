@@ -9,9 +9,26 @@ float3 ColorBanding(float2 uv)
 	return noise / 255.0;
 }
 
+/**
+ * Applies procedural organic film grain to combat color banding.
+ *
+ * @param color Input RGB color.
+ * @param uv Screen UV coordinates.
+ * @param intensity Grain strength multiplier.
+ * @return Color with organic film grain.
+ */
+float3 ColorFilmGrain(float3 color, float2 uv, float intensity = 0.015)
+{
+	float grain = frac(sin(dot(uv * ViewportSize, float2(12.9898, 78.233))) * 43758.5453);
+	float lum = luminance(color);
+	float grainWeight = 1.0 - smoothstep(0.8, 1.0, lum);
+	return color + (grain - 0.5) * intensity * grainWeight;
+}
+
 float3 ColorDithering(float3 color, float2 uv)
 {
 	color += ColorBanding(uv);
+	color = ColorFilmGrain(color, uv);
 	return color;
 }
 

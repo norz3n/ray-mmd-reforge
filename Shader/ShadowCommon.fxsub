@@ -127,3 +127,33 @@ float2 ComputeMoments(float depth)
 
 	return moments;
 }
+
+float SearchRegionRadius(float radius, float depth, float znear)
+{
+	return radius * (depth - znear) / max(depth, 1e-5);
+}
+
+float2 SearchRegionRadius(float2 radius, float depth, float znear)
+{
+	return radius * (depth - znear) / max(depth, 1e-5);
+}
+
+float PenumbraRadius(float radius, float receiverDepth, float blockerDepth)
+{
+	return radius * (receiverDepth - blockerDepth) / max(blockerDepth, 1e-5);
+}
+
+float2 PenumbraRadius(float2 radius, float receiverDepth, float blockerDepth)
+{
+	return radius * (receiverDepth - blockerDepth) / max(blockerDepth, 1e-5);
+}
+
+float ProjectToLight(float size, float depth, float znear)
+{
+	return size * znear / max(depth, 1e-5);
+}
+
+float2 ProjectToLight(float2 size, float depth, float znear)
+{
+	return size * znear / max(depth, 1e-5);
+}

@@ -41,7 +41,7 @@ bool TraceScreenSpaceShadow(float3 viewPosition, float3 L, float maxDistance, fl
 	float stepLength = jitter * stepSize + stepSize;
 
 	float bestLen = 0;
-	float bestIntervalSize = maxDistance / (CONTACT_SAMPLER_COUNT * 4);
+	float compareTolerance = maxDistance / (CONTACT_SAMPLER_COUNT * 2.0);
 
 	for (int i = 0; i < CONTACT_SAMPLER_COUNT; i += 4)
 	{
@@ -60,9 +60,8 @@ bool TraceScreenSpaceShadow(float3 viewPosition, float3 L, float maxDistance, fl
 		sampleDepth.a = tex2Dproj(Gbuffer8Map, samplePos4).r;
 
 		float4 depthDiff = samplePosZ - abs(sampleDepth);
-		depthDiff = abs(depthDiff);
 
-		bool4 hit = depthDiff > 0.01 && depthDiff < bestIntervalSize;
+		bool4 hit = abs(depthDiff + compareTolerance) < compareTolerance;
 		if (any(hit))
 		{
 			bestLen = 1;
@@ -71,6 +70,10 @@ bool TraceScreenSpaceShadow(float3 viewPosition, float3 L, float maxDistance, fl
 
 		stepLength += stepSize * 4;
 	}
+
+	float2 borderCheck = abs(endScreenPos.xy / max(1e-5, endScreenPos.w) * 2.0 - 1.0) - 1.0;
+	if (borderCheck.x > 0.0 || borderCheck.y > 0.0)
+		bestLen = 0;
 
 	return bestLen > 0 ? 0 : 1;
 }
@@ -94,12 +97,14 @@ float4 ConstantShadowPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOOR
 	float sampleDistance = 0.1;
 	sampleDistance *= material.linearDepth;
 
-	return TraceScreenSpaceShadow(viewPosition, L, sampleDistance, PseudoRandom(coord.zw));
+	return TraceScreenSpaceShadow(viewPosition, L, sampleDistance, InterleavedGradientNoise(coord.zw * ViewportSize));
 }
 
 float GetContactShadow(float3 viewPosition, float3 L, float2 screenCoord, float linearDepth)
 {
 	float sampleDistance = 0.05 * min(linearDepth, 50.0);
-	float jitter = PseudoRandom(screenCoord * ViewportSize);
-	return float(TraceScreenSpaceShadow(viewPosition, L, sampleDistance, jitter));
+	float jitter = InterleavedGradientNoise(screenCoord * ViewportSize);
+	float shadow = float(TraceScreenSpaceShadow(viewPosition, L, sampleDistance, jitter));
+	float fade = saturate(1.0 - linearDepth / 300.0);
+	return lerp(1.0, shadow, fade);
 }

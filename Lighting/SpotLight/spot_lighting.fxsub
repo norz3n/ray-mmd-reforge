@@ -127,7 +127,10 @@ float ShadingShadow(MaterialParam material, float3 P)
 	float linearDepth = length(mul(float4(P, 1), matLightViewFromCameraView));
 
 #if PCSS_SHADOW_ENABLE
-	float searchRadius = 8.0 / SHADOW_MAP_SIZE;
+	float lightSize = 0.05 * mLightPlaneNear;
+	float searchRadius = SearchRegionRadius(lightSize, linearDepth, mLightPlaneNear);
+	searchRadius = clamp(searchRadius, 2.0 / SHADOW_MAP_SIZE, 16.0 / SHADOW_MAP_SIZE);
+
 	float angle = PseudoRandom(proj.xy * SHADOW_MAP_SIZE) * PI_2;
 	float2 rotation = float2(cos(angle), sin(angle));
 
@@ -150,8 +153,9 @@ float ShadingShadow(MaterialParam material, float3 P)
 		return 1.0;
 
 	float avgBlockerDepth = blockerSum / blockerCount;
-	float penumbra = saturate((linearDepth - avgBlockerDepth) / max(avgBlockerDepth, 1e-4));
-	float filterRadius = lerp(1.0 / SHADOW_MAP_SIZE, 12.0 / SHADOW_MAP_SIZE, penumbra);
+	float penumbraRatio = PenumbraRadius(lightSize, linearDepth, avgBlockerDepth);
+	float filterSize = ProjectToLight(penumbraRatio, linearDepth, mLightPlaneNear);
+	float filterRadius = clamp(filterSize, 1.0 / SHADOW_MAP_SIZE, 32.0 / SHADOW_MAP_SIZE);
 
 	float2 momentsSum = 0;
 	[unroll]
