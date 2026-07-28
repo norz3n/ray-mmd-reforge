@@ -126,11 +126,12 @@ float4 VoxelConeTracingPassPS(
 			float depthDelta = (sampleViewPos.z - sampleDepth) - mVXGIBias;
 			float rawDepthWeight = SSGIDepthContinuityWeight(depthDelta, viewPosition.z, dist);
 			float depthWeight = lerp(1.0, rawDepthWeight, mVXGIThicknessWeight);
-			if (depthWeight <= 0.001) continue;
+			if (!(depthWeight > 0.001)) continue;
 
 			float3 hitColor = tex2Dlod(ShadingMapSamp, float4(sampleUV, 0, 0)).rgb;
 
 			float hitLum = dot(hitColor, float3(0.299, 0.587, 0.114));
+			if (!(hitLum >= 0.0 && hitLum < 65504.0)) continue;
 			if (hitLum <= 0.001 && step > 2)
 				continue;
 
