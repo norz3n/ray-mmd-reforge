@@ -125,8 +125,8 @@ float4 SSRConeTracingPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOOR
 {
 	float4 MRT0 = tex2Dlod(Gbuffer5Map, float4(coord.xy, 0, 0));
 	
-	// PONYTAIL: early out on matte materials before reading other G-buffers
-	clip(MRT0.w - 1e-5); 
+	// Return 0 for matte materials to ensure clean render target data (clip() left target unwritten/NaN causing black screen)
+	if (MRT0.w <= 1e-5) return 0; 
 
 	float4 MRT1 = tex2Dlod(Gbuffer6Map, float4(coord.xy, 0, 0));
 	float4 MRT2 = tex2Dlod(Gbuffer7Map, float4(coord.xy, 0, 0));
