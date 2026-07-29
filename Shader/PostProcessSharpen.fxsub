@@ -18,12 +18,42 @@ float3 CASSharpen(sampler2D source, float2 coord, float2 offset, float sharpness
 	return saturate(result);
 }
 
+// Procedural Cinematic Film Grain
+float3 ApplyFilmGrain(float3 color, float2 coord, float time, float intensity)
+{
+	// Generate high-frequency pseudo-random noise based on spatial coordinates and time
+	float2 seed = coord + frac(time);
+	float noise = frac(sin(dot(seed, float2(12.9898, 78.233))) * 43758.5453);
+	
+	// Shift from [0, 1] to [-1, 1], scale down internally for finer slider control
+	noise = (noise * 2.0 - 1.0) * (intensity * 0.2);
+	
+	// Blend: Parabolic curve (smoother than linear) to softly fade grain in deep shadows and bright highlights
+	float luma = dot(color, float3(0.299, 0.587, 0.114));
+	float grainWeight = 1.0 - pow(abs(luma - 0.5) * 2.0, 2.0);
+	
+	return saturate(color + noise * grainWeight);
+}
+
 #ifndef POST_SHARPEN_INTENSITY
 #	define POST_SHARPEN_INTENSITY 0.5
 #endif
 
+#ifndef FILM_GRAIN_ENABLE
+#	define FILM_GRAIN_ENABLE 0
+#endif
+
+#ifndef FILM_GRAIN_INTENSITY
+#	define FILM_GRAIN_INTENSITY 0.05
+#endif
+
 float4 PostProcessSharpenPS(in float2 coord : TEXCOORD0, uniform sampler2D source, uniform float2 offset) : COLOR
 {
-	float3 casColor = CASSharpen(source, coord, offset, POST_SHARPEN_INTENSITY);
-	return float4(ColorDithering(casColor, coord), 1.0);
+	float3 finalColor = CASSharpen(source, coord, offset, POST_SHARPEN_INTENSITY);
+
+#if FILM_GRAIN_ENABLE
+	finalColor = ApplyFilmGrain(finalColor, coord, time, FILM_GRAIN_INTENSITY);
+#endif
+
+	return float4(ColorDithering(finalColor, coord), 1.0);
 }
