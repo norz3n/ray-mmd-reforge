@@ -120,7 +120,8 @@ float4 VoxelConeTracingPassPS(
 			if (sampleUV.x < 0.001 || sampleUV.x > 0.999 || sampleUV.y < 0.001 || sampleUV.y > 0.999)
 				continue;
 
-			float sampleDepth = FetchLinearDepthVX(sampleUV);
+			float4 sampleGbuffer8 = tex2Dlod(Gbuffer8Map, float4(sampleUV, 0, 0));
+			float sampleDepth = sampleGbuffer8.r;
 			float3 sampleNormal = FetchViewNormalVX(sampleUV);
 
 			float depthDelta = (sampleViewPos.z - sampleDepth) - mVXGIBias;
@@ -136,14 +137,9 @@ float4 VoxelConeTracingPassPS(
 				continue;
 
 			// Material-Aware Subsurface Tinting (from sdPBR)
-			float4 sampleMRT0 = tex2Dlod(Gbuffer5Map, float4(sampleUV, 0, 0));
-			float4 sampleMRT1 = tex2Dlod(Gbuffer6Map, float4(sampleUV, 0, 0));
-			float4 sampleMRT2 = tex2Dlod(Gbuffer7Map, float4(sampleUV, 0, 0));
-			float4 sampleMRT3 = tex2Dlod(Gbuffer8Map, float4(sampleUV, 0, 0));
-			MaterialParam sampleMat;
-			DecodeGbuffer(sampleMRT0, sampleMRT1, sampleMRT2, sampleMRT3, sampleMat);
-
-			if (sampleMat.lightModel == SHADINGMODELID_SKIN)
+			// ponytail: fast lightModel extraction directly from cached Gbuffer8Map.a avoids 4-MRT fetches and GBuffer decoding
+			int sampleLightModel = (int)floor(sampleGbuffer8.a);
+			if (sampleLightModel == SHADINGMODELID_SKIN)
 			{
 				hitColor = lerp(hitColor, hitColor * float3(1.12, 0.88, 0.78), 0.35);
 			}
