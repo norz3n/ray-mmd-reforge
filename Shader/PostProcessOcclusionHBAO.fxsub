@@ -222,14 +222,25 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 
 	float4 occlusion = 0;
 
+	// Precalculate the rotation step outside the loop
+	float sinAlpha, cosAlpha;
+	sincos(alpha, sinAlpha, cosAlpha);
+
+	// Calculate the starting direction (with spatial jittering) outside the loop
+	float startAngle = alpha * sampleRandom.x;
+	float2 direction;
+	sincos(startAngle, direction.y, direction.x);
+
 	[loop]
 	for (int d = 0; d < HBAO_DIRECTION_COUNT; ++d)
 	{
-		float angle = alpha * (d + sampleRandom.x);
-
-		float2 direction = float2(cos(angle), sin(angle));
-
 		occlusion += HorizonOcclusion(samplePixel, sampleNormal, samplePosition, direction, radius, sampleRandom.y, mAmbientOcclusionBias);
+
+		// Rotate direction vector iteratively using a 2D rotation matrix (2 mad operations instead of cos/sin)
+		direction = float2(
+			direction.x * cosAlpha - direction.y * sinAlpha,
+			direction.x * sinAlpha + direction.y * cosAlpha
+		);
 	}
 
 	occlusion *= (1.0f / (HBAO_SAMPLER_COUNT * HBAO_DIRECTION_COUNT));
