@@ -1,43 +1,38 @@
-Ray-MMD
+Ray-MMD Reforge
 ========
-###### [English](https://github.com/ray-cast/ray-mmd/blob/master/README.md) &nbsp; [中文文档](https://github.com/ray-cast/ray-mmd/blob/master/README_chs.md)
-### Physically-Based Rendering ###
+### Heavyweight graphics. Reforged for perfection. ###
 　　<img style="vertical-align: top;" src="./Shader/screenshots/logo.png" alt="logo" height="48px">
 
-　　Ray-MMD is a free, powerful library and an extension pack of [mikumikudance](http://www.geocities.jp/higuchuu4/index_e.htm), offering an easy way of adding physically-based rendering with high-freedom of operation. it is written in hlsl lang with DX9 env and based on [mikumikueffect](https://bowlroll.net/file/35012). 
+　　**Ray-MMD Reforge** is a modified fork of the original Ray-MMD library for [mikumikudance](http://www.geocities.jp/higuchuu4/index_e.htm). 
+　　Focused on bridging realistic lighting with stylized rendering, Reforge updates the original engine pipeline by integrating modern graphics techniques. We've added **Temporal Anti-Aliasing (TAA)**, **Screen Space Voxel Global Illumination (SSVGI)**, **Hybrid HBAO/SSDO**, and **Percentage-Closer Soft Shadows (PCSS)** to improve shadow accuracy, reduce visual noise, and provide a more stable image out of the box.
 
 Screenshots:
 ------------
+> *Note: These are legacy screenshots from the original Ray-MMD. New showcases demonstrating SSVGI, PCSS, and TAA are coming soon!*
+
 [![link text](./Shader/screenshots/screen1_small.jpg)](https://raw.githubusercontent.com/ray-cast/ray-mmd/master/Shader/screenshots/screen1.jpg)
 [![link text](./Shader/screenshots/screen2_small.png)](https://raw.githubusercontent.com/ray-cast/ray-mmd/master/Shader/screenshots/screen2.png)
 [![link text](./Shader/screenshots/screen3_small.jpg)](https://raw.githubusercontent.com/ray-cast/ray-mmd/master/Shader/screenshots/screen3.png)
 [![link text](./Shader/screenshots/screen4_small.jpg)](https://raw.githubusercontent.com/ray-cast/ray-mmd/master/Shader/screenshots/screen4.png)
-
-Download
-------------
-　[![img](https://img.shields.io/badge/version-1.3.1v2-brightgreen.svg)](https://github.com/ray-cast/ray-mmd/archive/1.3.1v2.zip)
-　[![img](https://img.shields.io/badge/version-1.5.0-brightgreen.svg)](https://github.com/ray-cast/ray-mmd/archive/1.5.0.zip)
-
-* [Ray-MMD - 1.3.1v2 (zip)](https://github.com/ray-cast/ray-mmd/archive/1.3.1v2.zip)  (updated: 27. Apr 2017)
-* [Ray-MMD - 1.3.1v2 (tar.gz)](https://github.com/ray-cast/ray-mmd/archive/1.3.1v2.tar.gz)  (updated: 27. Apr 2017)
-* [Ray-MMD - 1.5.0 (zip)](https://github.com/ray-cast/ray-mmd/archive/1.5.0.zip) (updated: 15. Jan 2018)
-* [Ray-MMD - 1.5.0 (tar.gz)](https://github.com/ray-cast/ray-mmd/archive/1.5.0.tar.gz) (updated: 15. Jan 2018)
-- Extension
-	- [ColorGrading - v1.0.0 (zip)](https://github.com/MikuMikuShaders/ColorGrading/archive/v1.0.0.zip) (updated: 2. Dec 2017, \[[Github](https://github.com/MikuMikuShaders/ColorGrading)\])
-	- [FilmGrain - v1.0.0 (zip)](https://github.com/MikuMikuShaders/FilmGrain/archive/v1.0.0.zip) (updated: 2. Dec 2017, \[[Github](https://github.com/MikuMikuShaders/FilmGrain)\])
-	- [FXAA - v1.0.0 (zip)](https://github.com/MikuMikuShaders/FXAA/archive/v1.0.0.zip) (updated: 2. Dec 2017, \[[Github](https://github.com/MikuMikuShaders/FXAA)\])
-	- [LightBloom - v1.1.1 (zip)](https://github.com/MikuMikuShaders/LightBloom/archive/v1.1.1.zip) (updated: 2. Dec 2017, \[[Github](https://github.com/MikuMikuShaders/LightBloom)\])
-	- [SMAA - v1.0.0 (zip)](https://github.com/MikuMikuShaders/SMAA/archive/v1.0.0.zip) (updated: 2. Dec 2017, \[[Github](https://github.com/MikuMikuShaders/SMAA)\])
-	- [Spectrum - v1.4.0 (zip)](https://github.com/MikuMikuShaders/Spectrum/archive/v1.4.0.zip) (updated: 2. Dec 2017, \[[Github](https://github.com/MikuMikuShaders/Spectrum)\])
-	- [StereoImage - v1.0.0 (zip)](https://github.com/MikuMikuShaders/StereoImage/archive/v1.0.0.zip) (updated: 2. Dec 2017, \[[Github](https://github.com/MikuMikuShaders/StereoImage)\])
 
 Requirement :
 ------------
 * [MikuMikuDance](http://www.geocities.jp/higuchuu4/index_e.htm) - 926ver (x64) (Without Anti-Aliasing)
 * [MikuMikuEffect](https://bowlroll.net/file/35012) - 037ver (x64)
 * Direct3D 9 With Shader Model 3.0 (ps_3_0)
+* **Powerful GPU recommended** due to advanced shading techniques.
 
-Features :
+Reforge Exclusive Features :
+------------
+* **Temporal Anti-Aliasing (TAA)**: Improved edge anti-aliasing and temporal stability to reduce subpixel flickering.
+* **Hybrid HBAO / SSDO**: Horizon-based ambient occlusion and directional occlusion for more accurate contact shading.
+* **Percentage-Closer Soft Shadows (PCSS)**: Distance-based soft shadows that blur based on the distance from the caster.
+* **Screen Space Voxel Global Illumination (SSVGI)**: Hybrid GI architecture combining voxel grids with screen-space cone tracing for real-time indirect lighting (includes fixes for NaN/INF artifacts).
+* **Contact Shadows**: Screen-space raymarched shadows to reduce light leaking and grounding issues.
+* **Optimized SSR**: Upgraded Screen Space Reflections using Binary Search and depth-aware blur for better performance and accuracy.
+* **Depth-Aware AA Pipeline**: Fixed black screen issues and updated edge detection for SMAA/TAA passes.
+
+Standard Features (Inherited) :
 ------------
 * Physically-Based Material: albedo, metallic, smoothness/roughness, specular/reflectance, emissive, etc
 * Clear coat material with absorption to simulate a second layer
@@ -46,29 +41,13 @@ Features :
 * Special-Case Materials Wetness
 * Approximation subsurface scattering materials
 * Cook-Torrance microfacet specular BRDF (GGX) and burley diffuse BRDF
-* Physical light units
-* Multiple light sources (Point, spot, sun, reactangle, disk, sphere, tube, ies)
+* Physical light units & Multiple light sources (Point, spot, sun, reactangle, disk, sphere, tube, ies)
 * IES light profiles (point and spot light support)
-* Soft shadow (PCF, VSM, PSSM)
-* Omni light shadow support based on dual-paraboloid project
 * HDR linear lighting
-* Volumetric light (point, spot and ies light source support)
-* Volumetric fog (cube and sphere fog support)
-* Light shaft effect
+* Volumetric light and Volumetric fog (cube and sphere fog support)
 * Approximation atmospheric fog and sky scattering
-* Ground fog effect
-* Skybox based on RGBT encode
 * Image-based lighting based on RGBT encode
-* Screen Space Reflection
-* Screen Space Ambient Occlusition
-* Screen Space Subsurface Scattering
-* Post-Process Bokeh Depth Of Field
-* Post-Process Bloom
-* Post-Process Eye adaptation
-* Post-Process Tone-mapping (ACES-like,Reinhard,Hable,Hejl2015,NaughtyDog support)
-* Post-Process Color Balance
-* Post-Process FXAA
-* Post-Process SMAA
+* Post-Process Bokeh Depth Of Field, Bloom, Tone-mapping, Color Balance
 
 Resources :
 ------------
@@ -76,12 +55,14 @@ Resources :
 	- sIBL Archive - Hdrlabs.com \[[link](http://www.hdrlabs.com/sibl/archive.html)\].
 	- ++skies; - **[aokcub](https://twitter.com/aokcub_cg)** \[[link](https://aokcub.net/cg/incskies/)\].
 	- USC Institute \[[link](http://gl.ict.usc.edu/Data/HighResProbes)\].
-- Text editor
-	- Notepad++ \[[link](https://notepad-plus-plus.org)\].
-	- Visual studio code \[[link](http://code.visualstudio.com/Download)\].
 
 Credits:
 -------------
+**Reforge Integrations & Special Thanks:**
+* Credit: material by dendewa (https://dendewa.vercel.app/) - Used for HBAO rendering concepts.
+* **ikeno** - Referencing algorithms and mathematical concepts from `ikVXGI` for Global Illumination.
+
+**Original Engine:**
 Financially supported on [Patreon](http://www.patreon.com/cubizer):  
 
 #### Platinum supporters:
@@ -109,6 +90,7 @@ Contact:
 [License (MIT)](https://raw.githubusercontent.com/ray-cast/ray-mmd/master/LICENSE.txt)
 -------------------------------------------------------------------------------
 	Copyright (C) 2016-2018 Ray-MMD Developers. All rights reserved.
+    (Reforge modifications are part of the extended project scope).
 
 	https://github.com/ray-cast/ray-mmd
 
@@ -136,25 +118,8 @@ References :
 * Compact Normal Storage for small G-Buffers \[[link](http://aras-p.info/texts/CompactNormalStorage.html)\].
 * Convert Blinn-Phong to Beckmann distribution \[[link](http://simonstechblog.blogspot.de/2011/12/microfacet-brdf.html)\].
 * Spherical Gaussian approximation for Blinn-Phong, Phong and Fresnel \[[link](https://seblagarde.wordpress.com/2012/06/03/spherical-gaussien-approximation-for-blinn-phong-phong-and-fresnel/)\].
-* Physically Based Area Lights \[[link](http://www.frostbite.com/wp-content/uploads/2014/11/course_notes_moving_frostbite_to_pbr.pdf)\].
-* Physics and Math of Shading \[[link](http://blog.selfshadow.com/publications/s2015-shading-course/hoffman/s2015_pbs_physics_math_slides.pdf)\].
-* Compact YCoCg Frame Buffer for small IBL-Buffer \[[link](http://jcgt.org/published/0001/01/02/)\].
-* RGBM color encoding \[[link](http://graphicrants.blogspot.com/2009/04/rgbm-color-encoding.html)\].
 * Horizon Occlusion for IBL \[[link](http://marmosetco.tumblr.com/post/81245981087)\].
 * Screen space glossy reflections \[[link](http://roar11.com/2015/07/screen-space-glossy-reflections/)\].
 * Parallax Occlusion Map \[[link](http://sunandblackcat.com/tipFullView.php?topicid=28)\].
-* Convert Temperature to RGB \[[link](https://github.com/davidf2281/ColorTempToRGB)\].
-* Texture repetition \[[link](http://www.iquilezles.org/www/articles/texturerepetition/texturerepetition.htm)\].
-* Pre-Integrated Skin Shading \[[link](http://simonstechblog.blogspot.com/2015/02/pre-integrated-skin-shading.html)\]
-* Normal Blending in Detail \[[link](http://blog.selfshadow.com/publications/blending-in-detail/)\]
-* An Approximation to the Chapman Grazing-Incidence Function for Atmospheric Scattering \[[link](http://www.gameenginegems.net/gemsdb/article.php?id=1133)\]
-* Bump map to normal \[[link](https://docs.unrealengine.com/latest/attachments/Engine/Rendering/LightingAndShadows/BumpMappingWithoutTangentSpace/mm_sfgrad_bump.pdf)\]
 * Special-Case Materials Wetness \[[link](http://advances.realtimerendering.com/other/2016/naughty_dog/NaughtyDog_TechArt_Final.pdf)\]
-* Mip Fog \[[link](http://advances.realtimerendering.com/other/2016/naughty_dog/NaughtyDog_TechArt_Final.pdf)\]
-* Gaussian-kernel-calculator \[[link](http://dev.theomader.com/gaussian-kernel-calculator/)\]
-* Ray Box Intersection on the GPU \[[link](https://github.com/hpicgs/cgsee/wiki/Ray-Box-Intersection-on-the-GPU)\]
-* Hexagonal Bokeh Blur Revisited \[[link](https://colinbarrebrisebois.com/2017/04/18/hexagonal-bokeh-blur-revisited/)\]
-* Practical Post-Process Depth of Field \[[link](https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch28.html)\]
-* Approximation of the IBL’s DFG term for a cloth BRDF \[[link](https://gist.github.com/romainguy/52d0e7f070d9ed7b44a0327d735fe33e)\]
-* Real-Time Polygonal-Light Shading with Linearly Transformed Cosines\[[link](https://eheitzresearch.wordpress.com/415-2/)\]
-* Limb Darkening model \[[link](http://www.physics.hmc.edu/faculty/esin/a101/limbdarkening.pdf)\]
+* (And many more from the original development team...)
