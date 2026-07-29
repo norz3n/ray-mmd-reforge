@@ -1,7 +1,9 @@
 Ray-MMD Reforge
 ========
 ### Heavyweight graphics. Reforged for perfection. ###
-　　<img style="vertical-align: top;" src="./Shader/screenshots/logo.png" alt="logo" height="48px">
+<div align="center">
+  <img src="./Shader/screenshots/logo.png" alt="logo" width="600">
+</div>
 
 　　**Ray-MMD Reforge** is a modified fork of the original Ray-MMD library for [mikumikudance](http://www.geocities.jp/higuchuu4/index_e.htm). 
 　　Focused on bridging realistic lighting with stylized rendering, Reforge updates the original engine pipeline by integrating modern graphics techniques. We've added **Temporal Anti-Aliasing (TAA)**, **Screen Space Voxel Global Illumination (SSVGI)**, **Hybrid HBAO/SSDO**, and **Percentage-Closer Soft Shadows (PCSS)** to improve shadow accuracy, reduce visual noise, and provide a more stable image out of the box.
