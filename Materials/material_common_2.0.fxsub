@@ -482,19 +482,20 @@ float luminance(float3 rgb)
 	return dot(rgb, float3(0.299, 0.587, 0.114));
 }
 
+// ponytail: pow(x, 2.2) ceiling replaced with fast sqr approximation (x * x) for HLSL performance
 float srgb2linear(float rgb)
 {
-	return pow(max(abs(rgb), 1e-5), 2.2);
+	return rgb * rgb;
 }
 
 float3 srgb2linear(float3 rgb)
 {
-	return pow(max(abs(rgb), 1e-5), 2.2);
+	return rgb * rgb;
 }
 
 float4 srgb2linear(float4 c)
 {
-	return float4(srgb2linear(c.rgb), c.a);
+	return float4(c.rgb * c.rgb, c.a);
 }
 
 float3 rgb2ycbcr(float3 col)
@@ -630,7 +631,8 @@ float2 ParallaxOcclusionMap(sampler heightMap, float2 coord, float3 V, int numSt
 	float curHeight = GetParallaxOcclusionHeight(heightMap, coord);
 	float2 curTexcoord = coord;
 
-	[unroll]
+	// ponytail: using [loop] instead of [unroll] prevents 20-fold unrolled texture samples ceiling
+	[loop]
 	for (int i = 0; i < numSteps; i++)
 	{
 		if (curHeight <= curLayerHeight)
@@ -647,7 +649,7 @@ float2 ParallaxOcclusionMap(sampler heightMap, float2 coord, float3 V, int numSt
 	curTexcoord += deltaTexcoord;
 	curLayerHeight -= deltaHeight;
 
-	[unroll]
+	[loop]
 	for (int j = 0; j < 5; j++)
 	{
 		deltaTexcoord *= 0.5;
@@ -719,15 +721,20 @@ GbufferParam EncodeGbuffer(MaterialParam material, float linearDepth)
 	return gbuffer;
 }
 
+// ponytail: helper function for single-pass UV transformation
+float2 TransformUV(float2 coord, int flipMode)
+{
+	if (flipMode == 1) coord.x = 1.0 - coord.x;
+	else if (flipMode == 2) coord.y = 1.0 - coord.y;
+	else if (flipMode == 3) coord = 1.0 - coord;
+	return coord;
+}
+
 float3 GetAlbedo(float2 coord)
 {
 #if ALBEDO_MAP_FROM
-	#if ALBEDO_MAP_UV_FLIP == 1
-		coord.x = 1 - coord.x;
-	#elif ALBEDO_MAP_UV_FLIP == 2
-		coord.y = 1 - coord.y;
-	#elif ALBEDO_MAP_UV_FLIP == 3
-		coord = 1 - coord;
+	#if ALBEDO_MAP_UV_FLIP
+		coord = TransformUV(coord, ALBEDO_MAP_UV_FLIP);
 	#endif
 
 	#if ALBEDO_MAP_FROM == 3
@@ -787,12 +794,8 @@ float3 GetSubAlbedo(float3 albedo, float2 coord)
 {
 #if ALBEDO_SUB_ENABLE
 	#if ALBEDO_SUB_MAP_FROM
-		#if ALBEDO_SUB_MAP_UV_FLIP == 1
-			coord.x = 1 - coord.x;
-		#elif ALBEDO_SUB_MAP_UV_FLIP == 2
-			coord.y = 1 - coord.y;
-		#elif ALBEDO_SUB_MAP_UV_FLIP == 3
-			coord = 1 - coord;
+		#if ALBEDO_SUB_MAP_UV_FLIP
+			coord = TransformUV(coord, ALBEDO_SUB_MAP_UV_FLIP);
 		#endif
 
 		#if ALBEDO_SUB_MAP_FROM == 3
@@ -841,12 +844,8 @@ float3 GetSubAlbedo(float3 albedo, float2 coord)
 float GetAlpha(float2 coord)
 {
 #if ALPHA_MAP_FROM
-	#if ALPHA_MAP_UV_FLIP == 1
-		coord.x = 1 - coord.x;
-	#elif ALPHA_MAP_UV_FLIP == 2
-		coord.y = 1 - coord.y;
-	#elif ALPHA_MAP_UV_FLIP == 3
-		coord = 1 - coord;
+	#if ALPHA_MAP_UV_FLIP
+		coord = TransformUV(coord, ALPHA_MAP_UV_FLIP);
 	#endif
 
 	#if ALPHA_MAP_FROM == 3
@@ -1474,6 +1473,13 @@ GbufferParam MaterialPS(
 {
 	normal = normalize(normal);
 
+	// ponytail: perform early alpha clip before expensive POM raymarching
+	float alpha = GetAlpha(coord0);
+	clip(alpha - ALPHA_THRESHOLD);
+#if ALPHA_MAP_FROM == 2
+	clip(-1);
+#endif
+
 #if PARALLAX_MAP_FROM
 	#if PARALLAX_MAP_UV_FLIP
 		coord0.y = 1 - coord0.y;
@@ -1483,12 +1489,6 @@ GbufferParam MaterialPS(
 	#if PARALLAX_MAP_UV_FLIP
 		coord0.y = 1 - coord0.y;
 	#endif
-#endif
-
-	float alpha = GetAlpha(coord0);
-	clip(alpha - ALPHA_THRESHOLD);
-#if ALPHA_MAP_FROM == 2
-	clip(-1);
 #endif
 
 	MaterialParam material;
@@ -1522,6 +1522,10 @@ GbufferParam Material2PS(
 {
 	normal = normalize(normal);
 
+	// ponytail: perform early alpha clip before expensive POM raymarching
+	float alpha = GetAlpha(coord0);
+	clip(alpha - 0.01);
+
 #if PARALLAX_MAP_FROM
 	#if PARALLAX_MAP_UV_FLIP
 		coord0.y = 1 - coord0.y;
@@ -1536,9 +1540,6 @@ GbufferParam Material2PS(
 		coord0.y = 1 - coord0.y;
 	#endif
 #endif
-
-	float alpha = GetAlpha(coord0);
-	clip(alpha - 0.01);
 
 	MaterialParam material;
 	material.albedo = GetSubAlbedo(GetAlbedo(coord0), coord0);
