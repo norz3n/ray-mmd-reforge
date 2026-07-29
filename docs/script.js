@@ -118,6 +118,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                     <span style="color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; width: 100%;">${commit.commit.message.split('\\n')[0]}</span>
                                 </div>
                             `).join('');
+                            html += `<div style="font-size: 0.85rem; margin-top: 6px;"><a href="https://github.com/norz3n/ray-mmd-reforge/commits/${release.tag_name}" target="_blank" style="color: #64869e; text-decoration: none; transition: color 0.2s;">View all changes &rarr;</a></div>`;
                         }
                     } catch(e) {
                         html += `<div style="font-size: 0.85rem; color: #64869e;">Failed to load commits.</div>`;
