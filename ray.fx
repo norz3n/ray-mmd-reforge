@@ -103,6 +103,7 @@ static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceB
 #include "shader/ShadingMaterials.fxsub"
 
 #if SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE
+#	include "shader/ShadowCommon.fxsub"
 #	include "shader/ShadowMapCascaded.fxsub"
 #	include "shader/ShadowMap.fxsub"
 #endif

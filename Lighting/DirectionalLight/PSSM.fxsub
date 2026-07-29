@@ -1,6 +1,8 @@
 #include "../../ray.conf"
 #include "../../ray_advanced.conf"
+#include "../../shader/math.fxsub"
 #include "../../shader/common.fxsub"
+#include "../../shader/ShadowCommon.fxsub"
 #include "../../shader/ShadowMapCascaded.fxsub"
 
 #if SHADOW_QUALITY == 1
