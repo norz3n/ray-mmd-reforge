@@ -27,3 +27,4 @@ Fog/VolumetricFog
 /ref-code
 .venv/
 .agents/
+/internal_stuff
