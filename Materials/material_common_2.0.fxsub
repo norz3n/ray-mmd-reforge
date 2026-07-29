@@ -514,6 +514,19 @@ float3 ColorSynthesis(float3 diffuse, float3 m)
 	return diffuse * lerp(1.0, melanin, m);
 }
 
+// ponytail: Triplanar projection helper for sampling textures without UV unwrap
+float4 SampleTriplanar(sampler texSamp, float3 worldPos, float3 worldNormal, float scale)
+{
+	float3 blend = abs(worldNormal);
+	blend /= (blend.x + blend.y + blend.z + 1e-5);
+
+	float4 x = tex2D(texSamp, worldPos.yz * scale);
+	float4 y = tex2D(texSamp, worldPos.xz * scale);
+	float4 z = tex2D(texSamp, worldPos.xy * scale);
+
+	return x * blend.x + y * blend.y + z * blend.z;
+}
+
 #if NORMAL_MAP_FROM || NORMAL_SUB_MAP_FROM
 float3 ComputeTangentBinormalNormal(float3 N, float3 P, float2 coord, float3 tangentNormal)
 {
@@ -730,9 +743,15 @@ float2 TransformUV(float2 coord, int flipMode)
 	return coord;
 }
 
-float3 GetAlbedo(float2 coord)
+#ifndef TRIPLANAR_ENABLE
+#define TRIPLANAR_ENABLE 0
+#endif
+
+float3 GetAlbedo(float2 coord, float3 worldPos, float3 normal)
 {
-#if ALBEDO_MAP_FROM
+#if TRIPLANAR_ENABLE
+	float3 albedoColor = SampleTriplanar(AlbedoMapSamp, worldPos, normal, triplanarScale).rgb;
+#elif ALBEDO_MAP_FROM
 	#if ALBEDO_MAP_UV_FLIP
 		coord = TransformUV(coord, ALBEDO_MAP_UV_FLIP);
 	#endif
@@ -1492,7 +1511,7 @@ GbufferParam MaterialPS(
 #endif
 
 	MaterialParam material;
-	material.albedo = GetSubAlbedo(GetAlbedo(coord0), coord0);
+	material.albedo = GetSubAlbedo(GetAlbedo(coord0, worldPos.xyz, normal), coord0);
 	material.normal = GetNormal(normal, worldPos.xyz, coord0);
 	material.smoothness = GetSmoothness(coord0);
 	material.metalness = GetMetalness(coord0);
@@ -1542,7 +1561,7 @@ GbufferParam Material2PS(
 #endif
 
 	MaterialParam material;
-	material.albedo = GetSubAlbedo(GetAlbedo(coord0), coord0);
+	material.albedo = GetSubAlbedo(GetAlbedo(coord0, worldPos.xyz, normal), coord0);
 	material.normal = GetNormal(normal, worldPos.xyz, coord0);
 	material.smoothness = GetSmoothness(coord0);
 	material.metalness = GetMetalness(coord0);

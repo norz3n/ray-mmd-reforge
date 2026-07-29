@@ -45,11 +45,14 @@ float2 Rotate(float2 pos, float2 rotation)
 float ShadowPCF(sampler source, float2 coord, float radius, float receiverDepth, float2 rotation)
 {
 	float shadow = 0.0;
+	// ponytail: precalculating basis vectors saves 4 multiplications per Poisson sample with 100% exact result
+	float2 rotR = rotation * radius;
+	float2 rotRPerp = float2(-rotR.y, rotR.x);
 
 	[unroll]
 	for (int i = 0; i < SHADOW_POISSON_COUNT; i++) 
 	{
-		float2 pos = coord + Rotate(Poisson[i] * radius, rotation);
+		float2 pos = coord + Poisson[i].x * rotR + Poisson[i].y * rotRPerp;
 		shadow += saturate(exp(-20 * (receiverDepth - tex2Dlod(source, float4(pos, 0, 0)).r)));
 	}
 

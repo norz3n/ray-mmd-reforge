@@ -358,6 +358,17 @@ Shading Model ID
 * ##### const float3 customB = 0.0 ~ 1.0; (sRGB color-space)
 * ##### const float2 customBMapLoopNum = 1.0; (see [albedoMapLoopNum](#albedoMapLoopNum))
 
+Triplanar Projection:
+---------------------
+* ##### TRIPLANAR_ENABLE
+    Set `TRIPLANAR_ENABLE` to `1` in your material `.fx` file to project textures seamlessly without UV unwrap across world-space axes (X, Y, Z).
+
+    `0` . Disabled (default UV sampling)  
+    `1` . Enable Triplanar Projection  
+
+* ##### const float triplanarScale = 0.1;
+    Tile scaling factor in world-space coordinates.
+
 FAQ:
 --------------------
 * What is sRGB-color and Gamma
