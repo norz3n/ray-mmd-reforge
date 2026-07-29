@@ -46,6 +46,14 @@ bool TraceScreenSpaceRay(float3 viewPosition, float3 viewReflect, float maxDista
 	float4 endPosition = float4(viewPosition + viewReflect * maxDistance, 1);
 	float4 endScreenPos = mul(endPosition, matProject);
 
+	// ponytail: early discard for rays extending beyond screen boundaries
+	float2 borderCheck = abs(endScreenPos.xy / max(1e-5, endScreenPos.w) * 2.0 - 1.0) - 1.0;
+	if (borderCheck.x > 0.0 || borderCheck.y > 0.0)
+	{
+		hitPixel = 0;
+		return false;
+	}
+
 	startScreenPos.xy = startScreenPos.xy * float2(0.5, -0.5) + 0.5 * startScreenPos.w;
 	endScreenPos.xy = endScreenPos.xy * float2(0.5, -0.5) + 0.5 * endScreenPos.w;
 
@@ -57,21 +65,24 @@ bool TraceScreenSpaceRay(float3 viewPosition, float3 viewReflect, float maxDista
 	float bestLen = 0;
 	float bestIntervalSize = maxDistance / (SSR_SAMPLER_COUNT * 1.6) * mSSRThreshold;
 
+	float4 sampleStep = deltaScreenPos * stepSize;
+	float4 curPos = startScreenPos + deltaScreenPos * stepLength;
+
+	// ponytail: iterative vector addition replaces expensive 4D matrix/vector multiplies per step
+	[loop]
 	for (int i = 0; i < SSR_SAMPLER_COUNT; i += 4)
 	{
-		float4 sampleLength = stepLength + stepSize * float4(0, 1, 2, 3);
-
-		float4 samplePos1 = startScreenPos + deltaScreenPos * sampleLength.x;
-		float4 samplePos2 = startScreenPos + deltaScreenPos * sampleLength.y;
-		float4 samplePos3 = startScreenPos + deltaScreenPos * sampleLength.z;
-		float4 samplePos4 = startScreenPos + deltaScreenPos * sampleLength.w;
+		float4 samplePos1 = curPos;
+		float4 samplePos2 = curPos + sampleStep;
+		float4 samplePos3 = curPos + sampleStep * 2;
+		float4 samplePos4 = curPos + sampleStep * 3;
 		float4 samplePosZ = float4(samplePos1.w, samplePos2.w, samplePos3.w, samplePos4.w);
 
 		float4 sampleDepth;
-		sampleDepth.r = tex2Dproj(Gbuffer8Map, samplePos1).r;
-		sampleDepth.g = tex2Dproj(Gbuffer8Map, samplePos2).r;
-		sampleDepth.b = tex2Dproj(Gbuffer8Map, samplePos3).r;
-		sampleDepth.a = tex2Dproj(Gbuffer8Map, samplePos4).r;
+		sampleDepth.r = tex2Dlod(Gbuffer8Map, float4(samplePos1.xy / samplePos1.w, 0, 0)).r;
+		sampleDepth.g = tex2Dlod(Gbuffer8Map, float4(samplePos2.xy / samplePos2.w, 0, 0)).r;
+		sampleDepth.b = tex2Dlod(Gbuffer8Map, float4(samplePos3.xy / samplePos3.w, 0, 0)).r;
+		sampleDepth.a = tex2Dlod(Gbuffer8Map, float4(samplePos4.xy / samplePos4.w, 0, 0)).r;
 
 		float4 depthDiff = samplePosZ - abs(sampleDepth);
 
@@ -88,10 +99,11 @@ bool TraceScreenSpaceRay(float3 viewPosition, float3 viewReflect, float maxDista
 			float searchStep = stepSize * 0.5;
 			currentLen -= searchStep;
 
+			[loop]
 			for(int j = 0; j < 5; j++)
 			{
 				float4 searchPos = startScreenPos + deltaScreenPos * currentLen;
-				float searchDepth = tex2Dproj(Gbuffer8Map, searchPos).r;
+				float searchDepth = tex2Dlod(Gbuffer8Map, float4(searchPos.xy / searchPos.w, 0, 0)).r;
 				float sDepthDiff = searchPos.w - abs(searchDepth);
 				
 				if(sDepthDiff >= 0.0) 
@@ -105,6 +117,7 @@ bool TraceScreenSpaceRay(float3 viewPosition, float3 viewReflect, float maxDista
 			break;
 		}
 
+		curPos += sampleStep * 4;
 		stepLength += stepSize * 4;
 	}
 

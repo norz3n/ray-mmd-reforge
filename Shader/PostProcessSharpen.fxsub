@@ -1,16 +1,29 @@
+// ponytail: AMD FidelityFX CAS (Contrast Adaptive Sharpening) with NaN protection and scalable 0..1 sharpness
+float3 CASSharpen(sampler2D source, float2 coord, float2 offset, float sharpness)
+{
+	float3 e = tex2Dlod(source, float4(coord, 0, 0)).rgb;
+	float3 b = tex2Dlod(source, float4(coord + float2(0, -offset.y), 0, 0)).rgb;
+	float3 d = tex2Dlod(source, float4(coord + float2(-offset.x, 0), 0, 0)).rgb;
+	float3 f = tex2Dlod(source, float4(coord + float2(offset.x, 0), 0, 0)).rgb;
+	float3 h = tex2Dlod(source, float4(coord + float2(0, offset.y), 0, 0)).rgb;
+
+	float3 minColor = min(min(b, d), min(f, h));
+	float3 maxColor = max(max(b, d), max(f, h));
+
+	// AMD CAS peak weight clamping (-0.1875 max negative weight prevents 1 + 4*w division by zero)
+	float3 w = sqrt(saturate(min(minColor, 1.0 - maxColor) / max(maxColor, 1e-5))) * (-0.1875 * saturate(sharpness));
+	float3 denom = max(0.01, 1.0 + 4.0 * w);
+
+	float3 result = (b * w + d * w + f * w + h * w + e) / denom;
+	return saturate(result);
+}
+
+#ifndef POST_SHARPEN_INTENSITY
+#	define POST_SHARPEN_INTENSITY 0.5
+#endif
+
 float4 PostProcessSharpenPS(in float2 coord : TEXCOORD0, uniform sampler2D source, uniform float2 offset) : COLOR
 {
-	float4 color = tex2Dlod(source, float4(coord, 0, 0));
-	float4 shapen = color * 9;
-	shapen -= tex2Dlod(source, float4(coord + float2(offset.x, 0), 0, 0));
-	shapen -= tex2Dlod(source, float4(coord - float2(offset.x, 0), 0, 0));
-	shapen -= tex2Dlod(source, float4(coord + float2(0, offset.y), 0, 0));
-	shapen -= tex2Dlod(source, float4(coord - float2(0, offset.y), 0, 0));
-	shapen -= tex2Dlod(source, float4(coord + float2(offset.x, offset.y), 0, 0));
-	shapen -= tex2Dlod(source, float4(coord - float2(offset.x, offset.y), 0, 0));
-	shapen -= tex2Dlod(source, float4(coord + float2(-offset.x, offset.y), 0, 0));
-	shapen -= tex2Dlod(source, float4(coord - float2(offset.x, -offset.y), 0, 0));
-	shapen = max(0, shapen);
-
-	return float4(ColorDithering(lerp(color.rgb, shapen, 0.06), coord), 1);
+	float3 casColor = CASSharpen(source, coord, offset, POST_SHARPEN_INTENSITY);
+	return float4(ColorDithering(casColor, coord), 1.0);
 }
