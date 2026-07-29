@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Ray-MMD Reforge - Next-generation physically-based rendering for MikuMikuDance">
+    <title>Ray-MMD Reforge</title>
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/webp" href="./pics/branding/reforge_logo.webp">
+    
+    <!-- Google Fonts: Montserrat -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    
+    <!-- Styles -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <a href="#" class="logo-wrapper">
+                <img src="./pics/branding/reforge_logo.webp" alt="Icon" class="brand-logo">
+                <div class="logo-text">RAYMMD<span>REFORGE</span></div>
+            </a>
+            <div class="nav-links">
+                <a href="#features">Features</a>
+                <a href="#showcase">Showcase</a>
+                <a href="https://github.com/norz3n/ray-mmd-reforge" target="_blank" class="btn-primary">GitHub</a>
+            </div>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <div class="hero-content fade-in">
+            <h1>Heavyweight graphics.<br><span class="highlight-text">Reforged for perfection.</span></h1>
+            <p>A modified fork of the original Ray-MMD library, focused on bridging realistic lighting with stylized rendering. We integrated AAA modern graphics techniques to provide a stable, noise-free image out of the box.</p>
+            <div class="hero-buttons">
+                <div class="download-group">
+                    <a href="https://github.com/norz3n/ray-mmd-reforge/archive/refs/heads/master.zip" class="btn-primary btn-large" id="download-btn">Download</a>
+                    <button class="btn-primary btn-large dropdown-toggle" id="download-dropdown-btn">
+                        <i class="ph ph-caret-down"></i>
+                    </button>
+                    <div class="dropdown-menu">
+                        <a href="https://github.com/norz3n/ray-mmd-reforge/releases" id="download-stable">Stable Release</a>
+                        <a href="https://github.com/norz3n/ray-mmd-reforge/archive/refs/heads/master.zip">Latest Commit (Dev build)</a>
+                    </div>
+                </div>
+                <a href="https://github.com/norz3n/ray-mmd-reforge" class="btn-secondary btn-large">View Documentation</a>
+            </div>
+        </div>
+        <!-- Background decorative elements -->
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </header>
+
+    <section id="features" class="features">
+        <div class="section-title fade-in">
+            <h2>Exclusive Features</h2>
+            <p>The definitive MMD rendering experience, re-architected from the ground up.</p>
+        </div>
+        
+        <div class="feature-grid">
+            <div class="feature-card fade-in">
+                <div class="feature-icon"><i class="ph ph-magic-wand"></i></div>
+                <h3>Temporal Anti-Aliasing</h3>
+                <p>Improved edge anti-aliasing and temporal stability to reduce subpixel flickering, providing a stable image on complex meshes.</p>
+            </div>
+            
+            <div class="feature-card fade-in" style="transition-delay: 0.1s;">
+                <div class="feature-icon"><i class="ph ph-cube"></i></div>
+                <h3>Screen Space Voxel GI</h3>
+                <p>Hybrid GI architecture combining voxel grids with screen-space cone tracing for real-time indirect lighting without NaN artifacts.</p>
+            </div>
+            
+            <div class="feature-card fade-in" style="transition-delay: 0.2s;">
+                <div class="feature-icon"><i class="ph ph-circle-half"></i></div>
+                <h3>Hybrid HBAO / SSDO</h3>
+                <p>Horizon-based ambient occlusion and directional occlusion for accurate contact shading and material definition.</p>
+            </div>
+            
+            <div class="feature-card fade-in" style="transition-delay: 0.3s;">
+                <div class="feature-icon"><i class="ph ph-cloud-moon"></i></div>
+                <h3>Percentage-Closer Soft Shadows</h3>
+                <p>Distance-based soft shadows that blur based on the distance from the caster, reducing harsh shadow edges.</p>
+            </div>
+            
+            <div class="feature-card fade-in" style="transition-delay: 0.4s;">
+                <div class="feature-icon"><i class="ph ph-lightning"></i></div>
+                <h3>Optimized SSR</h3>
+                <p>Upgraded Screen Space Reflections using Binary Search and depth-aware blur for improved performance and accuracy.</p>
+            </div>
+            
+            <div class="feature-card fade-in" style="transition-delay: 0.5s;">
+                <div class="feature-icon"><i class="ph ph-user-focus"></i></div>
+                <h3>Contact Shadows</h3>
+                <p>Screen-space raymarched shadows to reduce light leaking and grounding issues, improving spatial grounding.</p>
+            </div>
+        </div>
+    </section>
+
+    <section id="showcase" class="showcase">
+        <div class="section-title fade-in">
+            <h2>Showcase</h2>
+            <p>Experience the bridge between PBR realism and anime stylization.</p>
+        </div>
+        
+        <div class="comparison-container fade-in">
+            <h3 class="comparison-title">SSVGI & PCSS</h3>
+            <div class="comparison-slider">
+                <!-- After Image (Reforge) -->
+                <img src="./pics/miku_showcase_gi.png" alt="After (SSVGI)" class="img-after">
+                <!-- Before Image Wrapper (Original) -->
+                <div class="img-before-wrapper">
+                    <img src="./pics/miku_showcase_without_gi.png" alt="Before (No SSVGI)" class="img-before">
+                </div>
+                <!-- Controls -->
+                <input type="range" min="0" max="100" value="50" class="slider-input">
+                <div class="slider-line"></div>
+                <div class="slider-button"><i class="ph ph-arrows-left-right"></i></div>
+            </div>
+        </div>
+
+        <div class="comparison-container fade-in" style="transition-delay: 0.2s;">
+            <h3 class="comparison-title">SSAO / Hybrid HBAO+SSDO</h3>
+            <div class="comparison-slider">
+                <!-- After Image (Reforge) -->
+                <img src="./pics/stf_showcade_hbssdo.png" alt="After (HBSSDO)" class="img-after">
+                <!-- Before Image Wrapper (Original) -->
+                <div class="img-before-wrapper">
+                    <img src="./pics/stf_showcase_orig_ssao.png" alt="Before (Original SSAO)" class="img-before">
+                </div>
+                <!-- Controls -->
+                <input type="range" min="0" max="100" value="50" class="slider-input">
+                <div class="slider-line"></div>
+                <div class="slider-button"><i class="ph ph-arrows-left-right"></i></div>
+            </div>
+        </div>
+
+        <div class="comparison-container fade-in" style="transition-delay: 0.4s;">
+            <h3 class="comparison-title">Normal-Aware Directional GI</h3>
+            <div class="comparison-slider">
+                <!-- After Image (Reforge) -->
+                <img src="./pics/stf_showcase_normals_with_gi.webp" alt="After (Directional GI)" class="img-after">
+                <!-- Before Image Wrapper (Original) -->
+                <div class="img-before-wrapper">
+                    <img src="./pics/stf_showcase_normals_without_gi.webp" alt="Before (No Directional GI)" class="img-before">
+                </div>
+                <!-- Controls -->
+                <input type="range" min="0" max="100" value="50" class="slider-input">
+                <div class="slider-line"></div>
+                <div class="slider-button"><i class="ph ph-arrows-left-right"></i></div>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <div class="footer-content">
+            <div class="logo-wrapper footer-logo-wrapper">
+                <img src="./pics/branding/reforge_logo.webp" alt="Icon" class="brand-logo">
+                <div class="logo-text">RAYMMD<span>REFORGE</span></div>
+            </div>
+            <div class="footer-credits">
+                <p>Reforged with <i class="ph-fill ph-heart" style="color: #bf616a; vertical-align: middle;"></i> by <a href="https://github.com/norz3n" target="_blank">Norz3n</a>.</p>
+                <p>Based on the original <a href="https://github.com/ray-cast/ray-mmd" target="_blank">Ray-MMD</a> by Rui.</p>
+                <p class="footer-inspired">Integrations inspired by dendewaLAB & ikeno.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
