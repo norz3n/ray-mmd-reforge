@@ -84,12 +84,25 @@ float4 ScreenSpaceDirOccLowPS(
 	float4 sampleOcclustion = 0.0f;
 	float2 sampleRadius = SSDOParams2.w * SSDORadius * ViewportAspect / SSDO_LOW_SAMPLER_COUNT;
 
+	// Precalculate the rotation step outside the loop
+	float stepAngle = 7.0 * PI_2 / SSDO_LOW_SAMPLER_COUNT;
+	float sinStep, cosStep;
+	sincos(stepAngle, sinStep, cosStep);
+
+	// Calculate the starting direction
+	float2 currentDir;
+	sincos(stepAngle + SSDOJitter, currentDir.x, currentDir.y); // x is sin, y is cos
+
 	SSDO_UNROLL
 	for (int i = 1; i <= SSDO_LOW_SAMPLER_COUNT; i++)
 	{
-		float2 angle;
-		sincos(i * 7.0 * PI_2 / SSDO_LOW_SAMPLER_COUNT + SSDOJitter, angle.x, angle.y);
-		sampleRotate[i - 1] = angle * sampleRadius * i * 0.5;
+		sampleRotate[i - 1] = currentDir * sampleRadius * i * 0.5;
+
+		// Rotate vector iteratively for the next step (Multiply-Add instead of sincos)
+		currentDir = float2(
+			currentDir.x * cosStep + currentDir.y * sinStep,
+			currentDir.y * cosStep - currentDir.x * sinStep
+		);
 	}
 
 	SSDO_UNROLL
