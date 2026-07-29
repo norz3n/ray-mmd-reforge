@@ -158,6 +158,24 @@
         </div>
     </section>
 
+    <section id="changelog" class="features" style="padding-top: 0;">
+        <div class="section-title fade-in">
+            <h2>Changelog</h2>
+            <p>Latest updates from Master and Stable branches.</p>
+        </div>
+        
+        <div class="changelog-grid fade-in" style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; max-width: 1200px; margin: 0 auto; padding: 0 2rem;">
+            <div class="changelog-column" style="background: var(--card-bg); padding: 1.5rem; border-radius: 12px; border: 1px solid var(--border-color); min-width: 0;">
+                <h3><i class="ph ph-tag" style="vertical-align: middle; margin-right: 8px; color: #A3BE8C;"></i>Stable Releases</h3>
+                <div id="stable-changelog" style="margin-top: 1rem; display: flex; flex-direction: column; gap: 1rem; max-height: 350px; overflow-y: auto; padding-right: 8px;">Loading...</div>
+            </div>
+            <div class="changelog-column" style="background: var(--card-bg); padding: 1.5rem; border-radius: 12px; border: 1px solid var(--border-color); min-width: 0;">
+                <h3><i class="ph ph-git-commit" style="vertical-align: middle; margin-right: 8px; color: #81A1C1;"></i>Master Commits</h3>
+                <div id="master-changelog" style="margin-top: 1rem; display: flex; flex-direction: column; gap: 1rem; max-height: 350px; overflow-y: auto; padding-right: 8px;">Loading...</div>
+            </div>
+        </div>
+    </section>
+
     <footer>
         <div class="footer-content">
             <div class="logo-wrapper footer-logo-wrapper">

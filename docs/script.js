@@ -92,4 +92,56 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error("Failed to fetch release info:", error);
             });
     }
+
+    // ponytail: minimum changelog logic, unauthenticated GitHub API (limit 60/hr)
+    const stableChangelog = document.getElementById('stable-changelog');
+    if (stableChangelog) {
+        fetch('https://api.github.com/repos/norz3n/ray-mmd-reforge/releases')
+            .then(res => res.json())
+            .then(async data => {
+                const releases = data.slice(0, 3); // Ограничим до 3, чтобы не упереться в лимит API
+                let html = '';
+                for (const release of releases) {
+                    html += `
+                        <div style="border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 0.5rem; margin-bottom: 0.5rem;">
+                            <a href="${release.html_url}" target="_blank" style="color: #A3BE8C; text-decoration: none; font-weight: 600;">${release.name || release.tag_name}</a>
+                            <span style="font-size: 0.85rem; color: #64869e; margin-left: 8px;">${new Date(release.published_at).toLocaleDateString()}</span>
+                            <div style="margin-top: 8px; padding-left: 12px; border-left: 2px solid rgba(163, 190, 140, 0.3);">
+                    `;
+                    try {
+                        const commitsRes = await fetch(`https://api.github.com/repos/norz3n/ray-mmd-reforge/commits?sha=${release.tag_name}&per_page=3`);
+                        const commits = await commitsRes.json();
+                        if (commits && commits.length) {
+                            html += commits.map(commit => `
+                                <div style="font-size: 0.85rem; margin-bottom: 4px; display: flex; gap: 6px; align-items: baseline;">
+                                    <a href="${commit.html_url}" target="_blank" style="color: #81A1C1; text-decoration: none; font-family: monospace; flex-shrink: 0;">${commit.sha.substring(0,7)}</a>
+                                    <span style="color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; width: 100%;">${commit.commit.message.split('\\n')[0]}</span>
+                                </div>
+                            `).join('');
+                        }
+                    } catch(e) {
+                        html += `<div style="font-size: 0.85rem; color: #64869e;">Failed to load commits.</div>`;
+                    }
+                    html += `</div></div>`;
+                }
+                stableChangelog.innerHTML = html || '<p>No releases found.</p>';
+            }).catch(() => stableChangelog.innerHTML = '<p>Failed to load.</p>');
+    }
+
+    const masterChangelog = document.getElementById('master-changelog');
+    if (masterChangelog) {
+        fetch('https://api.github.com/repos/norz3n/ray-mmd-reforge/commits?sha=master')
+            .then(res => res.json())
+            .then(data => {
+                masterChangelog.innerHTML = data.slice(0, 10).map(commit => `
+                    <div style="border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 0.5rem; display: flex; flex-direction: column;">
+                        <div style="display: flex; gap: 6px; align-items: baseline; overflow: hidden;">
+                            <a href="${commit.html_url}" target="_blank" style="color: #81A1C1; text-decoration: none; font-weight: 600; font-family: monospace; flex-shrink: 0;">${commit.sha.substring(0,7)}</a>
+                            <span style="font-size: 0.9rem; color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; width: 100%;">${commit.commit.message.split('\\n')[0]}</span>
+                        </div>
+                        <div style="font-size: 0.8rem; color: #64869e; margin-top: 4px;">by ${commit.commit.author.name} on ${new Date(commit.commit.author.date).toLocaleDateString()}</div>
+                    </div>
+                `).join('') || '<p>No commits found.</p>';
+            }).catch(() => masterChangelog.innerHTML = '<p>Failed to load.</p>');
+    }
 });
