@@ -134,37 +134,37 @@ float ShadingShadow(MaterialParam material, float3 P, float2 screenUV)
 	float angle = InterleavedGradientNoise(screenUV * ViewportSize) * PI_2;
 	float2 rotation = float2(cos(angle), sin(angle));
 
-	float blockerSum = 0;
-	float blockerCount = 0;
+	float blockers = 0.0;
+	float avgBlockerDepth = 0.0;
 
 	[unroll]
 	for (int i = 0; i < PCSS_POISSON_SAMPLES; i++)
 	{
 		float2 offset = RotateSample(PCSS_Poisson[i] * searchRadius, rotation);
 		float sampleDepth = tex2Dlod(ShadowMapSamp, float4(proj.xy + offset, 0, 0)).r;
-		if (sampleDepth < linearDepth - 0.01)
-		{
-			blockerSum += sampleDepth;
-			blockerCount += 1.0;
-		}
+		
+		float isBlocker = step(sampleDepth, linearDepth - 0.01);
+		avgBlockerDepth += sampleDepth * isBlocker;
+		blockers += isBlocker;
 	}
 
-	if (blockerCount < 1.0)
+	if (blockers < 1.0)
 		return 1.0;
 
-	float avgBlockerDepth = blockerSum / blockerCount;
+	avgBlockerDepth /= blockers;
 	float penumbraRatio = PenumbraRadius(lightSize, linearDepth, avgBlockerDepth);
 	float filterSize = ProjectToLight(penumbraRatio, linearDepth, mLightPlaneNear);
 	float filterRadius = clamp(filterSize, 1.0 / SHADOW_MAP_SIZE, 32.0 / SHADOW_MAP_SIZE);
 
-	float2 momentsSum = 0;
+	float visibility = 0.0;
 	[unroll]
 	for (int j = 0; j < PCSS_POISSON_SAMPLES; j++)
 	{
 		float2 offset = RotateSample(PCSS_Poisson[j] * filterRadius, rotation);
-		momentsSum += tex2Dlod(ShadowMapSamp, float4(proj.xy + offset, 0, 0)).rg;
+		float sampleDepth = tex2Dlod(ShadowMapSamp, float4(proj.xy + offset, 0, 0)).r;
+		visibility += step(linearDepth - 0.01, sampleDepth);
 	}
-	float2 shadow = momentsSum / PCSS_POISSON_SAMPLES;
+	float shadow = visibility / PCSS_POISSON_SAMPLES;
 #else
 	float2 shadow = 0.0;
 

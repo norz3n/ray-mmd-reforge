@@ -42,18 +42,50 @@ float2 Rotate(float2 pos, float2 rotation)
 	return float2(pos.x * rotation.x - pos.y * rotation.y, pos.y * rotation.x + pos.x * rotation.y);
 }
 
-float ShadowPCF(sampler source, float2 coord, float radius, float receiverDepth, float2 rotation)
+float FindBlocker(sampler source, float2 coord, float receiverDepth, float searchRadius, float2 rotation)
 {
-	float shadow = 0.0;
-	// ponytail: precalculating basis vectors saves 4 multiplications per Poisson sample with 100% exact result
-	float2 rotR = rotation * radius;
+	float blockers = 0.0;
+	float avgBlockerDepth = 0.0;
+	float2 rotR = rotation * searchRadius;
 	float2 rotRPerp = float2(-rotR.y, rotR.x);
 
 	[unroll]
 	for (int i = 0; i < SHADOW_POISSON_COUNT; i++) 
 	{
 		float2 pos = coord + Poisson[i].x * rotR + Poisson[i].y * rotRPerp;
-		shadow += saturate(exp(-20 * (receiverDepth - tex2Dlod(source, float4(pos, 0, 0)).r)));
+		float sampleDepth = tex2Dlod(source, float4(pos, 0, 0)).r;
+		float isBlocker = step(sampleDepth, receiverDepth - 0.001);
+		avgBlockerDepth += sampleDepth * isBlocker;
+		blockers += isBlocker;
+	}
+
+	return (blockers > 0.0) ? (avgBlockerDepth / blockers) : receiverDepth;
+}
+
+float ShadowPCF(sampler source, float2 coord, float radius, float receiverDepth, float2 rotation, int cascadeIndex)
+{
+	float lightSize = 0.015;
+	float searchRadius = clamp(lightSize, 2.0 / SHADOW_MAP_SIZE, 16.0 / SHADOW_MAP_SIZE);
+	float avgBlockerDepth = FindBlocker(source, coord, receiverDepth, searchRadius, rotation);
+	
+	float cascadeScale = lightCropParams[cascadeIndex].x; 
+	float penumbraWidth = (receiverDepth - avgBlockerDepth) * lightSize * cascadeScale * 0.5;
+	float filterRadius = clamp(penumbraWidth, 1.0 / SHADOW_MAP_SIZE, 32.0 / SHADOW_MAP_SIZE);
+
+	if (filterRadius <= 1.0 / SHADOW_MAP_SIZE)
+	{
+		return step(receiverDepth - 0.001, tex2Dlod(source, float4(coord, 0, 0)).r);
+	}
+
+	float shadow = 0.0;
+	float2 rotR = rotation * filterRadius;
+	float2 rotRPerp = float2(-rotR.y, rotR.x);
+
+	[unroll]
+	for (int i = 0; i < SHADOW_POISSON_COUNT; i++) 
+	{
+		float2 pos = coord + Poisson[i].x * rotR + Poisson[i].y * rotRPerp;
+		shadow += step(receiverDepth - 0.001, tex2Dlod(source, float4(pos, 0, 0)).r);
 	}
 
 	return shadow / SHADOW_POISSON_COUNT;
@@ -103,13 +135,13 @@ float ShadingShadow(MaterialParam material, float3 viewPosition)
 
 	[branch]
 	if (coord.w == 0)
-		shadow = ShadowPCF(PSSM1Samp, coord.xy, radius, receiverDepth, rotation);
+		shadow = ShadowPCF(PSSM1Samp, coord.xy, radius, receiverDepth, rotation, 0);
 	else if (coord.w == 1)
-		shadow = ShadowPCF(PSSM2Samp, coord.xy, radius, receiverDepth, rotation);
+		shadow = ShadowPCF(PSSM2Samp, coord.xy, radius, receiverDepth, rotation, 1);
 	else if (coord.w == 2)
-		shadow = ShadowPCF(PSSM3Samp, coord.xy, radius, receiverDepth, rotation);
+		shadow = ShadowPCF(PSSM3Samp, coord.xy, radius, receiverDepth, rotation, 2);
 	else
-		shadow = ShadowPCF(PSSM4Samp, coord.xy, radius, receiverDepth, rotation);
+		shadow = ShadowPCF(PSSM4Samp, coord.xy, radius, receiverDepth, rotation, 3);
 
 	return shadow;
 }
