@@ -144,6 +144,7 @@ Normal:
     `2` . 以PerturbNormalLQ的方式计算凹凸贴图用作模型的法线. 在小的物体上工作的可能不是很好.  
     `3` . 以PerturbNormalHQ的方式计算凹凸贴图用作模型的法线 (High Quality).  
     `4` . 将RGB的世界空间的法线贴图用于模型的法线.  
+    `5` . 以PerturbNormalUltra的方式计算凹凸贴图用作模型的法线 (Ultra Quality). 使用9个采样的Sobel滤波器.
 
 * ##### NORMAL_MAP_UV_FLIP (see [ALBEDO_MAP_APPLY_SCALE](#ALBEDO_MAP_APPLY_SCALE))
 * ##### NORMAL_MAP_FILE (see [ALBEDO_MAP_FILE](#ALBEDO_MAP_FILE))

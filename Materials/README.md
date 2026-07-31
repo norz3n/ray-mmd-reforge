@@ -153,6 +153,7 @@ check the scene that all `normals` are not `zero-length` (XYZ are the same equal
     `2` . Calculate world-space normal from Grayscale bump map by `PerturbNormalLQ` (Low  Quality). It has no effect on small objects.  
     `3` . Calculate world-space normal from Grayscale bump map by `PerturbNormalHQ` (High Quality).  
     `4` . Calculate world-space normal from RGB world-space map.  
+    `5` . Calculate world-space normal from Grayscale bump map by `PerturbNormalUltra` (Ultra Quality). Uses a 9-tap Sobel filter.
 
 * ##### NORMAL_MAP_UV_FLIP (see [ALBEDO_MAP_APPLY_SCALE](#ALBEDO_MAP_APPLY_SCALE))
 * ##### NORMAL_MAP_FILE (see [ALBEDO_MAP_FILE](#ALBEDO_MAP_FILE))
