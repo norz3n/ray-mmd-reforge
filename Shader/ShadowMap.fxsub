@@ -1,6 +1,10 @@
 #define SHADOW_BLUR_COUNT 6
 #define SHADOW_POISSON_COUNT 25
 
+#if CONTACT_SHADOW_QUALITY >= 1
+#	include "shader/ContactShadow.fxsub"
+#endif
+
 static float4x4 matLightProject = CreateOrthoProject(2, 2, mPSSMDepthZMin, mPSSMDepthZMax);
 static float4x4 matLightView = CreateLightViewMatrix(SunDirection, -SunDirection, mLightDistance);
 static float4x4 matLightViewProject = mul(matLightView, matLightProject);
@@ -181,7 +185,14 @@ float4 ShadowMapGenPS(
 	float3 view = normalize(viewdir);
 	float3 viewPosition = view * material.linearDepth / view.z;
 
-	return ShadingShadow(material, viewPosition);
+	float shadow = ShadingShadow(material, viewPosition);
+
+#if CONTACT_SHADOW_QUALITY >= 1
+	float3 L = mul(-SunDirection, (float3x3)matView);
+	shadow *= GetContactShadow(viewPosition, L, coord, material.linearDepth);
+#endif
+
+	return shadow;
 }
 
 #if SHADOW_BLUR_COUNT
