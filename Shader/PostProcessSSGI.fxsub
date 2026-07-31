@@ -20,7 +20,7 @@
 #	define VXGI_CONE_COUNT 16
 #endif
 
-#include "shader/Voxelize.fxsub"
+
 
 // ponytail: Screen-Space Voxel Cone Tracing performs 3D cone marching across G-buffer volumes with thickness continuity and near-distance boost. Upgrade path: Full 3D clipmap atlas packing.
 
