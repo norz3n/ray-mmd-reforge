@@ -164,7 +164,7 @@ float3 SpecularBRDF_GGXAniso(float3 N, float3 H, float nh, float nl, float vh, f
 
 float3 ClothShading(MaterialParam material, float nh, float nl, float vh, float nv, float roughness, float normalizeFactor, out float albedoScaling)
 {
-	float clampedSheenRoughness = max(material.smoothness, 1e-4f);
+	float clampedSheenRoughness = max(roughness, 1e-4f);
 	float invAlpha = 1.0f / clampedSheenRoughness;
 	
 	float cos2h = nh * nh;
@@ -172,7 +172,8 @@ float3 ClothShading(MaterialParam material, float nh, float nl, float vh, float 
 	
 	float D_Charlie = (2.0f + invAlpha) * pow(sin2h, invAlpha * 0.5f) * 0.159154943f;
 	
-	float denominator = 4.0f * (nl + nv - nl * nv) + 1e-5f;
+	// 0.05f epsilon prevents mathematical explosion (singularity) at grazing angles!
+	float denominator = 4.0f * (nl + nv - nl * nv) + 0.05f;
 	float V_Neubelt = 1.0f / denominator;
 	
 	float3 sheenColor = material.customDataB;

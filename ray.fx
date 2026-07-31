@@ -210,7 +210,6 @@ technique DeferredLighting<
 	"RenderDepthStencilTarget=DepthBuffer;"
 	"ClearSetColor=BackColor;"
 	"ClearSetDepth=ClearDepth;"
-	"ClearSetStencil=ClearStencil;"
 	"Clear=Color;"
 	"Clear=Depth;"
 	"ScriptExternal=Color;"

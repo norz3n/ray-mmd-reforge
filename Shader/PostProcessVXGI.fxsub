@@ -143,6 +143,18 @@ float4 VoxelConeTracingPassPS(
 			{
 				hitColor = lerp(hitColor, hitColor * float3(1.12, 0.88, 0.78), 0.35);
 			}
+			else if (sampleLightModel == SHADINGMODELID_ANISOTROPY || sampleLightModel == SHADINGMODELID_CLOTH)
+			{
+				// Hair specular is extremely intense and causes fake "radioactive" glowing in SSGI.
+				// We aggressively clamp its luminance when it acts as a GI emitter.
+				if (hitLum > 0.1)
+				{
+					hitColor *= (0.1 / hitLum);
+					hitLum = 0.1;
+				}
+				// Desaturate slightly to avoid neon-colored bleeding
+				hitColor = lerp(hitLum.rrr, hitColor, 0.5);
+			}
 
 			// Soft Reinhard-style luminance compression
 			if (hitLum > 0.8)
@@ -156,7 +168,9 @@ float4 VoxelConeTracingPassPS(
 
 			float emtNdotL = saturate(dot(sampleNormal, -coneDirView) * 0.7 + 0.3);
 			float nearBoost = SSGINearDistanceBoost(dist, mVXGIScale * 35.0);
-			float distAtten = (1.0 / (1.0 + dist * dist * 0.001)) * nearBoost;
+			// ponytail: increased distance attenuation coefficient from 0.001 to 0.025 
+			// to stop radiosity from illuminating the entire zipcode
+			float distAtten = (1.0 / (1.0 + dist * dist * 0.025)) * nearBoost;
 
 			float weight = rcvNdotL * emtNdotL * distAtten * depthWeight;
 

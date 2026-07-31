@@ -198,9 +198,7 @@ float2 FindBlocker(sampler source, float2 coord, float receiverDepth, float sear
 float SampleCascadeShadowSingle(sampler source, float2 coord, float receiverDepth, float2 rotation, float lightSize)
 {
 #if PCSS_SHADOW_ENABLE
-	float linearDepth = receiverDepth * mPSSMDepthZMax;
-	float searchRadius = SearchRegionRadius(lightSize, linearDepth, mPSSMDepthZMin);
-	searchRadius = clamp(searchRadius, 2.0 / SHADOW_MAP_SIZE, 16.0 / SHADOW_MAP_SIZE);
+	float searchRadius = clamp(lightSize, 2.0 / SHADOW_MAP_SIZE, 16.0 / SHADOW_MAP_SIZE);
 
 	float2 blocker = FindBlocker(source, coord, receiverDepth, searchRadius, rotation);
 
@@ -208,8 +206,8 @@ float SampleCascadeShadowSingle(sampler source, float2 coord, float receiverDept
 		return 1.0;
 
 	float avgBlockerDepth = blocker.x;
-	float penumbraRatio = PenumbraRadius(lightSize, receiverDepth, avgBlockerDepth);
-	float filterSize = ProjectToLight(penumbraRatio, linearDepth, mPSSMDepthZMin);
+	// Orthographic penumbra: linearly proportional to blocker distance, no perspective division needed!
+	float filterSize = (receiverDepth - avgBlockerDepth) * lightSize * 150.0;
 	float filterRadius = clamp(filterSize, 1.0 / SHADOW_MAP_SIZE, 32.0 / SHADOW_MAP_SIZE);
 
 	float2 momentsSum = 0;
@@ -231,16 +229,16 @@ float SampleCascadeShadowMap(int index, float2 coord, float receiverDepth, float
 {
 	[branch]
 	if (index == 0)
-		return SampleCascadeShadowSingle(PSSM1Samp, coord, receiverDepth, rotation, 0.04);
+		return SampleCascadeShadowSingle(PSSM1Samp, coord, receiverDepth, rotation, 0.015);
 	else if (index == 1)
-		return SampleCascadeShadowSingle(PSSM2Samp, coord, receiverDepth, rotation, 0.02);
+		return SampleCascadeShadowSingle(PSSM2Samp, coord, receiverDepth, rotation, 0.0075);
 	else if (index == 2)
-		return SampleCascadeShadowSingle(PSSM3Samp, coord, receiverDepth, rotation, 0.01);
+		return SampleCascadeShadowSingle(PSSM3Samp, coord, receiverDepth, rotation, 0.003);
 	else
-		return SampleCascadeShadowSingle(PSSM4Samp, coord, receiverDepth, rotation, 0.003);
+		return SampleCascadeShadowSingle(PSSM4Samp, coord, receiverDepth, rotation, 0.001);
 }
 
-float ShadingShadow(MaterialParam material, float3 viewPosition)
+float ShadingShadow(MaterialParam material, float3 viewPosition, float2 screenUV)
 {
 	float4 proj = mul(float4(viewPosition, 1), matLightProjectFromCameraView);
 
@@ -270,7 +268,7 @@ float ShadingShadow(MaterialParam material, float3 viewPosition)
 	float depthSlope = ShadowSlopeScaledBias(proj.z / mPSSMDepthZMax) * mPSSMDepthZMax;
 	receiverDepth -= (material.linearDepth + depthSlope * (1.0 + normalBias * 2.0)) * 0.0035 + max(0, material.linearDepth - 100) * 0.007;
 
-	float angle = PseudoRandom(coord.xy * SHADOW_MAP_SIZE) * PI_2;
+	float angle = InterleavedGradientNoise(screenUV * ViewportSize) * PI_2;
 	float2 rotation = float2(cos(angle), sin(angle));
 
 	float shadow = SampleCascadeShadowMap(int(coord.w), coord.xy + ShadowMapOffset, receiverDepth, rotation);
@@ -355,7 +353,7 @@ void LightSourcePS(
 
 	float shadow = 1;
 #if SHADOW_MAP_FROM >= 1
-	shadow = ShadingShadow(materialAlpha, P2);
+	shadow = ShadingShadow(materialAlpha, P2, coord.xy / coord.w);
 #if CONTACT_SHADOW_QUALITY >= 1
 	shadow *= GetContactShadow(P2, viewLightDirection, coord.xy / coord.w, materialAlpha.linearDepth);
 #endif

@@ -118,7 +118,7 @@ float2 RotateSample(float2 pos, float2 rotation)
 	return float2(pos.x * rotation.x - pos.y * rotation.y, pos.y * rotation.x + pos.x * rotation.y);
 }
 
-float ShadingShadow(MaterialParam material, float3 P)
+float ShadingShadow(MaterialParam material, float3 P, float2 screenUV)
 {
 	float4 proj = mul(float4(P, 1), matLightProjectFromCameraView);
 	proj.xy = PosToCoord(proj.xy / proj.w);
@@ -131,7 +131,7 @@ float ShadingShadow(MaterialParam material, float3 P)
 	float searchRadius = SearchRegionRadius(lightSize, linearDepth, mLightPlaneNear);
 	searchRadius = clamp(searchRadius, 2.0 / SHADOW_MAP_SIZE, 16.0 / SHADOW_MAP_SIZE);
 
-	float angle = PseudoRandom(proj.xy * SHADOW_MAP_SIZE) * PI_2;
+	float angle = InterleavedGradientNoise(screenUV * ViewportSize) * PI_2;
 	float2 rotation = float2(cos(angle), sin(angle));
 
 	float blockerSum = 0;
@@ -258,7 +258,7 @@ void LightSourcePS(
 
 	float shadow = 1;
 #if SHADOW_MAP_FROM
-	shadow = ShadingShadow(materialAlpha, P2);
+	shadow = ShadingShadow(materialAlpha, P2, texcoord.xy / texcoord.w);
 #if CONTACT_SHADOW_QUALITY >= 1
 	float3 L = normalize(viewLightPosition - P2);
 	shadow *= GetContactShadow(P2, L, texcoord.xy / texcoord.w, materialAlpha.linearDepth);
