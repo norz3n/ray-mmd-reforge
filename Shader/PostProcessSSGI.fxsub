@@ -1,9 +1,9 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////
 //
-//  Ray-MMD Screen-Space Voxel Global Illumination (SS-VXGI)
+//  Ray-MMD Screen-Space Global Illumination (SSGI)
 //  
 //  Reference Architecture & Algorithms:
-//  - Voxel Cone Tracing Concept & D3D9 Atlas Math: ikeno (ikVXGI / ikPolishShader)
+//  - Screen-Space Raymarching & Stochastic Sampling: Optimized Hybrid SSGI Pipeline
 //  - Depth Continuity & Thickness Falloff: dendewaLAB (Ray-LAB)
 //  - Luminance Masking & Early-Out: Karyou / KrSS (KrSS_Heavy2)
 //  - Subsurface Material-Aware Scattering: Sandman / Rui (sdPBR)
@@ -21,9 +21,8 @@
 #endif
 
 
-
-// ponytail: Screen-Space Voxel Cone Tracing performs 3D cone marching across G-buffer volumes with thickness continuity and near-distance boost. Upgrade path: Full 3D clipmap atlas packing.
-
+// Screen-Space Global Illumination performs optimized raymarching across G-buffer 
+// with thickness continuity and near-distance boost for accurate indirect lighting.
 float FetchLinearDepthVX(float2 uv)
 {
 	return tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).r;
@@ -158,7 +157,7 @@ float4 VoxelConeTracingPassPS(
 				continue;
 
 			// Material-Aware Subsurface Tinting (from sdPBR)
-			// ponytail: fast lightModel extraction directly from cached Gbuffer8Map.a avoids 4-MRT fetches and GBuffer decoding
+			// Fast lightModel extraction directly from cached Gbuffer8Map.a avoids 4-MRT fetches and GBuffer decoding
 			int sampleLightModel = (int)floor(sampleGbuffer8.a);
 			if (sampleLightModel == SHADINGMODELID_SKIN)
 			{
@@ -189,7 +188,7 @@ float4 VoxelConeTracingPassPS(
 
 			float emtNdotL = saturate(dot(sampleNormal, -coneDirView) * 0.7 + 0.3);
 			float nearBoost = SSGINearDistanceBoost(dist, mVXGIScale * 35.0);
-			// ponytail: increased distance attenuation coefficient from 0.001 to 0.025 
+			// Increased distance attenuation coefficient from 0.001 to 0.025 
 			// to stop radiosity from illuminating the entire zipcode
 			float distAtten = (1.0 / (1.0 + dist * dist * 0.025)) * nearBoost;
 
