@@ -41,36 +41,19 @@ float3 SubsurfaceShadingPennerSkin(MaterialParam material, float3 N, float3 L)
 
 float3 SubsurfaceShadingPreIntegratedSkin(MaterialParam material, float3 N, float3 L)
 {
-	float nl = saturate(dot(N, L) * 0.5 + 0.5);
+	float ndotl = dot(N, L);
 	float curvature = material.customDataA;
-	float curva = (1.0 / madd(curvature, 0.5 - 0.0625, 0.0625) - 2.0) / (16.0 - 2.0);
-	float oneMinusCurva = 1.0 - curva;
-
-	float3 rangeMin = float3(0.0, 0.3, 0.3);
-	float3 rangeMax = float3(1.0, 0.7, 0.7);
-	float3 offset = float3(0.0, 0.06, 0.06);
-	float3 t = saturate(madd(nl, 1.0 / (rangeMax - rangeMin), (offset + rangeMin) / (rangeMin - rangeMax)));
-	float3 lowerLine = (t * t) * float3(0.65, 0.5, 0.9);
-	lowerLine.r += 0.045;
-	lowerLine.b *= t.b;
-
-	float3 m1 = float3(1.75, 2.0, 1.97);
-	float3 m2 = float3(1.95, 2.0, 2.0);
-
-	float3 lerpMin = float3(0.0, 0.35, 0.35);
-	float3 lerpMax = float3(1.0, 0.7 , 0.6);
-	float3 lerpT = saturate(madd(nl, 1.0 / (lerpMax - lerpMin), lerpMin / (lerpMin - lerpMax)));
-
-	float3 upperLine1 = saturate(madd(nl, m1, float3(0.99, 0.99, 0.99) -m1));
-	float3 upperLine2 = saturate(madd(nl, m2, float3(0.99, 0.99, 1.0) - m2));
-
-	float3 curve1 = lerp(lowerLine, upperLine1, lerpT * lerpT);
-	float3 curve2 = upperLine2;
-
-	float oneMinusCurva2 = oneMinusCurva * oneMinusCurva;
-
-	float3 brdf = lerp(curve1, curve2, madd(oneMinusCurva2, -1.0 * oneMinusCurva2, 1.0));
-
+	float scatter = saturate(curvature * 2.5f);
+	
+	float3 wrap = float3(0.6f, 0.2f, 0.05f) * scatter;
+	float3 ndotl_wrap = saturate((ndotl + wrap) / (1.0f + wrap));
+	float3 scatter_profile = ndotl_wrap * ndotl_wrap;
+	
+	float3 energy_normalization = 1.0f / (1.0f + wrap * 0.5f);
+	float edge_mask = saturate(1.0f - abs(ndotl));
+	float3 blood_scatter = float3(0.3f, 0.0f, 0.0f) * edge_mask * scatter * energy_normalization;
+	
+	float3 brdf = (scatter_profile * energy_normalization) + blood_scatter;
 	return material.customDataB * brdf;
 }
 

@@ -28,3 +28,4 @@ Fog/VolumetricFog
 .venv/
 .agents/
 /internal_stuff
+/ref-docs

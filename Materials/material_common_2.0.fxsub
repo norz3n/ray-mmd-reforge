@@ -1550,6 +1550,16 @@ GbufferParam MaterialPS(
 	material.metalness = GetMetalness(coord0);
 	material.specular = GetSpecular(coord0);
 	material.customDataA = GetCustomDataA(coord0);
+#if CUSTOM_ENABLE == 1 // SHADINGMODELID_SKIN
+	float3 ddxP = ddx(worldPos.xyz);
+	float3 ddyP = ddy(worldPos.xyz);
+	float3 ddxN = ddx(normal); // normal is the geometric normal before normal map
+	float3 ddyN = ddy(normal);
+	float deltaP_sq = dot(ddxP, ddxP) + dot(ddyP, ddyP);
+	float deltaN_sq = dot(ddxN, ddxN) + dot(ddyN, ddyN);
+	float curvature = sqrt(deltaN_sq / (deltaP_sq + 1e-5f));
+	material.customDataA = saturate(curvature * material.customDataA * 50.0f); // Multiply base parameter by screen-space curvature
+#endif
 	material.customDataB = GetCustomDataB(coord0);
 	material.emissive = GetEmissiveColor(coord0);
 	material.emissiveIntensity = GetEmissiveIntensity();
@@ -1600,6 +1610,16 @@ GbufferParam Material2PS(
 	material.metalness = GetMetalness(coord0);
 	material.specular = GetSpecular(coord0);
 	material.customDataA = GetCustomDataA(coord0);
+#if CUSTOM_ENABLE == 1 // SHADINGMODELID_SKIN
+	float3 ddxP = ddx(worldPos.xyz);
+	float3 ddyP = ddy(worldPos.xyz);
+	float3 ddxN = ddx(normal);
+	float3 ddyN = ddy(normal);
+	float deltaP_sq = dot(ddxP, ddxP) + dot(ddyP, ddyP);
+	float deltaN_sq = dot(ddxN, ddxN) + dot(ddyN, ddyN);
+	float curvature = sqrt(deltaN_sq / (deltaP_sq + 1e-5f));
+	material.customDataA = saturate(curvature * material.customDataA * 50.0f);
+#endif
 	material.customDataB = GetCustomDataB(coord0);
 	material.emissive = GetEmissiveColor(coord0);
 	material.emissiveIntensity = GetEmissiveIntensity();
