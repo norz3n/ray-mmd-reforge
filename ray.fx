@@ -133,7 +133,7 @@ static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceB
 #endif
 
 #if GI_ENABLE
-#	include "shader/PostProcessVXGI.fxsub"
+#	include "shader/PostProcessSSGI.fxsub"
 #endif
 
 #if BOKEH_QUALITY

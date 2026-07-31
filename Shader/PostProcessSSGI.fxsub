@@ -75,10 +75,22 @@ float4 VoxelConeTracingPassPS(
 
 	// Continuous per-pixel random rotation jitter to eliminate directional streaks
 	float2 pixelPos = coord.xy * ViewportSize;
-	float jitter = PseudoRandom(pixelPos + float2(frac(time * 0.0314), frac(time * 0.0173)));
+	// Interleaved Gradient Noise (IGN) for low-discrepancy stochastic sampling
+	// Replaces expensive texture fetch and reduces banding
+	float2 screenPos = pixelPos + time * 60.0 * float2(0.61803398875, 0.61803398875);
+	float3 magic = float3(0.06711056, 0.00583715, 52.9829189);
+	float jitter = frac(magic.z * frac(dot(screenPos, magic.xy)));
 
 	float3 accumRadiance = 0;
 	float accumWeight = 0.0001;
+
+	// Precompute base angles to avoid expensive sin/cos inside the loop
+	float initialAngle = jitter * PI_2;
+	const float angleStep = 2.399963229728; // Golden ratio angle
+	float cosAngleStep = cos(angleStep);
+	float sinAngleStep = sin(angleStep);
+	float cosAngle = cos(initialAngle);
+	float sinAngle = sin(initialAngle);
 
 	// Fibonacci Hemisphere Cone Probing
 	[loop]
@@ -87,16 +99,18 @@ float4 VoxelConeTracingPassPS(
 		float radiusNoise = frac(jitter * 7.123 + float(i) * 0.3183);
 		float normIndex = (float(i) + 0.5 + radiusNoise * 0.5) / float(VXGI_CONE_COUNT);
 
-		// Golden ratio angle rotation + per-pixel jitter
-		float angle = (float(i) * 2.399963229728) + (jitter * PI_2);
-		float cosAngle = cos(angle);
-		float sinAngle = sin(angle);
-
 		float coneSpread = saturate(0.85 * (mVXGIConeAngle * 2.0));
 		float cosTheta = sqrt(1.0 - normIndex * coneSpread);
 		float sinTheta = sqrt(normIndex * coneSpread);
 
 		float3 coneLocal = float3(cosAngle * sinTheta, sinAngle * sinTheta, cosTheta);
+
+		// Incrementally rotate the angle for the next iteration using a 2D matrix
+		float nextCos = cosAngle * cosAngleStep - sinAngle * sinAngleStep;
+		float nextSin = sinAngle * cosAngleStep + cosAngle * sinAngleStep;
+		cosAngle = nextCos;
+		sinAngle = nextSin;
+
 		float3 coneDirWorld = coneLocal.x * T + coneLocal.y * B + coneLocal.z * worldNormal;
 		float3 coneDirView = mul(coneDirWorld, (float3x3)matView);
 
@@ -122,13 +136,20 @@ float4 VoxelConeTracingPassPS(
 
 			float4 sampleGbuffer8 = tex2Dlod(Gbuffer8Map, float4(sampleUV, 0, 0));
 			float sampleDepth = sampleGbuffer8.r;
-			float3 sampleNormal = FetchViewNormalVX(sampleUV);
+			
+			// Adaptive Stepping: Early out for skybox to save ALU
+			if (sampleDepth >= 1000.0) continue;
 
 			float depthDelta = (sampleViewPos.z - sampleDepth) - mVXGIBias;
 			float rawDepthWeight = SSGIDepthContinuityWeight(depthDelta, viewPosition.z, dist);
 			float depthWeight = lerp(1.0, rawDepthWeight, mVXGIThicknessWeight);
-			if (!(depthWeight > 0.001)) continue;
+			
+			// If depthWeight is zero, the ray went behind a thick object. 
+			// Screen-space data is no longer valid (occluded). 
+			// Stop marching to prevent light leaking and save ALU.
+			if (!(depthWeight > 0.001)) break;
 
+			float3 sampleNormal = FetchViewNormalVX(sampleUV);
 			float3 hitColor = tex2Dlod(ShadingMapSamp, float4(sampleUV, 0, 0)).rgb;
 
 			float hitLum = dot(hitColor, float3(0.299, 0.587, 0.114));
@@ -220,8 +241,11 @@ float4 VoxelGIBlurPS(
 		float depthDiff1 = abs(depth1 - centerDepth) / max(centerDepth, 0.1);
 		float depthDiff2 = abs(depth2 - centerDepth) / max(centerDepth, 0.1);
 
-		float w1 = exp(-r * r * 0.03 - depthDiff1 * adaptiveSharpness) * saturate(dot(normal1, centerNormal));
-		float w2 = exp(-r * r * 0.03 - depthDiff2 * adaptiveSharpness) * saturate(dot(normal2, centerNormal));
+		// Optimize weights by replacing expensive exp() with rational approximation
+		// and precomputing the constant spatial weight to save heavy ALU cycles
+		float spatialWeight = exp(-float(r * r) * 0.03);
+		float w1 = spatialWeight / (1.0 + depthDiff1 * adaptiveSharpness) * saturate(dot(normal1, centerNormal));
+		float w2 = spatialWeight / (1.0 + depthDiff2 * adaptiveSharpness) * saturate(dot(normal2, centerNormal));
 
 		totalColor += tex2Dlod(source, float4(uv1, 0, 0)) * w1;
 		totalColor += tex2Dlod(source, float4(uv2, 0, 0)) * w2;
