@@ -578,16 +578,19 @@ float3 PerturbNormalLQ(float3 N, float3 P, float height)
 #endif
 
 #if NORMAL_MAP_TYPE == 3 || NORMAL_SUB_MAP_TYPE == 3
-float3 PerturbNormalHQ(sampler source, float2 coord, float center)
+float3 PerturbNormalHQ(sampler source, float2 coord)
 {
 	float e = 0.001; // Fixed texel offset for camera independence
+	float center = tex2D(source, coord).x;
 	float right = tex2D(source, coord + float2(e, 0)).x;
 	float bottom = tex2D(source, coord + float2(0, e)).x;
 
-	float slope1 = right - center;
-	float slope2 = bottom - center;
+	float slope1 = center - right;
+	float slope2 = center - bottom;
 
-	return normalize(float3(slope1, slope2, e));
+	// Scale slopes to match the visual intensity of LQ bump mapping
+	float bumpIntensity = 50.0;
+	return normalize(float3(slope1 * bumpIntensity, slope2 * bumpIntensity, 1.0));
 }
 #endif
 
@@ -611,12 +614,14 @@ float3 PerturbNormalUltra(sampler source, float2 coord)
 	float bc = tex2D(source, coord + float2( 0,  e)).x;
 	float br = tex2D(source, coord + float2( e,  e)).x;
 
-	// Compute Sobel gradients
-	float slopeX = (tr + 2.0 * mr + br) - (tl + 2.0 * ml + bl);
-	float slopeY = (bl + 2.0 * bc + br) - (tl + 2.0 * tc + tr);
+	// Compute Sobel gradients (inverted to match normal mapping conventions)
+	float slopeX = (tl + 2.0 * ml + bl) - (tr + 2.0 * mr + br);
+	float slopeY = (tl + 2.0 * tc + tr) - (bl + 2.0 * bc + br);
 	
-	// 8.0 is the normalization factor for the Sobel kernel weight sum
-	return normalize(float3(slopeX, slopeY, e * 8.0));
+	// Normalize by 8.0 for Sobel weight sum. 
+	// Multiply by 50.0 to match visual intensity of LQ bump mapping.
+	float bumpIntensity = 50.0 / 8.0;
+	return normalize(float3(slopeX * bumpIntensity, slopeY * bumpIntensity, 1.0));
 }
 #endif
 #endif
@@ -949,7 +954,7 @@ float3 GetMainNormal(float3 N, float3 P, float2 coord)
 	#if NORMAL_MAP_TYPE == 1
 		tangentNormal.z = sqrt(1.0 - tangentNormal.x * tangentNormal.x - tangentNormal.y * tangentNormal.y);
 	#elif NORMAL_MAP_TYPE == 3
-		tangentNormal = PerturbNormalHQ(NormalMapSamp, coord * normalMapLoopNum, tangentNormal.x);
+		tangentNormal = PerturbNormalHQ(NormalMapSamp, coord * normalMapLoopNum);
 	#elif NORMAL_MAP_TYPE == 5
 		tangentNormal = PerturbNormalUltra(NormalMapSamp, coord * normalMapLoopNum);
 	#elif NORMAL_MAP_TYPE == 2
