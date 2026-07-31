@@ -160,35 +160,47 @@ float3 SpecularBRDF_GGXAniso(float3 N, float3 H, float nh, float nl, float vh, f
 	return spec * fresnel;
 }
 
-float3 SpecularBRDF_Sheen(float nh, float nl, float vh, float nv, float roughness, float3 specular, float NormalizationFactor)
+#define pow2(x) ((x) * (x))
+
+float3 ClothShading(MaterialParam material, float nh, float nl, float vh, float nv, float roughness, float normalizeFactor, out float albedoScaling)
 {
-	float sin2 = (1 - nh * nh);
-	float spec = (2 + 1 / roughness) * pow(sin2, 0.5 / roughness) / (2 * NormalizationFactor);
-
-	float G = 4 * (nl + nv - nl * nv);
-	spec /= G;
-
-	float3 f0 = specular;
-	float3 fresnel = fresnelSchlick(f0, 1.0, vh);
-
-	return fresnel * spec;
-}
-
-float3 SpecularBRDF_Velvet(float nh, float nl, float vh, float nv, float roughness, float3 specular, float NormalizationFactor)
-{
-	float A = 4;
-	float nh2 = nh * nh;
-	float spec = nh2 / (1 - nh2);
-	float sin4 = pow2(1.0 - nh2);
-	spec = (1 + A * exp(-spec / roughness) / sin4) / ((1 + A * roughness) * NormalizationFactor);
-
-	float G = 4 * (nl + nv - nl * nv);
-	spec /= G;
-
-	float3 f0 = specular;
-	float3 fresnel = fresnelSchlick(f0, 1.0, vh);
-
-	return fresnel * spec;
+	float clampedSheenRoughness = max(material.smoothness, 1e-4f);
+	float invAlpha = 1.0f / clampedSheenRoughness;
+	
+	float cos2h = nh * nh;
+	float sin2h = max(1.0f - cos2h, 0.0078125f);
+	
+	float D_Charlie = (2.0f + invAlpha) * pow(sin2h, invAlpha * 0.5f) * 0.159154943f;
+	
+	float denominator = 4.0f * (nl + nv - nl * nv) + 1e-5f;
+	float V_Neubelt = 1.0f / denominator;
+	
+	float3 sheenColor = material.customDataB;
+	float3 sheenTerm = sheenColor * (D_Charlie * V_Neubelt);
+	
+	float r2 = pow2(clampedSheenRoughness);
+	float isSmooth = step(clampedSheenRoughness, 0.25f);
+	
+	float a = lerp(
+		-8.48f * r2 + 14.3f * clampedSheenRoughness - 9.95f,
+		-339.2f * r2 + 161.4f * clampedSheenRoughness - 25.9f,
+		isSmooth
+	);
+	
+	float b = lerp(
+		1.97f * r2 - 3.27f * clampedSheenRoughness + 0.72f,
+		44.0f * r2 - 23.7f * clampedSheenRoughness + 3.26f,
+		isSmooth
+	);
+	
+	float correction = lerp(0.1f * (clampedSheenRoughness - 0.25f), 0.0f, isSmooth);
+	float directionalAlbedo = saturate(exp2(a * nv + b) + correction);
+	
+	float maxSheenColor = max(sheenColor.r, max(sheenColor.g, sheenColor.b));
+	albedoScaling = saturate(1.0f - maxSheenColor * directionalAlbedo);
+	
+	float3 specBase = SpecularBRDF_GGX(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);
+	return (specBase * albedoScaling) + sheenTerm;
 }
 
 float4 SpecularBRDF_ClearCoat(float nh, float nl, float vh, float nv, float roughness, float specular, float NormalizationFactor)
@@ -204,20 +216,23 @@ float4 SpecularBRDF_ClearCoat(float nh, float nl, float vh, float nv, float roug
 	return float4(spec, spec, spec, fresnel);
 }
 
-float3 ClothShading(MaterialParam material, float nh, float nl, float vh, float nv, float roughness, float normalizeFactor)
+float3 ClearCoatShading(MaterialParam material, float nh, float nl, float vh, float nv, float roughness, float normalizeFactor, out float albedoScaling)
 {
-	float3 spec1 = SpecularBRDF_GGX(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);
-	float3 spec2 = SpecularBRDF_Sheen(nh, nl, vh, nv, roughness, material.customDataB, normalizeFactor);
-	float3 spec = lerp(spec1, spec2, material.customDataA);
-	return spec;
-}
-
-float3 ClearCoatShading(MaterialParam material, float nh, float nl, float vh, float nv, float roughness, float normalizeFactor)
-{
-	float clearcoat = max(SmoothnessToRoughness(material.customDataA), 0.001);
-	float3 spec1 = SpecularBRDF_GGX(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);
-	float4 spec2 = SpecularBRDF_ClearCoat(nh, nl, vh, nv, clearcoat, 0.04, normalizeFactor);
-	return lerp(spec1, spec2.rgb, spec2.a);
+	float clearcoatRoughness = max(SmoothnessToRoughness(material.customDataA), 0.001);
+	
+	// ClearCoat layer has fixed IOR 1.5 (F0 = 0.04)
+	float4 spec2 = SpecularBRDF_ClearCoat(nh, nl, vh, nv, clearcoatRoughness, 0.04, normalizeFactor);
+	float clearCoatFresnel = spec2.a;
+	float3 clearCoatSpecular = spec2.rgb;
+	
+	// Light that penetrates the clearcoat is attenuated by (1 - Fc)
+	float attenuation = 1.0f - clearCoatFresnel;
+	albedoScaling = attenuation * attenuation;
+	
+	float3 specBase = SpecularBRDF_GGX(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);
+	
+	// Base specular is attenuated both on the way in and out. Clearcoat specular is added on top.
+	return (specBase * albedoScaling) + clearCoatSpecular;
 }
 
 float3 SubsurfaceShading(MaterialParam material, float3 N, float3 L, float3 V)
@@ -257,12 +272,13 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 #endif
 
 	float3 specular = 0;
+	float albedoScaling = 1.0f;
 
 	[branch]
 	if (material.lightModel == SHADINGMODELID_CLOTH)
-		specular = ClothShading(material, nh, nl, vh, nv, roughness, normalizeFactor);
+		specular = ClothShading(material, nh, nl, vh, nv, roughness, normalizeFactor, albedoScaling);
 	else if (material.lightModel == SHADINGMODELID_CLEAR_COAT)
-		specular = ClearCoatShading(material, nh, nl, vh, nv, roughness, normalizeFactor);
+		specular = ClearCoatShading(material, nh, nl, vh, nv, roughness, normalizeFactor, albedoScaling);
 	else if (material.lightModel == SHADINGMODELID_GLASS)
 		specular = SpecularBRDF_Blinn(nh, nl, vh, nv, material.smoothness, material.specular, normalizeFactor);
 	else if (material.lightModel == SHADINGMODELID_ANISOTROPY)
@@ -270,7 +286,7 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 	else
 		specular = SpecularBRDF_GGX(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);
 
-	return float2x3(diffuse, specular * nl * occlusion);
+	return float2x3(diffuse * albedoScaling, specular * nl * occlusion);
 }
 
 float4 SurfaceEnergy(MaterialParam material, float3 N, float3 Ld, float3 Ls, float3 V, float normalizeFactor = 1.0)
@@ -288,12 +304,13 @@ float4 SurfaceEnergy(MaterialParam material, float3 N, float3 Ld, float3 Ls, flo
 	float shadow = ComputeAmbientMicroOcclusion(nl2, material.visibility);
 
 	float3 specular = 0;
+	float albedoScaling = 1.0f;
 
 	[branch]
 	if (material.lightModel == SHADINGMODELID_CLOTH)
-		specular = ClothShading(material, nh, nl, vh, nv, roughness, normalizeFactor);
+		specular = ClothShading(material, nh, nl, vh, nv, roughness, normalizeFactor, albedoScaling);
 	else if (material.lightModel == SHADINGMODELID_CLEAR_COAT)
-		specular = ClearCoatShading(material, nh, nl, vh, nv, roughness, normalizeFactor);
+		specular = ClearCoatShading(material, nh, nl, vh, nv, roughness, normalizeFactor, albedoScaling);
 	else if (material.lightModel == SHADINGMODELID_GLASS)
 		specular = SpecularBRDF_Blinn(nh, nl, vh, nv, material.smoothness, material.specular, normalizeFactor);
 	else if (material.lightModel == SHADINGMODELID_ANISOTROPY)
@@ -301,5 +318,5 @@ float4 SurfaceEnergy(MaterialParam material, float3 N, float3 Ld, float3 Ls, flo
 	else
 		specular = SpecularBRDF_GGX(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);
 
-	return float4(diffuse, specular) * nl2 * shadow;
+	return float4(diffuse * albedoScaling, specular) * nl2 * shadow;
 }
