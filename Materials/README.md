@@ -359,6 +359,20 @@ Shading Model ID
 * ##### const float3 customB = 0.0 ~ 1.0; (sRGB color-space)
 * ##### const float2 customBMapLoopNum = 1.0; (see [albedoMapLoopNum](#albedoMapLoopNum))
 
+Procedural Hair:
+----------------
+* ##### PROCEDURAL_HAIR
+    Set `PROCEDURAL_HAIR` to `1` in your material `.fx` file to generate anisotropic hair normals procedurally. This eliminates the need for static `hair.jpg` normal maps and prevents visual repetition.
+    
+    `0` . Disabled
+    `1` . Enable Procedural Hair Normals
+    
+* ##### const float PROCEDURAL_HAIR_INTENSITY = 0.45;
+    Intensity of the generated hair normal mapping.
+
+* ##### const float PROCEDURAL_HAIR_SCALE = 0.45;
+    Scale/density of the generated hair strands.
+
 Triplanar Projection:
 ---------------------
 * ##### TRIPLANAR_ENABLE

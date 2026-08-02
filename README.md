@@ -61,6 +61,7 @@ Resources :
 Credits:
 -------------
 **Reforge Integrations & Special Thanks:**
+* **hbee** - Original "DX RayCast Hair Pack" materials (adapted for procedural generation).
 * Credit: material by dendewa (https://dendewa.vercel.app/) - Used for HBAO rendering concepts.
 * **ikeno** - Referencing algorithms and mathematical concepts from `ikVXGI` for Global Illumination.
 
