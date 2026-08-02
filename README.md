@@ -33,6 +33,7 @@ Reforge Exclusive Features :
 * **Contact Shadows**: Screen-space raymarched shadows to reduce light leaking and grounding issues.
 * **Optimized SSR**: Upgraded Screen Space Reflections using Binary Search and depth-aware blur for better performance and accuracy.
 * **Depth-Aware AA Pipeline**: Fixed black screen issues and updated edge detection for SMAA/TAA passes.
+* **Procedural Hair Materials**: Mathematically generated anisotropic hair normals that eliminate the need for heavy, repetitive static textures.
 
 Standard Features (Inherited) :
 ------------
