@@ -1,3 +1,8 @@
+#ifndef PROCEDURAL_HAIR
+#define PROCEDURAL_HAIR 0
+#define PROCEDURAL_HAIR_INTENSITY 0.5
+#endif
+
 float4x4 matView : VIEW;
 float4x4 matWorld : WORLD;
 float4x4 matWorldView : WORLDVIEW;
@@ -527,7 +532,7 @@ float4 SampleTriplanar(sampler texSamp, float3 worldPos, float3 worldNormal, flo
 	return x * blend.x + y * blend.y + z * blend.z;
 }
 
-#if NORMAL_MAP_FROM || NORMAL_SUB_MAP_FROM
+#if NORMAL_MAP_FROM || NORMAL_SUB_MAP_FROM || PROCEDURAL_HAIR > 0
 float3 ComputeTangentBinormalNormal(float3 N, float3 P, float2 coord, float3 tangentNormal)
 {
 	float3 dp1 = ddx(P);
@@ -1048,8 +1053,10 @@ float3 GetNormal(float3 N, float3 P, float2 coord)
 		float3 tangentNormal = RNMBlendUnpacked(tangentNormal1, tangentNormal2);
 	#elif NORMAL_MAP_FROM
 		float3 tangentNormal = tangentNormal1;
-	#else
+	#elif NORMAL_SUB_MAP_FROM
 		float3 tangentNormal = tangentNormal2;
+	#else
+		float3 tangentNormal = float3(0, 0, 1);
 	#endif
 
 	#if (NORMAL_MAP_FROM && (NORMAL_MAP_TYPE == 2 || NORMAL_MAP_TYPE == 4)) || (NORMAL_SUB_MAP_FROM && (NORMAL_SUB_MAP_TYPE == 2 || NORMAL_SUB_MAP_TYPE == 4))
@@ -1062,10 +1069,63 @@ float3 GetNormal(float3 N, float3 P, float2 coord)
 		#elif NORMAL_MAP_UV_FLIP == 3
 			coord = 1 - coord;
 		#endif
+
+		#ifndef PROCEDURAL_HAIR
+		#define PROCEDURAL_HAIR 0
+		#endif
+
+		#if PROCEDURAL_HAIR > 0
+			#ifndef PROCEDURAL_HAIR_SCALE
+			#define PROCEDURAL_HAIR_SCALE 1.0
+			#endif
+			#ifndef PROCEDURAL_HAIR_INTENSITY
+			#define PROCEDURAL_HAIR_INTENSITY 0.5
+			#endif
+			
+			float nx = coord.x * PROCEDURAL_HAIR_SCALE * 10000.0;
+			float hairNoise = sin(nx) * 0.4 + sin(nx * 1.732) * 0.3 + sin(nx * 3.1415) * 0.3;
+			
+			float fw = fwidth(nx);
+			hairNoise *= saturate(exp(-fw * 0.2));
+
+			float3 T_fake = cross(N, float3(0.0, 1.0, 0.0));
+			if (dot(T_fake, T_fake) < 0.001) T_fake = float3(1.0, 0.0, 0.0);
+			T_fake = normalize(T_fake);
+
+			return normalize(N + T_fake * hairNoise * PROCEDURAL_HAIR_INTENSITY);
+		#endif
+
 		return ComputeTangentBinormalNormal(N, P, coord, tangentNormal);
 	#endif
 #else
-	return N;
+	#ifndef PROCEDURAL_HAIR
+	#define PROCEDURAL_HAIR 0
+	#endif
+
+	#if PROCEDURAL_HAIR > 0
+		#ifndef PROCEDURAL_HAIR_SCALE
+		#define PROCEDURAL_HAIR_SCALE 1.0
+		#endif
+		#ifndef PROCEDURAL_HAIR_INTENSITY
+		#define PROCEDURAL_HAIR_INTENSITY 0.5
+		#endif
+
+		float nx = coord.x * PROCEDURAL_HAIR_SCALE * 10000.0;
+		float hairNoise = sin(nx) * 0.4 + sin(nx * 1.732) * 0.3 + sin(nx * 3.1415) * 0.3;
+		
+		// Anti-aliasing and seam hiding: fade out noise where UVs jump or density is too high
+		float fw = fwidth(nx);
+		hairNoise *= saturate(exp(-fw * 0.2)); 
+
+		// Generate a stable tangent vector (horizontal to the vertical hair flow)
+		float3 T_fake = cross(N, float3(0.0, 1.0, 0.0));
+		if (dot(T_fake, T_fake) < 0.001) T_fake = float3(1.0, 0.0, 0.0);
+		T_fake = normalize(T_fake);
+
+		return normalize(N + T_fake * hairNoise * PROCEDURAL_HAIR_INTENSITY);
+	#else
+		return N;
+	#endif
 #endif
 }
 
