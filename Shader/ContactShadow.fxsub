@@ -26,54 +26,63 @@ sampler ConstantShadowMapSamp = sampler_state
 
 float TraceScreenSpaceShadow(float3 viewPos, float3 shadingNormal, float3 lightDirVS, float maxDistance, float jitter)
 {
-	const int   MAX_STEPS           = CONTACT_SAMPLER_COUNT;
-	const float THICKNESS_TOLERANCE = 0.15f;
-	const float BASE_BIAS           = 0.03f;
-	const float TERMINATOR_SMOOTH   = 0.15f;
-
 	float nDotL = dot(shadingNormal, lightDirVS);
 	if (nDotL <= 0.0f) return 1.0f;
 	
-	float terminatorFade = smoothstep(0.0f, TERMINATOR_SMOOTH, nDotL);
-
-	// In DX9 SM3.0, using ddx/ddy after a clip() instruction causes undefined behavior (black screens).
-	// Therefore, we must use the shadingNormal directly to bias the ray, which is perfectly valid for SSCS.
-	float3 geomNormal = shadingNormal;
+	float terminatorFade = smoothstep(0.0f, 0.15f, nDotL);
 
 	float slopeScale = 1.0f - saturate(nDotL);
-	float appliedBias = BASE_BIAS + (BASE_BIAS * slopeScale * 2.0f);
+	float appliedBias = 0.05f + (0.05f * slopeScale * 4.0f);
+	viewPos += shadingNormal * appliedBias;
+
+	float rayStep = 1.0f / (float)CONTACT_SAMPLER_COUNT;
+	// Use a constant 0.5f offset instead of noisy jitter for smooth results with SMAA
+	float raySampleTime = rayStep * 1.5f;
+
+	float4 rayStartClip = mul(float4(viewPos, 1.0f), matProject);
+	float4 rayEndClip = mul(float4(viewPos + lightDirVS * maxDistance, 1.0f), matProject);
+
+	float2 rayStartUV = rayStartClip.xy / rayStartClip.w * float2(0.5f, -0.5f) + 0.5f;
+	float2 rayEndUV = rayEndClip.xy / rayEndClip.w * float2(0.5f, -0.5f) + 0.5f;
 	
-	float3 rayOrigin = viewPos + (geomNormal * appliedBias);
-	float3 rayStep = (lightDirVS * maxDistance) / (float)MAX_STEPS;
-	float3 currentPos = rayOrigin + (rayStep * jitter);
-	
-	float occlusion = 0.0f;
+	float3 rayStartUVz = float3(rayStartUV, viewPos.z);
+	float3 rayStepUVz = float3(rayEndUV - rayStartUV, (viewPos + lightDirVS * maxDistance).z - viewPos.z);
+
+	float compareTolerance = maxDistance * rayStep * 2.0f;
+	float firstHitTime = -1.0f;
 
 	[loop]
-	for (int i = 0; i < MAX_STEPS; i++)
+	for (int i = 0; i < CONTACT_SAMPLER_COUNT; i++)
 	{
-		float4 clipPos = mul(float4(currentPos, 1.0f), matProject);
-		float2 sampleUV = clipPos.xy / clipPos.w;
-		
-		sampleUV = sampleUV * float2(0.5f, -0.5f) + 0.5f;
-		
-		if (sampleUV.x < 0.0f || sampleUV.x > 1.0f || sampleUV.y < 0.0f || sampleUV.y > 1.0f) {
+		float3 sampleUVz = rayStartUVz + rayStepUVz * raySampleTime;
+
+		if (sampleUVz.x < 0.0f || sampleUVz.x > 1.0f || sampleUVz.y < 0.0f || sampleUVz.y > 1.0f) {
 			break;
 		}
-		
-		float rawDepth = tex2Dlod(Gbuffer8Map, float4(sampleUV, 0, 0)).r;
-		float depthVS = abs(rawDepth);
-		float depthDiff = currentPos.z - depthVS;
-		
-		if (depthDiff > 0.0f && depthDiff < THICKNESS_TOLERANCE)
+
+		float rawDepth = tex2Dlod(Gbuffer8Map, float4(sampleUVz.xy, 0, 0)).r;
+		float sampleDepthVS = abs(rawDepth);
+		float sampleDepthDiff = sampleDepthVS - sampleUVz.z;
+
+		bool hit = abs(sampleDepthDiff + compareTolerance) < compareTolerance;
+
+		if (hit)
 		{
-			occlusion = 1.0f;
+			firstHitTime = raySampleTime;
 			break;
 		}
 		
-		currentPos += rayStep;
+		raySampleTime += rayStep;
 	}
-	
+
+	float occlusion = 0.0f;
+	if (firstHitTime >= 0.0f)
+	{
+		// Fade out based on distance to simulate soft shadow (penumbra)
+		float fade = saturate(1.0f - firstHitTime * 1.5f);
+		occlusion = fade * fade;
+	}
+
 	return 1.0f - occlusion * terminatorFade;
 }
 

@@ -135,7 +135,9 @@ float ShadingShadow(MaterialParam material, float3 viewPosition)
 	clip(coord.z);
 
 	float receiverDepth = dot(float4(viewPosition, 1), matLightViewFromCameraView._13_23_33_43);
-	receiverDepth -= material.linearDepth * 0.0035 + max(0, material.linearDepth - 100) * 0.007;
+	float3 L_cam = normalize(mul(-SunDirection, (float3x3)matView));
+	float slopeBias = (1.0 - saturate(dot(material.normal, L_cam))) * 0.003 * material.linearDepth;
+	receiverDepth -= material.linearDepth * 0.0035 + max(0, material.linearDepth - 100) * 0.007 + slopeBias;
 
 	coord.xy += 0.5 / float(SHADOW_MAP_SIZE);
 
