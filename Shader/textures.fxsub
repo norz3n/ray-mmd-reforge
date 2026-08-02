@@ -428,8 +428,8 @@ sampler SSDOMapSampTemp = sampler_state {
 #endif
 
 #if GI_ENABLE > 0
-texture2D VoxelPackRT: OFFSCREENRENDERTARGET <
-	string Description = "Voxelization map for Ray-MMD VXGI";
+texture2D SSGICaptureRT: OFFSCREENRENDERTARGET <
+	string Description = "SSGI Geometry Capture atlas for Ray-MMD VXGI";
 	int Width = 512;
 	int Height = 2048;
 	string Format = "A8R8G8B8";
@@ -441,10 +441,10 @@ texture2D VoxelPackRT: OFFSCREENRENDERTARGET <
 		"self = hide;"
 		"rayController.pmx = hide;"
 		"ray.x = hide;"
-		"* = Main/Voxelize.fx;";
+		"* = Main/SSGIGeometryCapture.fx;";
 >;
-sampler2D VoxelPackSamp = sampler_state {
-	texture = <VoxelPackRT>;
+sampler2D SSGICaptureSamp = sampler_state {
+	texture = <SSGICaptureRT>;
 	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };

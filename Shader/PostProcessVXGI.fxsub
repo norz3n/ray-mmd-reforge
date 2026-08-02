@@ -20,7 +20,7 @@
 #	define VXGI_CONE_COUNT 16
 #endif
 
-#include "shader/Voxelize.fxsub"
+#include "shader/SSGIGeometryCapture.fxsub"
 
 // ponytail: Screen-Space Voxel Cone Tracing performs 3D cone marching across G-buffer volumes with thickness continuity and near-distance boost. Upgrade path: Full 3D clipmap atlas packing.
 
@@ -121,61 +121,50 @@ float4 VoxelConeTracingPassPS(
 				continue;
 
 			float4 sampleGbuffer8 = tex2Dlod(Gbuffer8Map, float4(sampleUV, 0, 0));
-			float sampleDepth = sampleGbuffer8.r;
-			float3 sampleNormal = FetchViewNormalVX(sampleUV);
-
-			float depthDelta = (sampleViewPos.z - sampleDepth) - mVXGIBias;
-			float rawDepthWeight = SSGIDepthContinuityWeight(depthDelta, viewPosition.z, dist);
-			float depthWeight = lerp(1.0, rawDepthWeight, mVXGIThicknessWeight);
-			if (!(depthWeight > 0.001)) continue;
+			float depthDelta = (sampleViewPos.z - sampleGbuffer8.r) - mVXGIBias;
+			
+			float depthWeight = lerp(1.0, SSGIDepthContinuityWeight(depthDelta, viewPosition.z, dist), mVXGIThicknessWeight);
+			if (depthWeight <= 0.001) continue;
 
 			float3 hitColor = tex2Dlod(ShadingMapSamp, float4(sampleUV, 0, 0)).rgb;
-
 			float hitLum = dot(hitColor, float3(0.299, 0.587, 0.114));
+			
+			if (hitLum <= 0.001 && step > 2) continue;
 			if (!(hitLum >= 0.0 && hitLum < 65504.0)) continue;
-			if (hitLum <= 0.001 && step > 2)
-				continue;
 
-			// Material-Aware Subsurface Tinting (from sdPBR)
-			// ponytail: fast lightModel extraction directly from cached Gbuffer8Map.a avoids 4-MRT fetches and GBuffer decoding
 			int sampleLightModel = (int)floor(sampleGbuffer8.a);
+
 			if (sampleLightModel == SHADINGMODELID_SKIN)
 			{
-				hitColor = lerp(hitColor, hitColor * float3(1.12, 0.88, 0.78), 0.35);
+				hitColor *= hitLum > 0.25 ? (0.25 / max(hitLum, 1e-5)) : 1.0;
+				hitColor *= lerp(1.0, float3(1.10, 0.92, 0.85), 0.25);
+				hitLum = min(hitLum, 0.25);
 			}
 			else if (sampleLightModel == SHADINGMODELID_ANISOTROPY || sampleLightModel == SHADINGMODELID_CLOTH)
 			{
-				// Hair specular is extremely intense and causes fake "radioactive" glowing in SSGI.
-				// We aggressively clamp its luminance when it acts as a GI emitter.
-				if (hitLum > 0.1)
-				{
-					hitColor *= (0.1 / hitLum);
-					hitLum = 0.1;
-				}
-				// Desaturate slightly to avoid neon-colored bleeding
+				hitColor *= hitLum > 0.1 ? (0.1 / max(hitLum, 1e-5)) : 1.0;
+				hitLum = min(hitLum, 0.1);
 				hitColor = lerp(hitLum.rrr, hitColor, 0.5);
 			}
 
-			// Soft Reinhard-style luminance compression
 			if (hitLum > 0.8)
 			{
-				float compressedLum = 0.8 + log(1.0 + (hitLum - 0.8) * 0.5);
-				hitColor *= (compressedLum / hitLum);
+				hitColor *= (0.8 + log(1.0 + (hitLum - 0.8) * 0.5)) / max(hitLum, 1e-5);
 			}
 
-			// Color Bleed Saturation Boost
 			hitColor = lerp(hitLum.rrr, hitColor, mGISaturation);
 
-			float emtNdotL = saturate(dot(sampleNormal, -coneDirView) * 0.7 + 0.3);
-			float nearBoost = SSGINearDistanceBoost(dist, mVXGIScale * 35.0);
-			// ponytail: increased distance attenuation coefficient from 0.001 to 0.025 
-			// to stop radiosity from illuminating the entire zipcode
-			float distAtten = (1.0 / (1.0 + dist * dist * 0.025)) * nearBoost;
+			float emtNdotL = saturate(dot(FetchViewNormalVX(sampleUV), -coneDirView) * 0.7 + 0.3);
+			
+			// Detect emissive simply by high luminance (bloom sources)
+			bool isEmissive = hitLum > 1.2;
+			float quadCoeff = isEmissive ? 0.005 : 0.025;
+			float distAtten = (1.0 / (1.0 + dist * dist * quadCoeff)) * SSGINearDistanceBoost(dist, mVXGIScale * 35.0);
 
-			float weight = rcvNdotL * emtNdotL * distAtten * depthWeight;
+			float geometryWeight = rcvNdotL * lerp(emtNdotL, max(emtNdotL, 0.6), isEmissive ? 1.0 : 0.0) * depthWeight;
 
-			coneRadiance += hitColor * weight;
-			coneWeight += weight;
+			coneRadiance += hitColor * (geometryWeight * distAtten);
+			coneWeight += geometryWeight;
 		}
 
 		accumRadiance += (coneRadiance / coneWeight);
@@ -297,5 +286,5 @@ float4 VXGIFinalCombinePS(
 	}
 
 	indirectDiffuse *= mVXGIIntensity * ssao;
-	return float4(indirectDiffuse, 1.0);
+	return float4(indirectDiffuse, 0.0);
 }
