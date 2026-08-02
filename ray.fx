@@ -81,6 +81,12 @@ static float mSSSSScale = lerp(lerp(mSSSSIntensityMin, mSSSSIntensityMax, mSSSSP
 static float mVXGIIntensity = lerp(mVXGIIntensityDefault, 5.0, mDbgVXGIIntensity);
 static float mVXGIConeAngle = lerp(mVXGIConeAngleDefault, 1.8, mDbgVXGIConeAngle);
 static float mVXGIBias = lerp(mVXGIBiasDefault, 2.0, mDbgVXGIBias);
+static float mSSRBlur = mSSRBlurDefault;
+static float mSSRThickness = mSSRThicknessDefault;
+static float mSSROffset = mSSROffsetDefault;
+static float mSSRSmoothness = mSSRSmoothnessDefault;
+static float mSSRBrightness = mSSRBrightnessDefault;
+static float mSSRFresnel = mSSRFresnelDefault;
 static float mSunIntensity = lerp(lerp(mLightIntensityMin, mLightIntensityMax, mSunLightP), 0, mSunLightM);
 static float mExposure = lerp(lerp(mExposureMin, mExposureMax, mExposureP), 0, mExposureM);
 static float mBloomRadius = lerp(lerp(2.2, 10, mBloomRadiusP), 0.1, mBloomRadiusM);
@@ -129,6 +135,7 @@ static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceB
 #endif
 
 #if SSR_QUALITY
+#	include "shader/HiZ_SSR.fxsub"
 #	include "shader/PostProcessSSR.fxsub"
 #endif
 
@@ -275,6 +282,19 @@ technique DeferredLighting<
 #endif
 
 #if SSR_QUALITY
+	"RenderColorTarget=ZBufferMipmap1;		  	  Pass=ZBufferMipmap1;"
+	"RenderColorTarget=ZBufferMipmap2;		      Pass=ZBufferMipmap2;"
+	"RenderColorTarget=ZBufferMipmap3;		      Pass=ZBufferMipmap3;"
+	"RenderColorTarget=ZBufferMipmap4;		 	  Pass=ZBufferMipmap4;"
+	"RenderColorTarget=ZBufferMipmap5;		      Pass=ZBufferMipmap5;"
+	"RenderColorTarget=ZBufferMipmap6;		      Pass=ZBufferMipmap6;"
+	"RenderColorTarget=ZBufferMipmap7;		      Pass=ZBufferMipmap7;"
+	"RenderColorTarget=ZBufferMipmap8;		      Pass=ZBufferMipmap8;"
+	"RenderColorTarget=ZBufferMipmap9;		      Pass=ZBufferMipmap9;"
+	"RenderColorTarget=ZBufferMipmap10;		      Pass=ZBufferMipmap10;"
+
+ 	"RenderColorTarget=ZBufferMipmap;		      Pass=ZBufferCombine;"
+
 	"RenderColorTarget=SSRLightX1Map;"
 	"Clear=Color;"
 	"Pass=SSRConeTracing;"
@@ -288,7 +308,7 @@ technique DeferredLighting<
 	"RenderColorTarget=SSRLightX4MapTemp; Pass=SSRGaussionBlurX4;"
 	"RenderColorTarget=SSRLightX4Map;	  Pass=SSRGaussionBlurY4;"
 
-	"RenderColorTarget=ShadingMap;		  Pass=SSRFinalCombie;"
+	"RenderColorTarget=ShadingMap;		  Pass=SSRFinalCombine;"
 #endif
 
 #if BOKEH_QUALITY
@@ -565,6 +585,72 @@ technique DeferredLighting<
 	}
 #endif
 #if SSR_QUALITY
+	pass ZBufferMipmap1<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
+		PixelShader  = compile ps_3_0 ZBufferMipmap_1_PS(Gbuffer8Map);
+	}
+	pass ZBufferMipmap2<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
+		PixelShader  = compile ps_3_0 ZBufferMipmap_N_PS(ZBufferMipmap1Samp, kHZBMip2ViewportSize, kHZBMip1ViewportSize);
+	}
+	pass ZBufferMipmap3<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
+		PixelShader  = compile ps_3_0 ZBufferMipmap_N_PS(ZBufferMipmap2Samp, kHZBMip3ViewportSize, kHZBMip2ViewportSize);
+	}
+	pass ZBufferMipmap4<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
+		PixelShader  = compile ps_3_0 ZBufferMipmap_N_PS(ZBufferMipmap3Samp, kHZBMip4ViewportSize, kHZBMip3ViewportSize);
+	}
+	pass ZBufferMipmap5<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
+		PixelShader  = compile ps_3_0 ZBufferMipmap_N_PS(ZBufferMipmap4Samp, kHZBMip5ViewportSize, kHZBMip4ViewportSize);
+	}
+	pass ZBufferMipmap6<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
+		PixelShader  = compile ps_3_0 ZBufferMipmap_N_PS(ZBufferMipmap5Samp, kHZBMip6ViewportSize, kHZBMip5ViewportSize);
+	}
+	pass ZBufferMipmap7<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
+		PixelShader  = compile ps_3_0 ZBufferMipmap_N_PS(ZBufferMipmap6Samp, kHZBMip7ViewportSize, kHZBMip6ViewportSize);
+	}
+	pass ZBufferMipmap8<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
+		PixelShader  = compile ps_3_0 ZBufferMipmap_N_PS(ZBufferMipmap7Samp, kHZBMip8ViewportSize, kHZBMip7ViewportSize);
+	}
+	pass ZBufferMipmap9<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
+		PixelShader  = compile ps_3_0 ZBufferMipmap_N_PS(ZBufferMipmap8Samp, kHZBMip9ViewportSize, kHZBMip8ViewportSize);
+	}
+	pass ZBufferMipmap10<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
+		PixelShader  = compile ps_3_0 ZBufferMipmap_N_PS(ZBufferMipmap9Samp, kHZBMip10ViewportSize, kHZBMip9ViewportSize);
+	}
+	pass ZBufferCombine<string Script= "Draw=Buffer;";>{
+ 		AlphaBlendEnable = false; AlphaTestEnable = false;
+ 		ZEnable = false; ZWriteEnable = false;
+ 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+ 		PixelShader  = compile ps_3_0 ZBufferMipmapCombinePS();
+ 	}
 	pass SSRConeTracing<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
@@ -619,12 +705,12 @@ technique DeferredLighting<
 		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(ViewportOffset2.x * 8);
 		PixelShader  = compile ps_3_0 SSRGaussionBlurPS(SSRLightX4SampTemp, SSROffsetY4);
 	}
-	pass SSRFinalCombie<string Script= "Draw=Buffer;";>{
+	pass SSRFinalCombine<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = true; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		SrcBlend = ONE; DestBlend = INVSRCALPHA;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSRFinalCombiePS();
+		PixelShader  = compile ps_3_0 SSRFinalCombinePS();
 	}
 #endif
 #if GI_ENABLE

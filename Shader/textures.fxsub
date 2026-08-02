@@ -195,6 +195,27 @@ sampler SSAOMapSamp = sampler_state {
 	AddressU = CLAMP; AddressV = CLAMP;
 };
 #endif
+#if SSR_QUALITY
+texture SSRMap : OFFSCREENRENDERTARGET<
+	string Description = "SSR visibility for ray";
+	float2 ViewportRatio = {1.0, 1.0};
+	string Format = "A8";
+	float4 ClearColor = { 1, 1, 1, 1 };
+	float ClearDepth = 1.0;
+	string DefaultEffect =
+		"self = hide;"
+		"*fog.pmx=hide;"
+		"*controller*.pmx=hide;"
+		"*editor*.pmx=hide;"
+		"Volumetric*.pmx=hide;"
+		"*.*=shadow/SSR visibility 1.0.fx;";
+>;
+sampler SSRMapSamp = sampler_state {
+	texture = <SSRMap>;
+	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+#endif
 #if SUN_LIGHT_ENABLE && SUN_SHADOW_QUALITY
 shared texture PSSM1 : OFFSCREENRENDERTARGET<
 	string Description = "Cascade shadow map for ray";

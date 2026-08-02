@@ -113,6 +113,10 @@ Contact:
 	AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 	CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+Credits :
+--------
+* Hierarchical Z-Buffer Screen Space Reflections and HBSSDO implementations by [dendewa](https://dendewa.vercel.app/).
+
 References :
 --------
 * Moving to the Next Generation - The Rendering Technology of Ryse \[[link](http://www.crytek.com/download/2014_03_25_CRYENGINE_GDC_Schultz.pdf)\].
