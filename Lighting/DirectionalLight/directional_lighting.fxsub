@@ -356,7 +356,7 @@ void LightSourcePS(
 #if SHADOW_MAP_FROM >= 1
 	shadow = ShadingShadow(materialAlpha, P2, coord.xy / coord.w);
 #if CONTACT_SHADOW_QUALITY >= 1
-	shadow *= GetContactShadow(P2, viewLightDirection, coord.xy / coord.w, materialAlpha.linearDepth);
+	shadow *= GetContactShadow(P2, materialAlpha.normal, viewLightDirection, coord.xy / coord.w, materialAlpha.linearDepth);
 #endif
 	clip(shadow - 1e-5);
 #endif

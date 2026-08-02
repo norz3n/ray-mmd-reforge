@@ -189,7 +189,7 @@ float4 ShadowMapGenPS(
 
 #if CONTACT_SHADOW_QUALITY >= 1
 	float3 L = mul(-SunDirection, (float3x3)matView);
-	shadow *= GetContactShadow(viewPosition, L, coord, material.linearDepth);
+	shadow *= GetContactShadow(viewPosition, material.normal, L, coord, material.linearDepth);
 #endif
 
 	return shadow;

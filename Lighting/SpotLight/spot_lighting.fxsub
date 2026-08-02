@@ -261,7 +261,7 @@ void LightSourcePS(
 	shadow = ShadingShadow(materialAlpha, P2, texcoord.xy / texcoord.w);
 #if CONTACT_SHADOW_QUALITY >= 1
 	float3 L = normalize(viewLightPosition - P2);
-	shadow *= GetContactShadow(P2, L, texcoord.xy / texcoord.w, materialAlpha.linearDepth);
+	shadow *= GetContactShadow(P2, materialAlpha.normal, L, texcoord.xy / texcoord.w, materialAlpha.linearDepth);
 #endif
 	clip(shadow - 1e-5);
 #endif

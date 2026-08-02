@@ -24,62 +24,57 @@ sampler ConstantShadowMapSamp = sampler_state
 	AddressU = CLAMP; AddressV = CLAMP;
 };
 
-bool TraceScreenSpaceShadow(float3 viewPosition, float3 L, float maxDistance, float jitter)
+float TraceScreenSpaceShadow(float3 viewPos, float3 shadingNormal, float3 lightDirVS, float maxDistance, float jitter)
 {
-	float4 startPosition = float4(viewPosition, 1);
-	float4 startScreenPos = mul(startPosition, matProject);
+	const int   MAX_STEPS           = CONTACT_SAMPLER_COUNT;
+	const float THICKNESS_TOLERANCE = 0.15f;
+	const float BASE_BIAS           = 0.03f;
+	const float TERMINATOR_SMOOTH   = 0.15f;
 
-	float4 endPosition = float4(viewPosition + L * maxDistance, 1);
-	float4 endScreenPos = mul(endPosition, matProject);
+	float nDotL = dot(shadingNormal, lightDirVS);
+	if (nDotL <= 0.0f) return 1.0f;
+	
+	float terminatorFade = smoothstep(0.0f, TERMINATOR_SMOOTH, nDotL);
 
-	// ponytail: early discard for rays extending beyond screen boundaries
-	float2 borderCheck = abs(endScreenPos.xy / max(1e-5, endScreenPos.w) * 2.0 - 1.0) - 1.0;
-	if (borderCheck.x > 0.0 || borderCheck.y > 0.0)
-		return 1;
+	// In DX9 SM3.0, using ddx/ddy after a clip() instruction causes undefined behavior (black screens).
+	// Therefore, we must use the shadingNormal directly to bias the ray, which is perfectly valid for SSCS.
+	float3 geomNormal = shadingNormal;
 
-	startScreenPos.xy = startScreenPos.xy * float2(0.5, -0.5) + 0.5 * startScreenPos.w;
-	endScreenPos.xy = endScreenPos.xy * float2(0.5, -0.5) + 0.5 * endScreenPos.w;
+	float slopeScale = 1.0f - saturate(nDotL);
+	float appliedBias = BASE_BIAS + (BASE_BIAS * slopeScale * 2.0f);
+	
+	float3 rayOrigin = viewPos + (geomNormal * appliedBias);
+	float3 rayStep = (lightDirVS * maxDistance) / (float)MAX_STEPS;
+	float3 currentPos = rayOrigin + (rayStep * jitter);
+	
+	float occlusion = 0.0f;
 
-	float4 deltaScreenPos = endScreenPos - startScreenPos;
-
-	float stepSize = 1.0 / CONTACT_SAMPLER_COUNT;
-	float stepLength = jitter * stepSize + stepSize;
-
-	float bestLen = 0;
-	float compareTolerance = maxDistance / (CONTACT_SAMPLER_COUNT * 2.0);
-
-	float4 sampleStep = deltaScreenPos * stepSize;
-	float4 curPos = startScreenPos + deltaScreenPos * stepLength;
-
-	// ponytail: iterative vector addition replaces expensive 4D matrix/vector multiplies per step
 	[loop]
-	for (int i = 0; i < CONTACT_SAMPLER_COUNT; i += 4)
+	for (int i = 0; i < MAX_STEPS; i++)
 	{
-		float4 samplePos1 = curPos;
-		float4 samplePos2 = curPos + sampleStep;
-		float4 samplePos3 = curPos + sampleStep * 2;
-		float4 samplePos4 = curPos + sampleStep * 3;
-		float4 samplePosZ = float4(samplePos1.w, samplePos2.w, samplePos3.w, samplePos4.w);
-
-		float4 sampleDepth;
-		sampleDepth.r = tex2Dlod(Gbuffer8Map, float4(samplePos1.xy / samplePos1.w, 0, 0)).r;
-		sampleDepth.g = tex2Dlod(Gbuffer8Map, float4(samplePos2.xy / samplePos2.w, 0, 0)).r;
-		sampleDepth.b = tex2Dlod(Gbuffer8Map, float4(samplePos3.xy / samplePos3.w, 0, 0)).r;
-		sampleDepth.a = tex2Dlod(Gbuffer8Map, float4(samplePos4.xy / samplePos4.w, 0, 0)).r;
-
-		float4 depthDiff = samplePosZ - abs(sampleDepth);
-
-		bool4 hit = abs(depthDiff + compareTolerance) < compareTolerance;
-		if (any(hit))
-		{
-			bestLen = 1;
+		float4 clipPos = mul(float4(currentPos, 1.0f), matProject);
+		float2 sampleUV = clipPos.xy / clipPos.w;
+		
+		sampleUV = sampleUV * float2(0.5f, -0.5f) + 0.5f;
+		
+		if (sampleUV.x < 0.0f || sampleUV.x > 1.0f || sampleUV.y < 0.0f || sampleUV.y > 1.0f) {
 			break;
 		}
-
-		curPos += sampleStep * 4;
+		
+		float rawDepth = tex2Dlod(Gbuffer8Map, float4(sampleUV, 0, 0)).r;
+		float depthVS = abs(rawDepth);
+		float depthDiff = currentPos.z - depthVS;
+		
+		if (depthDiff > 0.0f && depthDiff < THICKNESS_TOLERANCE)
+		{
+			occlusion = 1.0f;
+			break;
+		}
+		
+		currentPos += rayStep;
 	}
-
-	return bestLen > 0 ? 0 : 1;
+	
+	return 1.0f - occlusion * terminatorFade;
 }
 
 float4 ConstantShadowPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) : COLOR 
@@ -101,14 +96,14 @@ float4 ConstantShadowPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOOR
 	float sampleDistance = 0.1;
 	sampleDistance *= material.linearDepth;
 
-	return TraceScreenSpaceShadow(viewPosition, L, sampleDistance, InterleavedGradientNoise(coord.zw * ViewportSize));
+	return TraceScreenSpaceShadow(viewPosition, material.normal, L, sampleDistance, InterleavedGradientNoise(coord.zw * ViewportSize));
 }
 
-float GetContactShadow(float3 viewPosition, float3 L, float2 screenCoord, float linearDepth)
+float GetContactShadow(float3 viewPosition, float3 shadingNormal, float3 L, float2 screenCoord, float linearDepth)
 {
 	float sampleDistance = 0.05 * min(linearDepth, 50.0);
 	float jitter = InterleavedGradientNoise(screenCoord * ViewportSize);
-	float shadow = float(TraceScreenSpaceShadow(viewPosition, L, sampleDistance, jitter));
+	float shadow = TraceScreenSpaceShadow(viewPosition, shadingNormal, L, sampleDistance, jitter);
 	float fade = saturate(1.0 - linearDepth / 300.0);
 	return lerp(1.0, shadow, fade);
 }

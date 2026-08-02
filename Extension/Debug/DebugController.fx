@@ -4,6 +4,10 @@
 #include "../../shader/gbuffer.fxsub"
 #include "../../shader/gbuffer_sampler.fxsub"
 
+#if CONTACT_SHADOW_QUALITY >= 1
+#include "../../shader/ContactShadow.fxsub"
+#endif
+
 float showAlbedo : CONTROLOBJECT<string name="(self)"; string item = "Albedo";>;
 float showNormal : CONTROLOBJECT<string name="(self)"; string item = "Normal";>;
 float showSpecular : CONTROLOBJECT<string name="(self)"; string item = "Specular";>;
@@ -29,6 +33,7 @@ float showSSAO : CONTROLOBJECT<string name="(self)"; string item = "SSAO";>;
 float showSSDO : CONTROLOBJECT<string name="(self)"; string item = "SSDO";>;
 float showSSR : CONTROLOBJECT<string name="(self)"; string item = "SSR";>;
 float showPSSM : CONTROLOBJECT<string name="(self)"; string item = "PSSM";>;
+float showContactShadow : CONTROLOBJECT<string name="(self)"; string item = "ContactShadow";>;
 float showOutline : CONTROLOBJECT<string name="(self)"; string item = "Outline";>;
 float showVXGI : CONTROLOBJECT<string name="(self)"; string item = "VXGI";>;
 float showVXGIIntensity : CONTROLOBJECT<string name="(self)"; string item = "VXGIIntensity";>;
@@ -112,13 +117,15 @@ void DebugControllerVS(
 	in float4 Position : POSITION,
 	in float4 Texcoord : TEXCOORD0,
 	out float4 oTexcoord : TEXCOORD0,
+	out float3 oViewdir : TEXCOORD1,
 	out float4 oPosition : POSITION)
 {
 	oTexcoord = Texcoord.xyxy + ViewportOffset.xyxy;
+	oViewdir = mul(Position, matProjectInverse).xyz;
 	oPosition = Position;
 }
 
-float4 DebugControllerPS(in float2 coord : TEXCOORD0) : COLOR
+float4 DebugControllerPS(in float2 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) : COLOR
 {
 	float4 MRT1 = tex2Dlod(Gbuffer1Map, float4(coord, 0, 0));
 	float4 MRT2 = tex2Dlod(Gbuffer2Map, float4(coord, 0, 0));
@@ -200,6 +207,13 @@ float4 DebugControllerPS(in float2 coord : TEXCOORD0) : COLOR
 		float depth3 = tex2Dlod(PSSM3Samp, float4(coord * 2.0 - float2(0.0, 1.0), 0, 0)).r;		
 		float depth4 = tex2Dlod(PSSM4Samp, float4(coord * 2.0 - float2(1.0, 1.0), 0, 0)).r;		
 		result += pow(saturate((depth1 + depth2 + depth3 + depth4) / 1500), 2) * showPSSM;
+	#endif
+	
+	#if CONTACT_SHADOW_QUALITY >= 1
+		float3 view = normalize(viewdir);
+		float3 viewPosition = view * material.linearDepth / view.z;
+		float3 L = mul(-SunDirection, (float3x3)matView);
+		result += (1.0 - GetContactShadow(viewPosition, material.normal, L, coord, material.linearDepth)) * showContactShadow;
 	#endif
 
 	if (material.lightModel == SHADINGMODELID_SKIN)
