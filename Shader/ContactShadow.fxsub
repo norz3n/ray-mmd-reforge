@@ -11,10 +11,13 @@
 // budget and let TAA integrate the stochastic distribution.
 #if CONTACT_QUALITY <= 1
 #	define CONTACT_SHADOW_STEP_COUNT 8
+#	define CONTACT_SHADOW_HIZ_LOOP_COUNT 20
 #elif CONTACT_QUALITY == 2
 #	define CONTACT_SHADOW_STEP_COUNT 12
+#	define CONTACT_SHADOW_HIZ_LOOP_COUNT 28
 #else
 #	define CONTACT_SHADOW_STEP_COUNT 16
+#	define CONTACT_SHADOW_HIZ_LOOP_COUNT 36
 #endif
 
 // Gbuffer8Map is point sampled by default.  The point tap preserves silhouette
@@ -70,23 +73,66 @@ float TraceScreenSpaceShadow(
 	float3 geometricNormal = ContactShadowGeometricNormal(viewPositionDx, viewPositionDy, shadingNormal);
 
 	float3 lightDirection = normalize(lightDirectionVS);
-	float nDotL = dot(shadingNormal, lightDirection);
-	if (nDotL <= 0.0f || maxDistance <= 0.0f)
+	float shadingNdotL = dot(shadingNormal, lightDirection);
+	float geometricNdotL = dot(geometricNormal, lightDirection);
+	if (shadingNdotL <= 0.0f || geometricNdotL <= 0.0f || maxDistance <= 0.0f)
 		return 1.0f;
 
-	// Smoothly remove SSCS at the shading-normal terminator.  It avoids black
-	// low-poly facets where the shading and geometric hemispheres disagree.
-	float terminatorFade = smoothstep(0.0f, 0.15f, nDotL);
+	// A smooth normal may be lit even when the real low-poly face points away
+	// from the light.  In that case tracing would start inside the face.  Fade
+	// against both hemispheres before the ray can create a terminator artifact.
+	float shadingTerminatorFade = smoothstep(0.0f, 0.15f, shadingNdotL);
+	float geometricTerminatorFade = smoothstep(0.0f, 0.12f, geometricNdotL);
+	float terminatorFade = shadingTerminatorFade * geometricTerminatorFade;
 
 	// A footprint-aware, slope-scaled bias stays valid at different resolutions
 	// and depths.  Offset only along the geometric normal, never a normal map.
 	float pixelFootprint = max(length(viewPositionDx), length(viewPositionDy));
-	float slopeScale = 1.0f - saturate(nDotL);
-	float normalBias = max(0.0025f, pixelFootprint * 0.5f) * (1.0f + 2.0f * slopeScale);
+	float slopeScale = 1.0f - saturate(min(shadingNdotL, geometricNdotL));
+	float normalBias = max(0.0035f, pixelFootprint * 0.75f) * (1.0f + 3.0f * slopeScale);
 	float3 rayOrigin = viewPosition + geometricNormal * normalBias;
 
 	float stepLength = maxDistance / (float)CONTACT_SHADOW_STEP_COUNT;
-	float thickness = max(stepLength * 1.5f, normalBias * 2.0f);
+	float thickness = max(stepLength * 1.1f, normalBias * 2.0f);
+
+#if defined(CONTACT_SHADOW_USE_HIZ)
+	// Hi-Z skips empty cells, then confirms the candidate at mip 0.  Its start
+	// offset is along the ray; the normal offset has already been applied above.
+	float traceOffset = min(maxDistance * 0.25f, normalBias + frac(jitter) * thickness);
+	float hitT = 1.0f;
+	float2 hitUV = 0.0f;
+	float3 hitPosition = 0.0f;
+	bool hit = HZTrace(
+		CONTACT_SHADOW_HIZ_LOOP_COUNT,
+		rayOrigin,
+		lightDirection,
+		maxDistance,
+		float3(traceOffset, thickness, 0.0f),
+		hitT,
+		hitUV,
+		hitPosition);
+
+	if (hit)
+	{
+		// The hierarchy is conservative.  Confirm against both point and linear
+		// depth before darkening the pixel, preserving the false-wall rejection.
+		float2 sceneDepth = ContactShadowSampleDepth(hitUV);
+		float nearestDepth = min(sceneDepth.x, sceneDepth.y);
+		float farthestDepth = max(sceneDepth.x, sceneDepth.y);
+		float behindSurface = hitPosition.z - farthestDepth;
+		float penetration = hitPosition.z - nearestDepth;
+
+		if (behindSurface > 0.0f && penetration <= thickness)
+		{
+			float traceRange = max(maxDistance - traceOffset, 1e-5f);
+			float contactT = saturate((traceOffset + hitT * traceRange) / maxDistance);
+			float distanceFade = 1.0f - smoothstep(0.65f, 1.0f, contactT);
+			return 1.0f - terminatorFade * distanceFade;
+		}
+	}
+
+	return 1.0f;
+#else
 	float occlusion = 0.0f;
 	float hitT = 1.0f;
 
@@ -124,6 +170,7 @@ float TraceScreenSpaceShadow(
 	// Taper the end of the short ray to avoid a visible hard cut-off.
 	float distanceFade = 1.0f - smoothstep(0.65f, 1.0f, hitT);
 	return 1.0f - occlusion * terminatorFade * distanceFade;
+#endif
 }
 
 float GetContactShadow(float3 viewPosition, float3 shadingNormal, float3 L, float2 screenCoord, float linearDepth)

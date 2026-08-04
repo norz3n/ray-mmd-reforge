@@ -108,6 +108,10 @@ static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceB
 #include "shader/ColorGrading.fxsub"
 #include "shader/ShadingMaterials.fxsub"
 
+#if SSR_QUALITY || GI_ENABLE || (CONTACT_SHADOW_QUALITY && SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE)
+#	include "shader/HiZ_SSR.fxsub"
+#endif
+
 #if SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE
 #	include "shader/ShadowCommon.fxsub"
 #	include "shader/ShadowMapCascaded.fxsub"
@@ -135,7 +139,6 @@ static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceB
 #endif
 
 #if SSR_QUALITY
-#	include "shader/HiZ_SSR.fxsub"
 #	include "shader/PostProcessSSR.fxsub"
 #endif
 
@@ -221,6 +224,22 @@ technique DeferredLighting<
 	"Clear=Depth;"
 	"ScriptExternal=Color;"
 
+#if SSR_QUALITY || GI_ENABLE || (CONTACT_SHADOW_QUALITY && SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE)
+	// The G-buffer is complete after ScriptExternal.  Build the hierarchy here
+	// so deferred sun shadows and later screen-space passes use this frame.
+	"RenderColorTarget=ZBufferMipmap1;            Pass=ZBufferMipmap1;"
+	"RenderColorTarget=ZBufferMipmap2;            Pass=ZBufferMipmap2;"
+	"RenderColorTarget=ZBufferMipmap3;            Pass=ZBufferMipmap3;"
+	"RenderColorTarget=ZBufferMipmap4;            Pass=ZBufferMipmap4;"
+	"RenderColorTarget=ZBufferMipmap5;            Pass=ZBufferMipmap5;"
+	"RenderColorTarget=ZBufferMipmap6;            Pass=ZBufferMipmap6;"
+	"RenderColorTarget=ZBufferMipmap7;            Pass=ZBufferMipmap7;"
+	"RenderColorTarget=ZBufferMipmap8;            Pass=ZBufferMipmap8;"
+	"RenderColorTarget=ZBufferMipmap9;            Pass=ZBufferMipmap9;"
+	"RenderColorTarget=ZBufferMipmap10;           Pass=ZBufferMipmap10;"
+	"RenderColorTarget=ZBufferMipmap;             Pass=ZBufferCombine;"
+#endif
+
 #if SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE
 	"RenderColorTarget=ShadowMap;"
 	"ClearSetColor=WhiteColor;"
@@ -282,19 +301,6 @@ technique DeferredLighting<
 #endif
 
 #if SSR_QUALITY
-	"RenderColorTarget=ZBufferMipmap1;		  	  Pass=ZBufferMipmap1;"
-	"RenderColorTarget=ZBufferMipmap2;		      Pass=ZBufferMipmap2;"
-	"RenderColorTarget=ZBufferMipmap3;		      Pass=ZBufferMipmap3;"
-	"RenderColorTarget=ZBufferMipmap4;		 	  Pass=ZBufferMipmap4;"
-	"RenderColorTarget=ZBufferMipmap5;		      Pass=ZBufferMipmap5;"
-	"RenderColorTarget=ZBufferMipmap6;		      Pass=ZBufferMipmap6;"
-	"RenderColorTarget=ZBufferMipmap7;		      Pass=ZBufferMipmap7;"
-	"RenderColorTarget=ZBufferMipmap8;		      Pass=ZBufferMipmap8;"
-	"RenderColorTarget=ZBufferMipmap9;		      Pass=ZBufferMipmap9;"
-	"RenderColorTarget=ZBufferMipmap10;		      Pass=ZBufferMipmap10;"
-
- 	"RenderColorTarget=ZBufferMipmap;		      Pass=ZBufferCombine;"
-
 	"RenderColorTarget=SSRLightX1Map;"
 	"Clear=Color;"
 	"Pass=SSRConeTracing;"
@@ -584,7 +590,7 @@ technique DeferredLighting<
 		PixelShader  = compile ps_3_0 ScreenSpaceBilateralFilterPS(ShadingMapTempSamp, mDiffusionOffsetY);
 	}
 #endif
-#if SSR_QUALITY
+#if SSR_QUALITY || GI_ENABLE || (CONTACT_SHADOW_QUALITY && SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE)
 	pass ZBufferMipmap1<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
@@ -651,6 +657,8 @@ technique DeferredLighting<
  		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
  		PixelShader  = compile ps_3_0 ZBufferMipmapCombinePS();
  	}
+#endif
+#if SSR_QUALITY
 	pass SSRConeTracing<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;

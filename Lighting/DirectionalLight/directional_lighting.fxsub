@@ -130,25 +130,7 @@ static const float4x4 matLightViewFromCameraView = mul(matViewInverse, matLightV
 static const float4x4 matLightProjectFromCameraView = mul(matViewInverse, matLightViewProject);
 static const float4x4 lightCropParams = CreateLightCropParams(matLightViewFromCameraView, SHADOW_MAP_SIZE);
 
-#define PCSS_POISSON_SAMPLES 16
-static const float2 PCSS_Poisson[16] = {
-	float2(-0.94201624, -0.39906216),
-	float2( 0.94558609, -0.76890725),
-	float2(-0.09418410, -0.92938870),
-	float2( 0.34495938,  0.29387760),
-	float2(-0.91588581,  0.45771432),
-	float2(-0.81544232, -0.87912464),
-	float2(-0.38277543,  0.27676845),
-	float2( 0.97484398,  0.75648377),
-	float2( 0.44323325, -0.97511554),
-	float2( 0.53742981, -0.47373420),
-	float2(-0.26496911, -0.41893023),
-	float2( 0.79197514,  0.19090160),
-	float2(-0.24188840,  0.99706507),
-	float2(-0.81409955,  0.91437590),
-	float2( 0.19984126,  0.78641367),
-	float2( 0.14383161, -0.14100790)
-};
+
 
 float2 RotateSample(float2 pos, float2 rotation)
 {
@@ -173,57 +155,10 @@ float2 ShadowPCF(sampler source, float2 coord, float receiverDepth)
 	return shadow;
 }
 
-#if PCSS_SHADOW_ENABLE
-float FindBlocker(sampler source, float2 coord, float receiverDepth, float searchRadius, float2 rotation)
-{
-	float blockers = 0.0;
-	float avgBlockerDepth = 0.0;
-
-	[unroll]
-	for (int i = 0; i < PCSS_POISSON_SAMPLES; i++)
-	{
-		float2 offset = RotateSample(PCSS_Poisson[i] * searchRadius, rotation);
-		float sampleDepth = tex2Dlod(source, float4(coord + offset, 0, 0)).r;
-		float isBlocker = step(sampleDepth, receiverDepth - 0.001);
-		
-		avgBlockerDepth += sampleDepth * isBlocker;
-		blockers += isBlocker;
-	}
-
-	return (blockers > 0.0) ? (avgBlockerDepth / blockers) : receiverDepth;
-}
-#endif
-
 float SampleCascadeShadowSingle(sampler source, float2 coord, float receiverDepth, float2 rotation, float lightSize, int cascadeIndex)
 {
-#if PCSS_SHADOW_ENABLE
-	float searchRadius = clamp(lightSize, 2.0 / SHADOW_MAP_SIZE, 16.0 / SHADOW_MAP_SIZE);
-
-	float avgBlockerDepth = FindBlocker(source, coord, receiverDepth, searchRadius, rotation);
-
-	float cascadeScale = lightCropParams[cascadeIndex].x; 
-	float penumbraWidth = (receiverDepth - avgBlockerDepth) * lightSize * cascadeScale * 0.5;
-	float filterRadius = clamp(penumbraWidth, 1.0 / SHADOW_MAP_SIZE, 32.0 / SHADOW_MAP_SIZE);
-
-	if (filterRadius <= 1.0 / SHADOW_MAP_SIZE)
-	{
-		float centerDepth = tex2Dlod(source, float4(coord, 0, 0)).r;
-		return step(receiverDepth - 0.001, centerDepth);
-	}
-
-	float visibility = 0.0;
-	[unroll]
-	for (int j = 0; j < PCSS_POISSON_SAMPLES; j++)
-	{
-		float2 offset = RotateSample(PCSS_Poisson[j] * filterRadius, rotation);
-		float sampleDepth = tex2Dlod(source, float4(coord + offset, 0, 0)).r;
-		visibility += step(receiverDepth - 0.001, sampleDepth);
-	}
-	return visibility / PCSS_POISSON_SAMPLES;
-#else
 	float2 shadow = ShadowPCF(source, coord, receiverDepth);
 	return ChebyshevUpperBound(shadow, receiverDepth, 0.01, LightHardness);
-#endif
 }
 
 float SampleCascadeShadowMap(int index, float2 coord, float receiverDepth, float2 rotation)
@@ -281,9 +216,13 @@ float ShadingShadow(MaterialParam material, float3 viewPosition, float2 screenUV
 		shadow = lerp(shadow, shadowNext, blendWeight);
 	}
 
+#if CONTACT_SHADOW_QUALITY >= 1
+	float contactShadow = GetContactShadow(viewPosition, material.normal, viewLightDirection, screenUV, material.linearDepth);
+	shadow *= contactShadow;
+#endif
+
 	return shadow;
 }
-
 #endif
 
 void ShadingMaterial(MaterialParam material, float3 P, float3 V, float shadow, inout float3 diffuse, inout float3 specular)
@@ -356,7 +295,12 @@ void LightSourcePS(
 #if SHADOW_MAP_FROM >= 1
 	shadow = ShadingShadow(materialAlpha, P2, coord.xy / coord.w);
 #if CONTACT_SHADOW_QUALITY >= 1
-	shadow *= GetContactShadow(P2, materialAlpha.normal, viewLightDirection, coord.xy / coord.w, materialAlpha.linearDepth);
+	float contactShadow = GetContactShadow(P2, materialAlpha.normal, viewLightDirection, coord.xy / coord.w, materialAlpha.linearDepth);
+#if PCSS_SHADOW_ENABLE
+	shadow = min(shadow, contactShadow);
+#else
+	shadow *= contactShadow;
+#endif
 #endif
 	clip(shadow - 1e-5);
 #endif

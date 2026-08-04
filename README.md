@@ -24,14 +24,14 @@ Requirement :
 * Direct3D 9 With Shader Model 3.0 (ps_3_0)
 * **Powerful GPU recommended** due to advanced shading techniques.
 
-Reforge Exclusive Features :
+Reforge Exclusive Features (v1.8.0) :
 ------------
 * **Temporal Anti-Aliasing (TAA)**: Improved edge anti-aliasing and temporal stability to reduce subpixel flickering.
 * **Hybrid HBAO / SSDO**: Horizon-based ambient occlusion and directional occlusion for more accurate contact shading.
-* **Percentage-Closer Soft Shadows (PCSS)**: Distance-based soft shadows that blur based on the distance from the caster.
-* **Screen Space Voxel Global Illumination (SSVGI)**: Hybrid GI architecture combining voxel grids with screen-space cone tracing for real-time indirect lighting (includes fixes for NaN/INF artifacts).
+* **Refined Shadow Architecture (v1.8.0)**: Directional lights (Sun) now use ultra-clean, high-resolution Variance Shadow Maps (VSM) to completely eliminate film grain noise and shadow acne on character faces, while PCSS is intelligently reserved for local lights (Point/Spot).
+* **Screen Space Voxel Global Illumination (SSVGI) & Hi-Z (v1.8.0)**: Hybrid GI architecture combining voxel grids with screen-space cone tracing for real-time indirect lighting. Fully integrates Hierarchical Z-Buffer (Hi-Z) for accelerated raymarching and includes fixes for NaN/INF artifacts.
 * **Contact Shadows**: Screen-space raymarched shadows to reduce light leaking and grounding issues.
-* **Optimized SSR**: Upgraded Screen Space Reflections using Binary Search and depth-aware blur for better performance and accuracy.
+* **Optimized SSR & Hi-Z Passes (v1.8.0)**: Fixed broken Hierarchical Z-Buffer (Hi-Z) shader passes. Upgraded Screen Space Reflections using Binary Search and depth-aware blur for better performance and accuracy.
 * **Depth-Aware AA Pipeline**: Fixed black screen issues and updated edge detection for SMAA/TAA passes.
 * **Procedural Hair Materials**: Mathematically generated anisotropic hair normals that eliminate the need for heavy, repetitive static textures.
 

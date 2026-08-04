@@ -1,4 +1,8 @@
 // Credit: material by dendewa (https://dendewa.vercel.app/)
+// Shared hierarchical depth traversal for SSR, contact shadows and future
+// screen-space effects.  The pyramid itself is built by ray.fx once per frame.
+#ifndef RAY_MMD_HIZ_TRACE_FXSUB
+#define RAY_MMD_HIZ_TRACE_FXSUB
 static const float2 kHZBMip1ViewportSize = ViewportSize;
 static const float2 kHZBMip2ViewportSize = floor(ViewportSize / 2.0);
 static const float2 kHZBMip3ViewportSize = floor(ViewportSize / 4.0);
@@ -255,7 +259,7 @@ float IntersectCellBoundary(float3 begin, float3 delta, float2 cellId, float2 le
 	return k;
 }
 
-bool HZTrace(int count, float3 beginVS, float3 directionVS, float maxDistance, float3 ott, out float2 hitPixel, out float3 hitPos)
+bool HZTrace(int count, float3 beginVS, float3 directionVS, float maxDistance, float3 ott, out float hitT, out float2 hitPixel, out float3 hitPos)
 {
 	int level = 0;
 
@@ -265,7 +269,7 @@ bool HZTrace(int count, float3 beginVS, float3 directionVS, float maxDistance, f
 	float3 beginNDC = beginClip.xyz / beginClip.w;
 	float3 begin = beginNDC * float3(0.5, -0.5, 1) + float3(0.5, 0.5, 0);
 
-	float4 endClip = mul(float4(beginVS + directionVS * maxDistance * 2, 1), matProject);
+	float4 endClip = mul(float4(beginVS + directionVS * maxDistance, 1), matProject);
 	float3 endNDC = endClip.xyz / endClip.w;
 	float3 end = endNDC * float3(0.5, -0.5, 1) + float3(0.5, 0.5, 0);
 
@@ -322,6 +326,7 @@ bool HZTrace(int count, float3 beginVS, float3 directionVS, float maxDistance, f
 		level = min(maxLevel, level);
 	}
     float3 result = begin + k * delta;
+	hitT = k;
 	hitPixel = result.xy;
 
     float3 resultNDC = (result - float3(0.5, 0.5, 0)) * float3(2, -2, 1);
@@ -332,8 +337,16 @@ bool HZTrace(int count, float3 beginVS, float3 directionVS, float maxDistance, f
 	return level < 0;
 }
 
+bool HZTrace(int count, float3 beginVS, float3 directionVS, float maxDistance, float3 ott, out float2 hitPixel, out float3 hitPos)
+{
+	float hitT = 0;
+	return HZTrace(count, beginVS, directionVS, maxDistance, ott, hitT, hitPixel, hitPos);
+}
+
 bool HZTrace(int count, float3 beginVS, float3 directionVS, float maxDistance, float3 ott, out float2 hitPixel)
 {
     float3 hitPos = 0;
     return HZTrace(count, beginVS, directionVS, maxDistance, ott, hitPixel, hitPos);
 }
+
+#endif

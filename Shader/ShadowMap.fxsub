@@ -2,7 +2,9 @@
 #define SHADOW_POISSON_COUNT 25
 
 #if CONTACT_SHADOW_QUALITY >= 1
+#	define CONTACT_SHADOW_USE_HIZ 1
 #	include "shader/ContactShadow.fxsub"
+#	undef CONTACT_SHADOW_USE_HIZ
 #endif
 
 static float4x4 matLightProject = CreateOrthoProject(2, 2, mPSSMDepthZMin, mPSSMDepthZMax);
@@ -46,71 +48,21 @@ float2 Rotate(float2 pos, float2 rotation)
 	return float2(pos.x * rotation.x - pos.y * rotation.y, pos.y * rotation.x + pos.x * rotation.y);
 }
 
-#if PCSS_SHADOW_ENABLE
-float FindBlocker(sampler source, float2 coord, float receiverDepth, float searchRadius, float2 rotation)
-{
-	float blockers = 0.0;
-	float avgBlockerDepth = 0.0;
-	float2 rotR = rotation * searchRadius;
-	float2 rotRPerp = float2(-rotR.y, rotR.x);
-
-	[unroll]
-	for (int i = 0; i < SHADOW_POISSON_COUNT; i++) 
-	{
-		float2 pos = coord + Poisson[i].x * rotR + Poisson[i].y * rotRPerp;
-		float sampleDepth = tex2Dlod(source, float4(pos, 0, 0)).r;
-		float isBlocker = step(sampleDepth, receiverDepth - 0.001);
-		avgBlockerDepth += sampleDepth * isBlocker;
-		blockers += isBlocker;
-	}
-
-	return (blockers > 0.0) ? (avgBlockerDepth / blockers) : receiverDepth;
-}
-#endif
-
 float ShadowPCF(sampler source, float2 coord, float radius, float receiverDepth, float2 rotation, int cascadeIndex)
 {
-#if PCSS_SHADOW_ENABLE
-	float lightSize = 0.015;
-	float searchRadius = clamp(lightSize, 2.0 / SHADOW_MAP_SIZE, 16.0 / SHADOW_MAP_SIZE);
-	float avgBlockerDepth = FindBlocker(source, coord, receiverDepth, searchRadius, rotation);
-	
-	float cascadeScale = lightCropParams[cascadeIndex].x; 
-	float penumbraWidth = (receiverDepth - avgBlockerDepth) * lightSize * cascadeScale * 0.5;
-	float filterRadius = clamp(penumbraWidth, 1.0 / SHADOW_MAP_SIZE, 32.0 / SHADOW_MAP_SIZE);
-
-	if (filterRadius <= 1.0 / SHADOW_MAP_SIZE)
-	{
-		return step(receiverDepth - 0.001, tex2Dlod(source, float4(coord, 0, 0)).r);
-	}
-
-	float shadow = 0.0;
-	float2 rotR = rotation * filterRadius;
-	float2 rotRPerp = float2(-rotR.y, rotR.x);
-
-	[unroll]
-	for (int i = 0; i < SHADOW_POISSON_COUNT; i++) 
-	{
-		float2 pos = coord + Poisson[i].x * rotR + Poisson[i].y * rotRPerp;
-		shadow += step(receiverDepth - 0.001, tex2Dlod(source, float4(pos, 0, 0)).r);
-	}
-
-	return shadow / SHADOW_POISSON_COUNT;
-#else
 	float shadow = 0.0;
 	// ponytail: precalculating basis vectors saves 4 multiplications per Poisson sample with 100% exact result
 	float2 rotR = rotation * radius;
 	float2 rotRPerp = float2(-rotR.y, rotR.x);
 
 	[unroll]
-	for (int i = 0; i < SHADOW_POISSON_COUNT; i++) 
+	for (int i = 0; i < SHADOW_POISSON_COUNT; i++)
 	{
 		float2 pos = coord + Poisson[i].x * rotR + Poisson[i].y * rotRPerp;
 		shadow += saturate(exp(-20 * (receiverDepth - tex2Dlod(source, float4(pos, 0, 0)).r)));
 	}
-
+	
 	return shadow / SHADOW_POISSON_COUNT;
-#endif
 }
 
 float ShadingShadow(MaterialParam material, float3 viewPosition)
@@ -135,9 +87,7 @@ float ShadingShadow(MaterialParam material, float3 viewPosition)
 	clip(coord.z);
 
 	float receiverDepth = dot(float4(viewPosition, 1), matLightViewFromCameraView._13_23_33_43);
-	float3 L_cam = normalize(mul(-SunDirection, (float3x3)matView));
-	float slopeBias = (1.0 - saturate(dot(material.normal, L_cam))) * 0.003 * material.linearDepth;
-	receiverDepth -= material.linearDepth * 0.0035 + max(0, material.linearDepth - 100) * 0.007 + slopeBias;
+	receiverDepth -= material.linearDepth * 0.0035 + max(0, material.linearDepth - 100) * 0.007;
 
 	coord.xy += 0.5 / float(SHADOW_MAP_SIZE);
 
@@ -191,7 +141,8 @@ float4 ShadowMapGenPS(
 
 #if CONTACT_SHADOW_QUALITY >= 1
 	float3 L = mul(-SunDirection, (float3x3)matView);
-	shadow *= GetContactShadow(viewPosition, material.normal, L, coord, material.linearDepth);
+	float contactShadow = GetContactShadow(viewPosition, material.normal, L, coord, material.linearDepth);
+	shadow *= contactShadow;
 #endif
 
 	return shadow;

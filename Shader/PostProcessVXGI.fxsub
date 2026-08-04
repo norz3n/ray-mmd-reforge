@@ -22,7 +22,7 @@
 
 #include "shader/SSGIGeometryCapture.fxsub"
 
-// ponytail: Screen-Space Voxel Cone Tracing performs 3D cone marching across G-buffer volumes with thickness continuity and near-distance boost. Upgrade path: Full 3D clipmap atlas packing.
+// ponytail: Screen-Space Voxel Cone Tracing performs 3D cone marching with Hi-Z hierarchical depth traversal (HZTrace) and multi-mip depth filtering across G-buffer volumes. Upgrade path: Full 3D clipmap atlas packing.
 
 float FetchLinearDepthVX(float2 uv)
 {
@@ -120,15 +120,22 @@ float4 VoxelConeTracingPassPS(
 			if (sampleUV.x < 0.001 || sampleUV.x > 0.999 || sampleUV.y < 0.001 || sampleUV.y > 0.999)
 				continue;
 
+			// Hierarchical depth fetch & early-out cell test using Hi-Z Mip 1 (prevents coarse tile silhouette dilation)
+			float hizMinDepth = tex2Dlod(ZBufferMipmap1Samp, float4(sampleUV, 0, 0)).r;
+
+			// Skip empty space if ray is in front of the cell's conservative min-depth
+			if (sampleViewPos.z < hizMinDepth - mVXGIBias)
+				continue;
+
 			float4 sampleGbuffer8 = tex2Dlod(Gbuffer8Map, float4(sampleUV, 0, 0));
 			float depthDelta = (sampleViewPos.z - sampleGbuffer8.r) - mVXGIBias;
-			
+
 			float depthWeight = lerp(1.0, SSGIDepthContinuityWeight(depthDelta, viewPosition.z, dist), mVXGIThicknessWeight);
 			if (depthWeight <= 0.001) continue;
 
 			float3 hitColor = tex2Dlod(ShadingMapSamp, float4(sampleUV, 0, 0)).rgb;
 			float hitLum = dot(hitColor, float3(0.299, 0.587, 0.114));
-			
+
 			if (hitLum <= 0.001 && step > 2) continue;
 			if (!(hitLum >= 0.0 && hitLum < 65504.0)) continue;
 
@@ -147,21 +154,21 @@ float4 VoxelConeTracingPassPS(
 				hitColor = lerp(hitLum.rrr, hitColor, 0.5);
 			}
 
+			// Compress specular highlights log-scale so bright reflections don't turn materials into false light bulbs
 			if (hitLum > 0.8)
 			{
-				hitColor *= (0.8 + log(1.0 + (hitLum - 0.8) * 0.5)) / max(hitLum, 1e-5);
+				hitColor *= (0.8 + log(1.0 + (hitLum - 0.8) * 0.25)) / max(hitLum, 1e-5);
+				hitLum = dot(hitColor, float3(0.299, 0.587, 0.114));
 			}
 
 			hitColor = lerp(hitLum.rrr, hitColor, mGISaturation);
 
-			float emtNdotL = saturate(dot(FetchViewNormalVX(sampleUV), -coneDirView) * 0.7 + 0.3);
-			
-			// Detect emissive simply by high luminance (bloom sources)
-			bool isEmissive = hitLum > 1.2;
-			float quadCoeff = isEmissive ? 0.005 : 0.025;
-			float distAtten = (1.0 / (1.0 + dist * dist * quadCoeff)) * SSGINearDistanceBoost(dist, mVXGIScale * 35.0);
+			// Directional orientation weighting (surfaces facing away from cone do not radiate light into it)
+			float emtNdotL = saturate(dot(FetchViewNormalVX(sampleUV), -coneDirView));
 
-			float geometryWeight = rcvNdotL * lerp(emtNdotL, max(emtNdotL, 0.6), isEmissive ? 1.0 : 0.0) * depthWeight;
+			float distAtten = (1.0 / (1.0 + dist * dist * 0.025)) * SSGINearDistanceBoost(dist, mVXGIScale * 35.0);
+
+			float geometryWeight = rcvNdotL * emtNdotL * depthWeight;
 
 			coneRadiance += hitColor * (geometryWeight * distAtten);
 			coneWeight += geometryWeight;

@@ -94,23 +94,23 @@ static float4x4 matLightViewFromCameraView = mul(matViewInverse, matLightView);
 static float4x4 matLightProjectFromCameraView = mul(matViewInverse, matLightViewProject);
 
 #define PCSS_POISSON_SAMPLES 16
-static const float2 PCSS_Poisson[16] = {
-	float2(-0.94201624, -0.39906216),
-	float2( 0.94558609, -0.76890725),
-	float2(-0.09418410, -0.92938870),
-	float2( 0.34495938,  0.29387760),
-	float2(-0.91588581,  0.45771432),
-	float2(-0.81544232, -0.87912464),
-	float2(-0.38277543,  0.27676845),
-	float2( 0.97484398,  0.75648377),
-	float2( 0.44323325, -0.97511554),
-	float2( 0.53742981, -0.47373420),
-	float2(-0.26496911, -0.41893023),
-	float2( 0.79197514,  0.19090160),
-	float2(-0.24188840,  0.99706507),
-	float2(-0.81409955,  0.91437590),
-	float2( 0.19984126,  0.78641367),
-	float2( 0.14383161, -0.14100790)
+static const float2 VogelDisk[16] = {
+	float2( 0.000000,  0.000000),
+	float2( 0.435794,  0.000000),
+	float2(-0.217897,  0.540166),
+	float2(-0.297446, -0.584347),
+	float2( 0.686532,  0.183955),
+	float2(-0.730303,  0.278385),
+	float2( 0.358249, -0.733560),
+	float2( 0.245842,  0.826040),
+	float2(-0.771960, -0.445690),
+	float2( 0.908075, -0.193026),
+	float2(-0.640656,  0.697920),
+	float2( 0.053535, -0.967005),
+	float2( 0.573199,  0.793316),
+	float2(-0.966472, -0.222718),
+	float2( 0.957640,  0.301077),
+	float2(-0.536965, -0.841571)
 };
 
 float2 RotateSample(float2 pos, float2 rotation)
@@ -127,9 +127,9 @@ float ShadingShadow(MaterialParam material, float3 P, float2 screenUV)
 	float linearDepth = length(mul(float4(P, 1), matLightViewFromCameraView));
 
 #if PCSS_SHADOW_ENABLE
-	float lightSize = 0.05 * mLightPlaneNear;
+	float lightSize = 0.25 * mLightPlaneNear;
 	float searchRadius = SearchRegionRadius(lightSize, linearDepth, mLightPlaneNear);
-	searchRadius = clamp(searchRadius, 2.0 / SHADOW_MAP_SIZE, 16.0 / SHADOW_MAP_SIZE);
+	searchRadius = clamp(searchRadius, 4.0 / SHADOW_MAP_SIZE, 64.0 / SHADOW_MAP_SIZE);
 
 	float angle = InterleavedGradientNoise(screenUV * ViewportSize) * PI_2;
 	float2 rotation = float2(cos(angle), sin(angle));
@@ -140,10 +140,10 @@ float ShadingShadow(MaterialParam material, float3 P, float2 screenUV)
 	[unroll]
 	for (int i = 0; i < PCSS_POISSON_SAMPLES; i++)
 	{
-		float2 offset = RotateSample(PCSS_Poisson[i] * searchRadius, rotation);
+		float2 offset = RotateSample(VogelDisk[i] * searchRadius, rotation);
 		float sampleDepth = tex2Dlod(ShadowMapSamp, float4(proj.xy + offset, 0, 0)).r;
 		
-		float isBlocker = step(sampleDepth, linearDepth - 0.01);
+		float isBlocker = step(sampleDepth, linearDepth - 0.005);
 		avgBlockerDepth += sampleDepth * isBlocker;
 		blockers += isBlocker;
 	}
@@ -154,17 +154,17 @@ float ShadingShadow(MaterialParam material, float3 P, float2 screenUV)
 	avgBlockerDepth /= blockers;
 	float penumbraRatio = PenumbraRadius(lightSize, linearDepth, avgBlockerDepth);
 	float filterSize = ProjectToLight(penumbraRatio, linearDepth, mLightPlaneNear);
-	float filterRadius = clamp(filterSize, 1.0 / SHADOW_MAP_SIZE, 32.0 / SHADOW_MAP_SIZE);
+	float filterRadius = clamp(filterSize, 1.5 / SHADOW_MAP_SIZE, 64.0 / SHADOW_MAP_SIZE);
 
 	float visibility = 0.0;
 	[unroll]
 	for (int j = 0; j < PCSS_POISSON_SAMPLES; j++)
 	{
-		float2 offset = RotateSample(PCSS_Poisson[j] * filterRadius, rotation);
+		float2 offset = RotateSample(VogelDisk[j] * filterRadius, rotation);
 		float sampleDepth = tex2Dlod(ShadowMapSamp, float4(proj.xy + offset, 0, 0)).r;
-		visibility += step(linearDepth - 0.01, sampleDepth);
+		visibility += step(linearDepth - 0.005, sampleDepth);
 	}
-	float shadow = visibility / PCSS_POISSON_SAMPLES;
+	return visibility / float(PCSS_POISSON_SAMPLES);
 #else
 	float2 shadow = 0.0;
 
@@ -178,9 +178,9 @@ float ShadingShadow(MaterialParam material, float3 P, float2 screenUV)
 			shadow += tex2Dlod(ShadowMapSamp, float4(pos, 0, 0)).rg * sampleKernel[sampleRadius + x] * sampleKernel[sampleRadius + y];
 		}
 	}
-#endif
 
 	return ChebyshevUpperBound(shadow, linearDepth, 1e-5, LightHardness);
+#endif
 }
 
 #endif
@@ -261,7 +261,12 @@ void LightSourcePS(
 	shadow = ShadingShadow(materialAlpha, P2, texcoord.xy / texcoord.w);
 #if CONTACT_SHADOW_QUALITY >= 1
 	float3 L = normalize(viewLightPosition - P2);
-	shadow *= GetContactShadow(P2, materialAlpha.normal, L, texcoord.xy / texcoord.w, materialAlpha.linearDepth);
+	float contactShadow = GetContactShadow(P2, materialAlpha.normal, L, texcoord.xy / texcoord.w, materialAlpha.linearDepth);
+#if PCSS_SHADOW_ENABLE
+	shadow = min(shadow, contactShadow);
+#else
+	shadow *= contactShadow;
+#endif
 #endif
 	clip(shadow - 1e-5);
 #endif
