@@ -3,18 +3,18 @@
 // screen-space effects.  The pyramid itself is built by ray.fx once per frame.
 #ifndef RAY_MMD_HIZ_TRACE_FXSUB
 #define RAY_MMD_HIZ_TRACE_FXSUB
-static const float2 kHZBMip1ViewportSize = ViewportSize;
-static const float2 kHZBMip2ViewportSize = floor(ViewportSize / 2.0);
-static const float2 kHZBMip3ViewportSize = floor(ViewportSize / 4.0);
-static const float2 kHZBMip4ViewportSize = floor(ViewportSize / 8.0);
-static const float2 kHZBMip5ViewportSize = floor(ViewportSize / 16.0);
-static const float2 kHZBMip6ViewportSize = floor(ViewportSize / 32.0);
-static const float2 kHZBMip7ViewportSize = floor(ViewportSize / 64.0);
-static const float2 kHZBMip8ViewportSize = floor(ViewportSize / 128.0);
-static const float2 kHZBMip9ViewportSize = floor(ViewportSize / 256.0);
-static const float2 kHZBMip10ViewportSize = floor(ViewportSize / 512.0);
+static const float2 kHZBMip1ViewportSize = floor(ViewportSize / 2.0);
+static const float2 kHZBMip2ViewportSize = floor(ViewportSize / 4.0);
+static const float2 kHZBMip3ViewportSize = floor(ViewportSize / 8.0);
+static const float2 kHZBMip4ViewportSize = floor(ViewportSize / 16.0);
+static const float2 kHZBMip5ViewportSize = floor(ViewportSize / 32.0);
+static const float2 kHZBMip6ViewportSize = floor(ViewportSize / 64.0);
+static const float2 kHZBMip7ViewportSize = floor(ViewportSize / 128.0);
+static const float2 kHZBMip8ViewportSize = floor(ViewportSize / 256.0);
+static const float2 kHZBMip9ViewportSize = floor(ViewportSize / 512.0);
+static const float2 kHZBMip10ViewportSize = floor(ViewportSize / 1024.0);
 
-#define MIP_DIV_1  (1)
+#define MIP_DIV_1  (2)
 #define MIP_DIV_2  (MIP_DIV_1 * 2)
 #define MIP_DIV_3  (MIP_DIV_2 * 2)
 #define MIP_DIV_4  (MIP_DIV_3 * 2)
@@ -25,7 +25,7 @@ static const float2 kHZBMip10ViewportSize = floor(ViewportSize / 512.0);
 #define MIP_DIV_9  (MIP_DIV_8 * 2)
 #define MIP_DIV_10 (MIP_DIV_9 * 2)
 
-texture ZBufferMipmap1 : RENDERCOLORTARGET<
+shared texture ZBufferMipmap1 : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0/MIP_DIV_1, 1.0/MIP_DIV_1};
 	string Format = "R16F";
 >;
@@ -34,7 +34,7 @@ sampler ZBufferMipmap1Samp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
-texture ZBufferMipmap2 : RENDERCOLORTARGET<
+shared texture ZBufferMipmap2 : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0/MIP_DIV_2, 1.0/MIP_DIV_2};
 	string Format = "R16F";
 >;
@@ -43,7 +43,7 @@ sampler ZBufferMipmap2Samp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
-texture ZBufferMipmap3 : RENDERCOLORTARGET<
+shared texture ZBufferMipmap3 : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0/MIP_DIV_3, 1.0/MIP_DIV_3};
 	string Format = "R16F";
 >;
@@ -52,7 +52,7 @@ sampler ZBufferMipmap3Samp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
-texture ZBufferMipmap4 : RENDERCOLORTARGET<
+shared texture ZBufferMipmap4 : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0/MIP_DIV_4, 1.0/MIP_DIV_4};
 	string Format = "R16F";
 >;
@@ -61,7 +61,7 @@ sampler ZBufferMipmap4Samp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
-texture ZBufferMipmap5 : RENDERCOLORTARGET<
+shared texture ZBufferMipmap5 : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0/MIP_DIV_5, 1.0/MIP_DIV_5};
 	string Format = "R16F";
 >;
@@ -70,7 +70,7 @@ sampler ZBufferMipmap5Samp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
-texture ZBufferMipmap6 : RENDERCOLORTARGET<
+shared texture ZBufferMipmap6 : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0/MIP_DIV_6, 1.0/MIP_DIV_6};
 	string Format = "R16F";
 >;
@@ -79,7 +79,7 @@ sampler ZBufferMipmap6Samp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
-texture ZBufferMipmap7 : RENDERCOLORTARGET<
+shared texture ZBufferMipmap7 : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0/MIP_DIV_7, 1.0/MIP_DIV_7};
 	string Format = "R16F";
 >;
@@ -88,7 +88,7 @@ sampler ZBufferMipmap7Samp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
-texture ZBufferMipmap8 : RENDERCOLORTARGET<
+shared texture ZBufferMipmap8 : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0/MIP_DIV_8, 1.0/MIP_DIV_8};
 	string Format = "R16F";
 >;
@@ -97,7 +97,7 @@ sampler ZBufferMipmap8Samp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
-texture ZBufferMipmap9 : RENDERCOLORTARGET<
+shared texture ZBufferMipmap9 : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0/MIP_DIV_9, 1.0/MIP_DIV_9};
 	string Format = "R16F";
 >;
@@ -106,7 +106,7 @@ sampler ZBufferMipmap9Samp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
-texture ZBufferMipmap10 : RENDERCOLORTARGET<
+shared texture ZBufferMipmap10 : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0/MIP_DIV_10, 1.0/MIP_DIV_10};
 	string Format = "R16F";
 >;
@@ -116,7 +116,7 @@ sampler ZBufferMipmap10Samp = sampler_state {
 	AddressU = CLAMP; AddressV = CLAMP;
 };
 
-texture ZBufferMipmap : RENDERCOLORTARGET<
+shared texture ZBufferMipmap : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0, 1.0};
 	string Format = "R16F";
 >;
@@ -128,10 +128,10 @@ sampler ZBufferMipmapSamp = sampler_state {
 
 float4 ZBufferMipmap_1_PS(in float2 pos: VPOS, in float2 coord : TEXCOORD0, uniform sampler source) : COLOR
 {
-    float2 uv0 = coord * 2 + ViewportOffset * float2(1 ,1);
-    float2 uv1 = coord * 2 + ViewportOffset * float2(1 ,3);
-    float2 uv2 = coord * 2 + ViewportOffset * float2(3 ,3);
-    float2 uv3 = coord * 2 + ViewportOffset * float2(3 ,1);
+    float2 uv0 = coord + ViewportOffset * float2(0.5 ,0.5);
+    float2 uv1 = coord + ViewportOffset * float2(0.5 ,1.5);
+    float2 uv2 = coord + ViewportOffset * float2(1.5 ,1.5);
+    float2 uv3 = coord + ViewportOffset * float2(1.5 ,0.5);
 
     float depth = tex2Dlod(source, float4(uv0, 0, 0)).x;
     depth = min(tex2Dlod(source, float4(uv1, 0, 0)).x, depth);
@@ -143,10 +143,10 @@ float4 ZBufferMipmap_1_PS(in float2 pos: VPOS, in float2 coord : TEXCOORD0, unif
 
 float4 ZBufferMipmap_N_PS(in float2 pos: VPOS, in float2 coord : TEXCOORD0, uniform sampler source, uniform float2 viewportSize, uniform float2 superSize) : COLOR
 {
-    float2 uv0 = (coord * viewportSize * 2 + 0.5 * float2(1, 1)) / superSize;
-    float2 uv1 = (coord * viewportSize * 2 + 0.5 * float2(1, 3)) / superSize;
-    float2 uv2 = (coord * viewportSize * 2 + 0.5 * float2(3, 3)) / superSize;
-    float2 uv3 = (coord * viewportSize * 2 + 0.5 * float2(3, 1)) / superSize;
+    float2 uv0 = coord + (0.5 * float2(1, 1)) / superSize;
+    float2 uv1 = coord + (0.5 * float2(1, 3)) / superSize;
+    float2 uv2 = coord + (0.5 * float2(3, 3)) / superSize;
+    float2 uv3 = coord + (0.5 * float2(3, 1)) / superSize;
 
     float depth = tex2Dlod(source, float4(uv0, 0, 0)).x;
     depth = min(tex2Dlod(source, float4(uv1, 0, 0)).x, depth);
@@ -288,11 +288,14 @@ bool HZTrace(int count, float3 beginVS, float3 directionVS, float maxDistance, f
         float2 levelSize = ViewportSize / exp2(level);
 		int2 cellId = floor(ray.xy * levelSize);
 
-        float linearZ = matProject[3][2]/(ray.z - matProject[2][2]);
-		float linearMinZ = HZBSampleDepth(ray.xy, level, levelSize);
+        float denom = ray.z - matProject[2][2];
+        denom = abs(denom) < 1e-6f ? sign(denom) * 1e-6f : denom;
+        if (denom == 0.0f) denom = 1e-6f;
+        float linearZ = matProject[3][2]/denom;
+		float linearMinZ = max(HZBSampleDepth(ray.xy, level, levelSize), 1e-6f);
 		float minZ = matProject[2][2] + matProject[3][2] / linearMinZ;
 		float t = k;
-		if (delta.z > 0)
+		if (delta.z > 1e-6f)
 		{
 			float deltaZ = minZ - ray.z;
 			t = deltaZ > 0.0 ? (t + deltaZ/delta.z) : t;
