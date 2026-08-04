@@ -71,6 +71,13 @@ float TraceScreenSpaceShadow(
 	float3 viewPositionDx = ddx(viewPosition);
 	float3 viewPositionDy = ddy(viewPosition);
 	float3 geometricNormal = ContactShadowGeometricNormal(viewPositionDx, viewPositionDy, shadingNormal);
+	float pixelFootprint = max(length(viewPositionDx), length(viewPositionDy));
+
+	if (pixelFootprint > 0.1f)
+	{
+		geometricNormal = shadingNormal;
+		pixelFootprint = 0.005f;
+	}
 
 	float3 lightDirection = normalize(lightDirectionVS);
 	float shadingNdotL = dot(shadingNormal, lightDirection);
@@ -87,7 +94,6 @@ float TraceScreenSpaceShadow(
 
 	// A footprint-aware, slope-scaled bias stays valid at different resolutions
 	// and depths.  Offset only along the geometric normal, never a normal map.
-	float pixelFootprint = max(length(viewPositionDx), length(viewPositionDy));
 	float slopeScale = 1.0f - saturate(min(shadingNdotL, geometricNdotL));
 	float normalBias = max(0.0035f, pixelFootprint * 0.75f) * (1.0f + 3.0f * slopeScale);
 	float3 rayOrigin = viewPosition + geometricNormal * normalBias;
