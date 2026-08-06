@@ -58,29 +58,29 @@ float mColBalanceBM : CONTROLOBJECT<string name="ray_controller.pmx"; string ite
 float mTemperatureP : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "Temperature+";>;
 float mTemperatureM : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "Temperature-";>;
 
-float mDbgVXGIIntensity1 : CONTROLOBJECT<string name="DebugController.pmx"; string item = "VXGIIntensity";>;
-float mDbgVXGIConeAngle1 : CONTROLOBJECT<string name="DebugController.pmx"; string item = "VXGIConeAngle";>;
-float mDbgVXGIBias1      : CONTROLOBJECT<string name="DebugController.pmx"; string item = "VXGIBias";>;
+float mDbgSSGIIntensity1 : CONTROLOBJECT<string name="DebugController.pmx"; string item = "SSGIIntensity";>;
+float mDbgSSGIConeAngle1 : CONTROLOBJECT<string name="DebugController.pmx"; string item = "SSGIConeAngle";>;
+float mDbgSSGIBias1      : CONTROLOBJECT<string name="DebugController.pmx"; string item = "SSGIBias";>;
 
-float mDbgVXGIIntensity2 : CONTROLOBJECT<string name="DebugController"; string item = "VXGIIntensity";>;
-float mDbgVXGIConeAngle2 : CONTROLOBJECT<string name="DebugController"; string item = "VXGIConeAngle";>;
-float mDbgVXGIBias2      : CONTROLOBJECT<string name="DebugController"; string item = "VXGIBias";>;
+float mDbgSSGIIntensity2 : CONTROLOBJECT<string name="DebugController"; string item = "SSGIIntensity";>;
+float mDbgSSGIConeAngle2 : CONTROLOBJECT<string name="DebugController"; string item = "SSGIConeAngle";>;
+float mDbgSSGIBias2      : CONTROLOBJECT<string name="DebugController"; string item = "SSGIBias";>;
 
-float mCtrlVXGIIntensity : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "VXGIIntensity";>;
-float mCtrlVXGIConeAngle : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "VXGIConeAngle";>;
-float mCtrlVXGIBias      : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "VXGIBias";>;
+float mCtrlSSGIIntensity : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "SSGIIntensity";>;
+float mCtrlSSGIConeAngle : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "SSGIConeAngle";>;
+float mCtrlSSGIBias      : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "SSGIBias";>;
 
-static float mDbgVXGIIntensity = max(mDbgVXGIIntensity1, max(mDbgVXGIIntensity2, mCtrlVXGIIntensity));
-static float mDbgVXGIConeAngle = max(mDbgVXGIConeAngle1, max(mDbgVXGIConeAngle2, mCtrlVXGIConeAngle));
-static float mDbgVXGIBias      = max(mDbgVXGIBias1,      max(mDbgVXGIBias2,      mCtrlVXGIBias));
+static float mDbgSSGIIntensity = max(mDbgSSGIIntensity1, max(mDbgSSGIIntensity2, mCtrlSSGIIntensity));
+static float mDbgSSGIConeAngle = max(mDbgSSGIConeAngle1, max(mDbgSSGIConeAngle2, mCtrlSSGIConeAngle));
+static float mDbgSSGIBias      = max(mDbgSSGIBias1,      max(mDbgSSGIBias2,      mCtrlSSGIBias));
 
 static float mSSAOScale = lerp(lerp(mSSDOIntensityMin, mSSDOIntensityMax, mSSAOP), 0, mSSAOM);
 static float mSSAORadius = lerp(lerp(1.0, 2.0, mSSAORadiusP), 0.5, mSSAORadiusM);
 static float mSSDOScale = lerp(lerp(mSSDOIntensityMin, mSSDOIntensityMax, mSSDOP), 0, mSSDOM);
 static float mSSSSScale = lerp(lerp(mSSSSIntensityMin, mSSSSIntensityMax, mSSSSP), 0.25, mSSSSM);
-static float mVXGIIntensity = lerp(mVXGIIntensityDefault, 5.0, mDbgVXGIIntensity);
-static float mVXGIConeAngle = lerp(mVXGIConeAngleDefault, 1.8, mDbgVXGIConeAngle);
-static float mVXGIBias = lerp(mVXGIBiasDefault, 2.0, mDbgVXGIBias);
+static float mSSGIIntensity = lerp(mSSGIIntensityDefault, 5.0, mDbgSSGIIntensity);
+static float mSSGIConeAngle = lerp(mSSGIConeAngleDefault, 1.8, mDbgSSGIConeAngle);
+static float mSSGIBias = lerp(mSSGIBiasDefault, 2.0, mDbgSSGIBias);
 static float mSSRBlur = mSSRBlurDefault;
 static float mSSRThickness = mSSRThicknessDefault;
 static float mSSROffset = mSSROffsetDefault;
@@ -143,7 +143,7 @@ static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceB
 #endif
 
 #if GI_ENABLE
-#	include "shader/PostProcessVXGI.fxsub"
+#	include "shader/PostProcessSSGI.fxsub"
 #endif
 
 #if BOKEH_QUALITY
@@ -292,12 +292,12 @@ technique DeferredLighting<
 #endif
 
 #if GI_ENABLE
-	"RenderColorTarget=VXGIMap;     Clear=Color; Pass=VXGI;"
-	"RenderColorTarget=VXGIMapTemp; Pass=VXGIBlurX;"
-	"RenderColorTarget=VXGIMap;     Pass=VXGIBlurY;"
-	"RenderColorTarget=VXGIMapTemp; Pass=VXGIBlurX;"
-	"RenderColorTarget=VXGIMap;     Pass=VXGIBlurY;"
-	"RenderColorTarget=ShadingMap;  Pass=VXGIFinalCombine;"
+	"RenderColorTarget=SSGIMap;     Clear=Color; Pass=SSGI;"
+	"RenderColorTarget=SSGIMapTemp; Pass=SSGIBlurX;"
+	"RenderColorTarget=SSGIMap;     Pass=SSGIBlurY;"
+	"RenderColorTarget=SSGIMapTemp; Pass=SSGIBlurX;"
+	"RenderColorTarget=SSGIMap;     Pass=SSGIBlurY;"
+	"RenderColorTarget=ShadingMap;  Pass=SSGIFinalCombine;"
 #endif
 
 #if SSR_QUALITY
@@ -722,30 +722,30 @@ technique DeferredLighting<
 	}
 #endif
 #if GI_ENABLE
-	pass VXGI<string Script= "Draw=Buffer;";>{
+	pass SSGI<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 VoxelConeTracingPassPS();
+		PixelShader  = compile ps_3_0 SSGIPassPS();
 	}
-	pass VXGIBlurX<string Script= "Draw=Buffer;";>{
+	pass SSGIBlurX<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 VoxelGIBlurPS(VXGIMapSamp, float2(ViewportOffset2.x, 0.0f));
+		PixelShader  = compile ps_3_0 SSGIBlurPS(SSGIMapSamp, 1.0f);
 	}
-	pass VXGIBlurY<string Script= "Draw=Buffer;";>{
+	pass SSGIBlurY<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 VoxelGIBlurPS(VXGIMapSampTemp, float2(0.0f, ViewportOffset2.y));
+		PixelShader  = compile ps_3_0 SSGIBlurPS(SSGIMapSampTemp, 3.0f);
 	}
-	pass VXGIFinalCombine<string Script= "Draw=Buffer;";>{
+	pass SSGIFinalCombine<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = true; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		SrcBlend = ONE; DestBlend = ONE;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 VXGIFinalCombinePS();
+		PixelShader  = compile ps_3_0 SSGIFinalCombinePS();
 	}
 #endif
 #if BOKEH_QUALITY
@@ -1178,3 +1178,4 @@ technique DeferredLighting<
 	}
 #endif
 }
+

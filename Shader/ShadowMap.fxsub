@@ -14,55 +14,42 @@ static float4x4 matLightViewFromCameraView = mul(matViewInverse, matLightView);
 static float4x4 matLightProjectFromCameraView = mul(matViewInverse, matLightViewProject);
 static float4x4 lightCropParams = CreateLightCropParams(matLightViewFromCameraView, SHADOW_MAP_SIZE);
 
-static const float2 Poisson[SHADOW_POISSON_COUNT] =
+float2 VogelDiskSample(int i, int numSamples, float noise)
 {
-	float2(-0.978698, -0.0884121),
-	float2(-0.841121, 0.521165),
-	float2(-0.71746, -0.50322),
-	float2(-0.702933, 0.903134),
-	float2(-0.663198, 0.15482),
-	float2(-0.495102, -0.232887),
-	float2(-0.364238, -0.961791),
-	float2(-0.345866, -0.564379),
-	float2(-0.325663, 0.64037),
-	float2(-0.182714, 0.321329),
-	float2(-0.142613, -0.0227363),
-	float2(-0.0564287, -0.36729),
-	float2(-0.0185858, 0.918882),
-	float2(0.0381787, -0.728996),
-	float2(0.16599, 0.093112),
-	float2(0.253639, 0.719535),
-	float2(0.369549, -0.655019),
-	float2(0.423627, 0.429975),
-	float2(0.530747, -0.364971),
-	float2(0.566027, -0.940489),
-	float2(0.639332, 0.0284127),
-	float2(0.652089, 0.669668),
-	float2(0.773797, 0.345012),
-	float2(0.968871, 0.840449),
-	float2(0.991882, -0.657338)
-};
-
-float2 Rotate(float2 pos, float2 rotation)
-{
-	return float2(pos.x * rotation.x - pos.y * rotation.y, pos.y * rotation.x + pos.x * rotation.y);
+	float r = sqrt((i + 0.5) / float(numSamples));
+	float theta = i * 2.3999632 + noise * PI_2;
+	return float2(cos(theta), sin(theta)) * r;
 }
 
-float ShadowPCF(sampler source, float2 coord, float radius, float receiverDepth, float2 rotation, int cascadeIndex)
+float ShadowPCF(sampler source, float2 coord, float radius, float receiverDepth, float noise, int cascadeIndex)
 {
 	float shadow = 0.0;
-	// ponytail: precalculating basis vectors saves 4 multiplications per Poisson sample with 100% exact result
-	float2 rotR = rotation * radius;
-	float2 rotRPerp = float2(-rotR.y, rotR.x);
+	float weightSum = 0.0;
+	
+	// Масштабируем радиус для каскадов, чтобы тени не размывались слишком сильно вдали.
+	// cascadeIndex 0 = 1.0, 1 = 0.66, 2 = 0.5, 3 = 0.4
+	float cascadeScale = 1.0 / (1.0 + cascadeIndex * 0.5); 
+	float finalRadius = radius * cascadeScale;
 
 	[unroll]
 	for (int i = 0; i < SHADOW_POISSON_COUNT; i++)
 	{
-		float2 pos = coord + Poisson[i].x * rotR + Poisson[i].y * rotRPerp;
-		shadow += saturate(exp(-20 * (receiverDepth - tex2Dlod(source, float4(pos, 0, 0)).r)));
+		float2 vogel = VogelDiskSample(i, SHADOW_POISSON_COUNT, noise);
+		float2 pos = coord + vogel * finalRadius;
+		
+		// Экспоненциальное сглаживание. Увеличиваем жесткость (-40 вместо -20)
+		// и используем max(0, diff), чтобы избежать переполнения exp.
+		float zMap = tex2Dlod(source, float4(pos, 0, 0)).r;
+		float diff = receiverDepth - zMap;
+		float sampleShadow = saturate(exp(-40.0 * max(0.0, diff)));
+		
+		// Придаем больший вес семплам ближе к центру (имитация Гауссиана)
+		float weight = 1.0 - length(vogel);
+		shadow += sampleShadow * weight;
+		weightSum += weight;
 	}
 	
-	return shadow / SHADOW_POISSON_COUNT;
+	return shadow / weightSum;
 }
 
 float ShadingShadow(MaterialParam material, float3 viewPosition)
@@ -104,18 +91,17 @@ float ShadingShadow(MaterialParam material, float3 viewPosition)
 	float shadow = 0;
 	float radius = 2.0 / SHADOW_MAP_SIZE;
 
-	float angle = PseudoRandom(coord.xy * SHADOW_MAP_SIZE) * PI_2;
-	float2 rotation = float2(cos(angle), sin(angle));
+	float noise = InterleavedGradientNoise(coord.xy * SHADOW_MAP_SIZE);
 
 	[branch]
 	if (coord.w == 0)
-		shadow = ShadowPCF(PSSM1Samp, coord.xy, radius, receiverDepth, rotation, 0);
+		shadow = ShadowPCF(PSSM1Samp, coord.xy, radius, receiverDepth, noise, 0);
 	else if (coord.w == 1)
-		shadow = ShadowPCF(PSSM2Samp, coord.xy, radius, receiverDepth, rotation, 1);
+		shadow = ShadowPCF(PSSM2Samp, coord.xy, radius, receiverDepth, noise, 1);
 	else if (coord.w == 2)
-		shadow = ShadowPCF(PSSM3Samp, coord.xy, radius, receiverDepth, rotation, 2);
+		shadow = ShadowPCF(PSSM3Samp, coord.xy, radius, receiverDepth, noise, 2);
 	else
-		shadow = ShadowPCF(PSSM4Samp, coord.xy, radius, receiverDepth, rotation, 3);
+		shadow = ShadowPCF(PSSM4Samp, coord.xy, radius, receiverDepth, noise, 3);
 
 	return shadow;
 }

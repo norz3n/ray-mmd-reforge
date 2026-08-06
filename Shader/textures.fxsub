@@ -449,44 +449,25 @@ sampler SSDOMapSampTemp = sampler_state {
 #endif
 
 #if GI_ENABLE > 0
-texture2D SSGICaptureRT: OFFSCREENRENDERTARGET <
-	string Description = "SSGI Geometry Capture atlas for Ray-MMD VXGI";
-	int Width = 512;
-	int Height = 2048;
-	string Format = "A8R8G8B8";
-	int MipLevels = 1;
-	bool AntiAlias = false;
-	float4 ClearColor = { 0, 0, 0, 0 };
-	float ClearDepth = 1.0;
-	string DefaultEffect = 
-		"self = hide;"
-		"rayController.pmx = hide;"
-		"ray.x = hide;"
-		"* = Main/SSGIGeometryCapture.fx;";
->;
-sampler2D SSGICaptureSamp = sampler_state {
-	texture = <SSGICaptureRT>;
-	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
-	AddressU = CLAMP; AddressV = CLAMP;
-};
-
-shared texture VXGIMap : RENDERCOLORTARGET<
+shared texture SSGIMap : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0, 1.0};
 	bool AntiAlias = false;
 	string Format = "A16B16G16R16F";
+	float4 ClearColor = {0, 0, 0, 0};
 >;
-texture VXGIMapTemp : RENDERCOLORTARGET<
+texture SSGIMapTemp : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0, 1.0};
 	bool AntiAlias = false;
 	string Format = "A16B16G16R16F";
+	float4 ClearColor = {0, 0, 0, 0};
 >;
-sampler VXGIMapSamp = sampler_state {
-	texture = <VXGIMap>;
+sampler SSGIMapSamp = sampler_state {
+	texture = <SSGIMap>;
 	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
 	AddressU = CLAMP;  AddressV = CLAMP;
 };
-sampler VXGIMapSampTemp = sampler_state {
-	texture = <VXGIMapTemp>;
+sampler SSGIMapSampTemp = sampler_state {
+	texture = <SSGIMapTemp>;
 	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
 	AddressU = CLAMP;  AddressV = CLAMP;
 };

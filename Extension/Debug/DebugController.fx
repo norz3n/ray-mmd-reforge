@@ -35,10 +35,10 @@ float showSSR : CONTROLOBJECT<string name="(self)"; string item = "SSR";>;
 float showPSSM : CONTROLOBJECT<string name="(self)"; string item = "PSSM";>;
 float showContactShadow : CONTROLOBJECT<string name="(self)"; string item = "ContactShadow";>;
 float showOutline : CONTROLOBJECT<string name="(self)"; string item = "Outline";>;
-float showVXGI : CONTROLOBJECT<string name="(self)"; string item = "VXGI";>;
-float showVXGIIntensity : CONTROLOBJECT<string name="(self)"; string item = "VXGIIntensity";>;
-float showVXGIConeAngle : CONTROLOBJECT<string name="(self)"; string item = "VXGIConeAngle";>;
-float showVXGIBias : CONTROLOBJECT<string name="(self)"; string item = "VXGIBias";>;
+float showSSGI : CONTROLOBJECT<string name="(self)"; string item = "SSGI";>;
+float showSSGIIntensity : CONTROLOBJECT<string name="(self)"; string item = "SSGIIntensity";>;
+float showSSGIConeAngle : CONTROLOBJECT<string name="(self)"; string item = "SSGIConeAngle";>;
+float showSSGIBias : CONTROLOBJECT<string name="(self)"; string item = "SSGIBias";>;
 
 texture2D ScnMap : RENDERCOLORTARGET<
 	float2 ViewPortRatio = {1.0,1.0};
@@ -70,9 +70,9 @@ sampler SSRayTracingSamp = sampler_state {
 #endif
 
 #if GI_ENABLE
-shared texture VXGIMap : RENDERCOLORTARGET;
-sampler VXGIMapSamp = sampler_state {
-	texture = <VXGIMap>;
+shared texture SSGIMap : RENDERCOLORTARGET;
+sampler SSGIMapSamp = sampler_state {
+	texture = <SSGIMap>;
 	MinFilter = NONE; MagFilter = NONE; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
@@ -145,7 +145,7 @@ float4 DebugControllerPS(in float2 coord : TEXCOORD0, in float3 viewdir : TEXCOO
 
 	float showTotal = showAlbedo + showNormal + showSpecular + showSmoothness + showVisibility + showCustomID + showCustomDataB + showCustomDataA;
 	showTotal += showAlpha + showAlbedoAlpha + showSpecularAlpha + showNormalAlpha + showSmoothnessAlpha + showVisibilityAlpha + showCustomIDAlpha + showCustomDataAlphaB + showCustomDataAlphaA;
-	showTotal += showDepth + showDepthAlpha + showSSAO + showSSDO + showSSR + showPSSM + showOutline + showVXGI;
+	showTotal += showDepth + showDepthAlpha + showSSAO + showSSDO + showSSR + showPSSM + showOutline + showSSGI;
 
 	float3 result = srgb2linear_fast(tex2Dlod(ScnSamp, float4(coord, 0, 0)).rgb) * !any(showTotal);
 	result += material.albedo * showAlbedo;
@@ -196,9 +196,9 @@ float4 DebugControllerPS(in float2 coord : TEXCOORD0, in float3 viewdir : TEXCOO
 	#endif
 
 	#if GI_ENABLE
-		float3 giDebug = tex2Dlod(VXGIMapSamp, float4(coord, 0, 0)).rgb;
-		giDebug *= lerp(1.2, 5.0, showVXGIIntensity);
-		result += giDebug * showVXGI;
+		float3 giDebug = tex2Dlod(SSGIMapSamp, float4(coord, 0, 0)).rgb;
+		giDebug *= lerp(1.2, 5.0, showSSGIIntensity);
+		result += giDebug * showSSGI;
 	#endif
 
 	#if SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE

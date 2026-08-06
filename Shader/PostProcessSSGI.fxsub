@@ -1,0 +1,240 @@
+////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//  Screen-Space Global Illumination
+//
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+#if GI_QUALITY == 1
+#	define SSGI_ANGLES 4
+#	define SSGI_STEPS 4
+#	define SSGI_RADIUS 6
+#elif GI_QUALITY == 2
+#	define SSGI_ANGLES 6
+#	define SSGI_STEPS 4
+#	define SSGI_RADIUS 6
+#elif GI_QUALITY == 3
+#	define SSGI_ANGLES 8
+#	define SSGI_STEPS 4
+#	define SSGI_RADIUS 6
+#elif GI_QUALITY == 4
+#	define SSGI_ANGLES 6
+#	define SSGI_STEPS 8
+#	define SSGI_RADIUS 8
+#elif GI_QUALITY == 5
+#	define SSGI_ANGLES 8
+#	define SSGI_STEPS 8
+#	define SSGI_RADIUS 8
+#elif GI_QUALITY == 6
+#	define SSGI_ANGLES 12
+#	define SSGI_STEPS 12
+#	define SSGI_RADIUS 10
+#elif GI_QUALITY == 7
+#	define SSGI_ANGLES 16
+#	define SSGI_STEPS 16
+#	define SSGI_RADIUS 12
+#else
+#	define SSGI_ANGLES 6
+#	define SSGI_STEPS 5
+#	define SSGI_RADIUS 6
+#endif
+
+float mSSGIIntensityPlus : CONTROLOBJECT < string name="ray_controller.pmx"; string item = "SSGI+"; >;
+float mSSGIIntensityMinus : CONTROLOBJECT < string name="ray_controller.pmx"; string item = "SSGI-"; >;
+
+inline float GetSSGILinearDepth(float2 uv)
+{
+	return tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).r;
+}
+
+inline float3 GetSSGINormal(float2 uv)
+{
+	return DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(uv, 0, 0)));
+}
+
+inline float ComputeThicknessWeight(float zDiff, float viewZ, float distanceSq)
+{
+	float dynamicThickness = max(1.0f, 2.0f + viewZ * 0.02f + sqrt(distanceSq) * 0.35f);
+	float edge0 = dynamicThickness * 0.85f;
+	float x = saturate((abs(zDiff) - edge0) / (dynamicThickness - edge0));
+	return 1.0f - (x * x * (3.0f - 2.0f * x));
+}
+
+inline float ComputeProximityBoost(float distance, float limitDist)
+{
+	float n = saturate(distance / max(limitDist, 0.001f));
+	return lerp(1.35f, 0.9f, n * n * (3.0f - 2.0f * n));
+}
+
+float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) : COLOR
+{
+	float zOrigin = GetSSGILinearDepth(uvCoord.xy);
+	if (!(zOrigin > 0.0f && zOrigin < 1000.0f)) clip(-1);
+
+	float4 projInfo = GetProjConstant();
+	float3 nOrigin = GetSSGINormal(uvCoord.xy);
+	float3 pOrigin = GetViewPosition(projInfo, uvCoord.xy, zOrigin);
+
+	float screenSize = max(min(ViewportSize.x, ViewportSize.y), 1.0f);
+	float maxRadPx = min(0.1f * screenSize * 31.6f, screenSize * 0.5f);
+	float screenRadius = clamp(15.3f * screenSize * log2(max(zOrigin, 1.0f)), (float)SSGI_STEPS, maxRadPx) / screenSize;
+
+	float noise = InterleavedGradientNoise(uvCoord.xy * ViewportSize);
+	float startAngle = noise * PI_2;
+	float stepOffset = frac(noise * 7.321f);
+
+	float3 totalGi = 0.0f;
+	float maxDistance = mSSGIScale * 100.0f;
+	
+	[loop]
+	for (int a = 0; a < SSGI_ANGLES; ++a)
+	{
+		float theta = (float(a) / float(SSGI_ANGLES)) * PI_2 + startAngle;
+		float2 direction = float2(cos(theta), sin(theta));
+		float2 uvDelta = direction * (screenRadius / float(SSGI_STEPS));
+		float2 currentUv = uvCoord.xy + uvDelta * (stepOffset + 0.5f);
+
+		float accumWeight = 0.0f;
+		float3 accumIllum = 0.0f;
+
+		[loop]
+		for (int s = 0; s < SSGI_STEPS; ++s)
+		{
+			if (currentUv.x < 0.0f || currentUv.x > 1.0f || currentUv.y < 0.0f || currentUv.y > 1.0f) break;
+
+			float zSample = GetSSGILinearDepth(currentUv);
+			if (zSample > 0.0f && zSample < 1000.0f)
+			{
+				float3 pSample = GetViewPosition(projInfo, currentUv, zSample);
+				float3 diff = pSample - pOrigin;
+				float distSq = dot(diff, diff);
+				float dist = sqrt(distSq);
+				float3 lightVector = diff / (dist + 1e-5f);
+				
+				float NdotL = dot(nOrigin, lightVector);
+				if (NdotL > 0.05f)
+				{
+					float distRatio = saturate(dist / maxDistance);
+					float fade = saturate(1.0f - distRatio * distRatio);
+					float atten = (fade * fade) / (1.0f + distSq * 0.005f);
+					
+					float thickWeight = ComputeThicknessWeight(pSample.z - pOrigin.z, pOrigin.z, distSq);
+					float w = NdotL * atten * thickWeight * ComputeProximityBoost(dist, maxDistance);
+					
+					float3 sampleColor = clamp(tex2Dlod(ShadingMapSamp, float4(currentUv, 0, 0)).rgb, 0.0f, 1000.0f);
+					float luma = dot(sampleColor, float3(0.2126f, 0.7152f, 0.0722f));
+					
+					int shadingModel = (int)floor(tex2Dlod(Gbuffer8Map, float4(currentUv, 0, 0)).a);
+					
+					if (shadingModel == 2)
+					{
+						sampleColor *= (luma > 3.0f) ? (3.0f + 5.0f * (1.0f - exp(-(luma - 3.0f) * 0.2f))) / max(luma, 1e-5f) : 1.0f;
+						accumIllum += sampleColor * w * 1.5f;
+					}
+					else
+					{
+						sampleColor *= (luma > 1.5f) ? (1.5f + 3.5f * (1.0f - exp(-(luma - 1.5f) * 0.5f))) / max(luma, 1e-5f) : 1.0f;
+						accumIllum += sampleColor * w;
+					}
+					
+					accumWeight += w;
+				}
+			}
+			currentUv += uvDelta;
+		}
+		
+		totalGi += (accumWeight > 1e-5f) ? (accumIllum / accumWeight) : 0.0f;
+	}
+
+	float intensityMultiplier = max(0.0f, 1.0f + (mSSGIIntensityPlus * 2.0f) - mSSGIIntensityMinus);
+	float3 finalGi = (totalGi / float(SSGI_ANGLES * SSGI_STEPS)) * 12.0f * intensityMultiplier;
+	
+	return float4(clamp(finalGi, 0.0f, 1000.0f), 1.0f);
+}
+
+float4 SSGIBlurPS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1, uniform sampler source, uniform float stepSize) : COLOR
+{
+	float zCenter = GetSSGILinearDepth(uvCoord);
+	if (!(zCenter > 0.0f && zCenter < 1000.0f)) return float4(0, 0, 0, 0);
+
+	float3 nCenter = GetSSGINormal(uvCoord);
+	float4 cCenter = clamp(tex2Dlod(source, float4(uvCoord, 0, 0)), 0.0f, 1000.0f);
+	
+	float luma = dot(cCenter.rgb, float3(0.299f, 0.587f, 0.114f));
+	float sharpness = lerp(mGIBlurSharpness * 0.35f, mGIBlurSharpness, saturate(luma * 4.0f));
+
+	float2 blurDir = stepSize < 2.0f ? float2(ViewportOffset2.x, 0.0f) : float2(0.0f, ViewportOffset2.y);
+	
+	float totalW = 1.0f;
+	float4 totalC = cCenter;
+
+	[unroll]
+	for (int i = 1; i <= SSGI_RADIUS; ++i)
+	{
+		float2 shift = blurDir * (float)i;
+		float2 uvA = uvCoord + shift;
+		float2 uvB = uvCoord - shift;
+
+		float zA = GetSSGILinearDepth(uvA);
+		float zB = GetSSGILinearDepth(uvB);
+		zA = (zA > 0.0f && zA < 1000.0f) ? zA : (zCenter + 10000.0f);
+		zB = (zB > 0.0f && zB < 1000.0f) ? zB : (zCenter + 10000.0f);
+
+		float3 nA = GetSSGINormal(uvA);
+		float3 nB = GetSSGINormal(uvB);
+
+		float wA = exp(-i * i * 0.03f) * exp(-(abs(zA - zCenter) / max(zCenter, 0.1f)) * sharpness) * saturate(dot(nA, nCenter));
+		float wB = exp(-i * i * 0.03f) * exp(-(abs(zB - zCenter) / max(zCenter, 0.1f)) * sharpness) * saturate(dot(nB, nCenter));
+
+		totalC += clamp(tex2Dlod(source, float4(uvA, 0, 0)), 0.0f, 1000.0f) * wA;
+		totalC += clamp(tex2Dlod(source, float4(uvB, 0, 0)), 0.0f, 1000.0f) * wB;
+		totalW += wA + wB;
+	}
+
+	return clamp(totalC / max(totalW, 1e-5f), 0.0f, 1000.0f);
+}
+
+float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) : COLOR
+{
+	MaterialParam mat;
+	DecodeGbuffer(tex2Dlod(Gbuffer5Map, float4(uvCoord, 0, 0)), tex2Dlod(Gbuffer6Map, float4(uvCoord, 0, 0)), tex2Dlod(Gbuffer7Map, float4(uvCoord, 0, 0)), tex2Dlod(Gbuffer8Map, float4(uvCoord, 0, 0)), mat);
+
+	float3 rawGi = clamp(tex2Dlod(SSGIMapSamp, float4(uvCoord, 0, 0)).rgb, 0.0f, 1000.0f);
+	
+#if SSDO_QUALITY > 0
+	float occlusion = min((mat.lightModel == SHADINGMODELID_GLASS) ? 1.0f : tex2Dlod(SSDOMapSamp, float4(uvCoord, 0, 0)).w, mat.visibility);
+#else
+	float occlusion = mat.visibility;
+#endif
+
+	float3 camDir = normalize(viewDir);
+	float NdV = saturate(dot(mat.normal, camDir));
+	
+	[branch]
+	if (mat.lightModel == SHADINGMODELID_SKIN || mat.lightModel == SHADINGMODELID_SUBSURFACE)
+	{
+		rawGi *= lerp(mat.albedo, mat.albedo * float3(1.12f, 0.88f, 0.78f), 0.35f);
+	}
+	else if (mat.lightModel == SHADINGMODELID_GLASS)
+	{
+		rawGi *= max(0.02f, mat.albedo) * (1.0f - saturate(pow(1.0f - NdV, 5.0f))) * mat.alpha;
+	}
+	else if (mat.lightModel == SHADINGMODELID_CLOTH)
+	{
+		rawGi *= mat.albedo + mat.customDataB * (pow(1.0f - NdV, 4.0f) * mat.customDataA);
+	}
+	else if (mat.lightModel == SHADINGMODELID_CLEAR_COAT)
+	{
+		rawGi *= mat.albedo * (1.0f - mat.customDataA * (0.04f + 0.96f * pow(1.0f - NdV, 5.0f)));
+	}
+	else if (mat.lightModel == SHADINGMODELID_CEL || mat.lightModel == SHADINGMODELID_TONEBASED)
+	{
+		float luma = dot(rawGi, float3(0.299f, 0.587f, 0.114f));
+		rawGi = (luma > 1e-4f) ? rawGi * ((floor(luma * 4.0f + 0.5f) / 4.0f) / max(luma, 1e-4f)) * mat.albedo : rawGi * mat.albedo;
+	}
+	else
+	{
+		rawGi *= mat.albedo;
+	}
+
+	return float4(clamp(rawGi * mSSGIIntensity * occlusion, 0.0f, 1000.0f), 0.0f);
+}
