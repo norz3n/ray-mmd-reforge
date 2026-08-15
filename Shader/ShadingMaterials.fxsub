@@ -172,11 +172,20 @@ float4 ShadingTransparentPS(
 #endif
 
 	float2 ior = (material.lightModel != SHADINGMODELID_GLASS) ? 0 : mul(material.normal, (float3x3)matViewInverse).xy * material.customDataA * 0.04;
-	float3 prefilteredRefract = tex2Dlod(ShadingMapTempPointSamp, float4(coord + ior, 0, 0)).rgb;
-	prefilteredRefract += srgb2linear(tex2Dlod(ScnSamp, float4(coord + ior, 0, 0)).rgb);
+	float3 prefilteredRefract;
 
 	if (material.lightModel == SHADINGMODELID_GLASS)
 	{
+		float2 iorR = ior * 0.94f;
+		float2 iorG = ior * 1.00f;
+		float2 iorB = ior * 1.06f;
+
+		prefilteredRefract = float3(
+			tex2Dlod(ShadingMapTempPointSamp, float4(coord + iorR, 0, 0)).r + srgb2linear(tex2Dlod(ScnSamp, float4(coord + iorR, 0, 0)).rgb).r,
+			tex2Dlod(ShadingMapTempPointSamp, float4(coord + iorG, 0, 0)).g + srgb2linear(tex2Dlod(ScnSamp, float4(coord + iorG, 0, 0)).rgb).g,
+			tex2Dlod(ShadingMapTempPointSamp, float4(coord + iorB, 0, 0)).b + srgb2linear(tex2Dlod(ScnSamp, float4(coord + iorB, 0, 0)).rgb).b
+		);
+
 		float3 dielectricColor = max(0.02, material.albedo);
 		float3 trans = lerp(material.specular, 1.0, (1 - saturate(dot(normalize((L + V) / 2), -L))));
 		float3 fresnel = FresnelSchlickGlass(material.normal, V, material.smoothness, material.specular);
@@ -186,6 +195,8 @@ float4 ShadingTransparentPS(
 	}
 	else
 	{
+		prefilteredRefract = tex2Dlod(ShadingMapTempPointSamp, float4(coord + ior, 0, 0)).rgb;
+		prefilteredRefract += srgb2linear(tex2Dlod(ScnSamp, float4(coord + ior, 0, 0)).rgb);
 		lighting = lerp(prefilteredRefract * (1 - material.alpha), lighting, material.alpha);
 	}
 

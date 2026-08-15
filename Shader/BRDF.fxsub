@@ -138,26 +138,46 @@ float3 SpecularBRDF_GGX(float nh, float nl, float vh, float nv, float roughness,
 	return fresnel * spec;
 }
 
-float3 SpecularBRDF_GGXAniso(float3 N, float3 H, float nh, float nl, float vh, float nv, float3 specular, float roughness, float anisotropic, float3 shift, float NormalizationFactor)
+float3 DualLobeSkinSpecular(float nh, float nl, float vh, float nv, float roughness, float3 specular, float normalizeFactor)
 {
-	float3 X = normalize(cross(N, float3(0,1,0)) + N * shift.r);
-	float3 Y = normalize(cross(N, X) + N * shift.r);
+	float r1 = roughness;
+	float r2 = saturate(roughness * 0.45f + 0.05f);
+	float3 lobe1 = SpecularBRDF_GGX(nh, nl, vh, nv, r1, specular, normalizeFactor);
+	float3 lobe2 = SpecularBRDF_GGX(nh, nl, vh, nv, r2, specular, normalizeFactor);
+	return lobe1 * 0.6f + lobe2 * 0.4f;
+}
+
+float3 SpecularBRDF_GGXAniso(float3 N, float3 H, float nh, float nl, float vh, float nv, float3 specular, float3 albedo, float roughness, float anisotropic, float3 shift, float NormalizationFactor)
+{
+	float3 T = normalize(cross(N, float3(0,1,0)) + N * shift.r);
+	float3 B = normalize(cross(N, T));
 
 	float aspect = rsqrt(1.0f - anisotropic * 0.9f);
 	float ax = 1.0f / (roughness * aspect);
 	float ay = aspect / roughness;
 
-	float spec = pow2(dot(X, H) * ax) + pow2(dot(Y, H) * ay) + nh * nh;
-	spec = (ax * ay) / (spec * spec) * NormalizationFactor;
+	// Primary highlight (R lobe - shifted towards root)
+	float3 H_shift1 = normalize(H + N * (shift.g * 0.1f));
+	float spec1 = pow2(dot(T, H_shift1) * ax) + pow2(dot(B, H_shift1) * ay) + nh * nh;
+	spec1 = (ax * ay) / (spec1 * spec1) * NormalizationFactor;
+
+	// Secondary highlight (TRT lobe - transmission bounce shifted towards tip, tinted by hair albedo)
+	float3 H_shift2 = normalize(H - N * (shift.b * 0.15f + 0.08f));
+	float r2 = saturate(roughness * 1.4f + 0.1f);
+	float ax2 = 1.0f / (r2 * aspect);
+	float ay2 = aspect / r2;
+	float spec2 = pow2(dot(T, H_shift2) * ax2) + pow2(dot(B, H_shift2) * ay2) + nh * nh;
+	spec2 = (ax2 * ay2) / (spec2 * spec2) * NormalizationFactor;
 
 	float k = 1.0f - roughness;
-	float G = nl * (nv * k + roughness) + nv * (nl * k + roughness);
-	spec *= 0.5f / G;
+	float G = 0.5f / (nl * (nv * k + roughness) + nv * (nl * k + roughness));
+	spec1 *= G;
+	spec2 *= G;
 
 	float3 f0 = specular;
 	float3 fresnel = fresnelSchlick(f0, 1.0f, vh);
 
-	return spec * fresnel;
+	return (spec1 * fresnel) + (spec2 * albedo * 0.45f * fresnel);
 }
 
 #define pow2(x) ((x) * (x))
@@ -279,14 +299,16 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 	float albedoScaling = 1.0f;
 
 	[branch]
-	if (material.lightModel == SHADINGMODELID_CLOTH)
+	if (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE)
+		specular = DualLobeSkinSpecular(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);
+	else if (material.lightModel == SHADINGMODELID_CLOTH)
 		specular = ClothShading(material, nh, nl, vh, nv, roughness, normalizeFactor, albedoScaling);
 	else if (material.lightModel == SHADINGMODELID_CLEAR_COAT)
 		specular = ClearCoatShading(material, nh, nl, vh, nv, roughness, normalizeFactor, albedoScaling);
 	else if (material.lightModel == SHADINGMODELID_GLASS)
 		specular = SpecularBRDF_Blinn(nh, nl, vh, nv, material.smoothness, material.specular, normalizeFactor);
 	else if (material.lightModel == SHADINGMODELID_ANISOTROPY)
-		specular = SpecularBRDF_GGXAniso(N, H, nh, nl, vh, nv, material.specular, roughness, material.customDataA, material.customDataB, normalizeFactor);
+		specular = SpecularBRDF_GGXAniso(N, H, nh, nl, vh, nv, material.specular, material.albedo, roughness, material.customDataA, material.customDataB, normalizeFactor);
 	else
 		specular = SpecularBRDF_GGX(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);
 
@@ -314,14 +336,16 @@ float4 SurfaceEnergy(MaterialParam material, float3 N, float3 Ld, float3 Ls, flo
 	float albedoScaling = 1.0f;
 
 	[branch]
-	if (material.lightModel == SHADINGMODELID_CLOTH)
+	if (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE)
+		specular = DualLobeSkinSpecular(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);
+	else if (material.lightModel == SHADINGMODELID_CLOTH)
 		specular = ClothShading(material, nh, nl, vh, nv, roughness, normalizeFactor, albedoScaling);
 	else if (material.lightModel == SHADINGMODELID_CLEAR_COAT)
 		specular = ClearCoatShading(material, nh, nl, vh, nv, roughness, normalizeFactor, albedoScaling);
 	else if (material.lightModel == SHADINGMODELID_GLASS)
 		specular = SpecularBRDF_Blinn(nh, nl, vh, nv, material.smoothness, material.specular, normalizeFactor);
 	else if (material.lightModel == SHADINGMODELID_ANISOTROPY)
-		specular = SpecularBRDF_GGXAniso(N, H, nh, nl, vh, nv, material.specular, roughness, material.customDataA, material.customDataB, normalizeFactor);
+		specular = SpecularBRDF_GGXAniso(N, H, nh, nl, vh, nv, material.specular, material.albedo, roughness, material.customDataA, material.customDataB, normalizeFactor);
 	else
 		specular = SpecularBRDF_GGX(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);
 

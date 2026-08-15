@@ -212,6 +212,34 @@ float3 TonemapACESFitted(float3 color)
 	return saturate(mul(ACESOutputMat, color));
 }
 
+// AgX Tonemapping (Troy Sobotka / Blender 4.0 standard) - preserves chromatic purity and hue in extreme highlights
+float3 TonemapAgX(float3 val)
+{
+	static const float3x3 AgXInsetMat = {
+		0.842479065f, 0.0784336f, 0.079223745f,
+		0.04232824f, 0.87846864f, 0.079166127f,
+		0.042375655f, 0.0784336f, 0.87914297f
+	};
+	static const float3x3 AgXOutMat = {
+		1.196879f, -0.05289685f, -0.052971635f,
+		-0.09802088f, 1.1519031f, -0.09804345f,
+		-0.09902975f, -0.07547978f, 1.1510731f
+	};
+
+	val = max(0.0f, val);
+	val = mul(AgXInsetMat, val);
+
+	// Log2 curve: mapping [-10 EV, +6.5 EV]
+	val = clamp((log2(max(1e-5f, val)) + 10.0f) / 16.5f, 0.0f, 1.0f);
+
+	// AgX Sigmoid S-curve approximation
+	val = val * val * (3.0f - 2.0f * val);
+	val = val * val * (3.0f - 2.0f * val);
+
+	val = mul(AgXOutMat, val);
+	return saturate(val);
+}
+
 float3 ColorToneMapping(float3 color)
 {
 #if HDR_TONEMAP_OPERATOR == 1
@@ -236,6 +264,9 @@ float3 ColorToneMapping(float3 color)
 	return saturate(curr);
 #elif HDR_TONEMAP_OPERATOR == 7
 	float3 curr = TonemapACESFitted(color);
+	return saturate(curr);
+#elif HDR_TONEMAP_OPERATOR == 8
+	float3 curr = TonemapAgX(color);
 	return saturate(curr);
 #else
 	return saturate(color);
