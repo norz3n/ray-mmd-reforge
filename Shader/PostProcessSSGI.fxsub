@@ -53,7 +53,7 @@ inline float3 GetSSGINormal(float2 uv)
 
 inline float ComputeThicknessWeight(float zDiff, float viewZ, float distance)
 {
-	float dynamicThickness = max(1.5f, 3.0f + viewZ * 0.05f + distance * 0.35f);
+	float dynamicThickness = max(0.6f, 1.2f + viewZ * 0.02f + distance * 0.12f);
 	float x = saturate(abs(zDiff) / dynamicThickness);
 	return 1.0f - (x * x * (3.0f - 2.0f * x));
 }
@@ -74,9 +74,12 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 	float projScale = max(abs(projInfo.x), 1e-4f);
 	float screenRadius = clamp(maxWorldDistance / (zOrigin * projScale), 0.01f, 0.6f);
 
-	float noise = InterleavedGradientNoise(uvCoord.xy * ViewportSize);
-	float startAngle = noise * PI_2;
-	float stepOffset = frac(noise * 7.321f);
+	float2 screenPixel = uvCoord.xy * ViewportSize;
+	float noiseAngle = InterleavedGradientNoise(screenPixel);
+	float noiseRadius = frac(noiseAngle * 5.588238f + (screenPixel.x + screenPixel.y * 5.588238f) * 0.61803398875f);
+
+	float startAngle = noiseAngle * PI_2;
+	float stepOffset = noiseRadius;
 
 	float3 totalGi = 0.0f;
 	float minDistanceSq = max(mSSGIBias * mSSGIBias * 0.02f, 0.001f);
@@ -86,6 +89,7 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 	{
 		float theta = (float(a) / float(SSGI_ANGLES)) * PI_2 + startAngle;
 		float2 direction = float2(cos(theta), sin(theta));
+		float rayJitter = frac(noiseRadius + float(a) * 0.61803398875f);
 
 		float3 rayColor = 0.0f;
 		float rayOcc = 0.0f;
@@ -93,8 +97,8 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 		[loop]
 		for (int s = 0; s < SSGI_STEPS; ++s)
 		{
-			// Quadratic step progression for dense near-field contacts & broad far-field bounce
-			float stepProgress = (float(s) + stepOffset + 0.5f) / float(SSGI_STEPS);
+			// Staggered per-ray step progression completely dissolves concentric ring bands
+			float stepProgress = (float(s) + rayJitter) / float(SSGI_STEPS);
 			float stepDist = stepProgress * stepProgress;
 			float2 currentUv = uvCoord.xy + direction * (screenRadius * stepDist);
 
@@ -117,31 +121,34 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 					float NdotL = dot(nOrigin, lightVector);
 					if (NdotL > 0.0f)
 					{
-						// Emitter cosine factor (sample must face the receiver, with smooth wrap)
+						int shadingModel = (int)floor(tex2Dlod(Gbuffer8Map, float4(currentUv, 0, 0)).a);
+						bool isEmissive = (shadingModel == SHADINGMODELID_EMISSIVE);
+
+						// Emitter cosine factor (sample must face the receiver, or be an active omnidirectional emissive light source)
 						float3 nSample = GetSSGINormal(currentUv);
 						float NsDotMinusL = dot(nSample, -lightVector);
-						if (NsDotMinusL > -0.15f)
+						if (NsDotMinusL > -0.15f || isEmissive)
 						{
-							float geomFactor = saturate(NdotL) * saturate(NsDotMinusL * 0.85f + 0.15f);
+							float geomFactor = saturate(NdotL) * (isEmissive ? 1.0f : saturate(NsDotMinusL * 0.85f + 0.15f));
 							
-							// Distance attenuation with smooth window cutoff
+							// Distance attenuation with smooth window cutoff & physical inverse falloff (wider reach for emissive lights)
 							float distRatio = saturate(dist / maxWorldDistance);
 							float fade = 1.0f - distRatio * distRatio;
-							float atten = fade * fade;
+							float invDistFalloff = 1.0f / (1.0f + dist * (isEmissive ? 0.08f : 0.35f));
+							float atten = (fade * fade) * invDistFalloff;
 							
 							// Thickness visibility weighting
-							float thickWeight = ComputeThicknessWeight(pSample.z - pOrigin.z, pOrigin.z, dist);
-							float w = saturate(geomFactor * atten * thickWeight * 1.5f);
+							float thickWeight = isEmissive ? 1.0f : ComputeThicknessWeight(pSample.z - pOrigin.z, pOrigin.z, dist);
+							float w = saturate(geomFactor * atten * thickWeight);
 							
 							if (w > 1e-3f)
 							{
 								float3 sampleColor = tex2Dlod(ShadingMapSamp, float4(currentUv, 0, 0)).rgb;
 								sampleColor = clamp(sampleColor, 0.0f, 100.0f);
 								
-								int shadingModel = (int)floor(tex2Dlod(Gbuffer8Map, float4(currentUv, 0, 0)).a);
-								if (shadingModel == SHADINGMODELID_EMISSIVE)
+								if (isEmissive)
 								{
-									sampleColor *= 2.0f;
+									sampleColor *= 4.0f;
 								}
 								
 								// Front-to-back ray accumulation
@@ -161,7 +168,7 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 	}
 
 	float intensityMultiplier = lerp(lerp(1.0f, 3.0f, mSSGIIntensityPlus), 0.0f, mSSGIIntensityMinus);
-	float3 finalGi = (totalGi / float(SSGI_ANGLES)) * (PI * intensityMultiplier * 1.5f);
+	float3 finalGi = (totalGi / float(SSGI_ANGLES)) * (PI * intensityMultiplier);
 	
 	return float4(clamp(finalGi, 0.0f, 100.0f), 1.0f);
 }
@@ -171,14 +178,15 @@ float4 SSGIBlurPS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1, 
 	float zCenter = GetSSGILinearDepth(uvCoord);
 	if (!(zCenter > 0.0f && zCenter < 1000.0f)) return float4(0, 0, 0, 0);
 
+	float4 projInfo = GetProjConstant();
 	float3 nCenter = GetSSGINormal(uvCoord);
+	float3 pCenter = GetViewPosition(projInfo, uvCoord, zCenter);
+
 	float4 cCenter = tex2Dlod(source, float4(uvCoord, 0, 0));
 	cCenter = clamp(cCenter, 0.0f, 100.0f);
 	
-	float luma = dot(cCenter.rgb, float3(0.299f, 0.587f, 0.114f));
-	float sharpness = lerp(mGIBlurSharpness * 0.5f, mGIBlurSharpness, saturate(luma * 4.0f));
-
 	float2 blurDir = stepSize < 2.0f ? float2(ViewportOffset2.x, 0.0f) : float2(0.0f, ViewportOffset2.y);
+	float planeThreshold = max(zCenter * 0.04f, 0.25f);
 	
 	float totalW = 1.0f;
 	float4 totalC = cCenter;
@@ -195,12 +203,25 @@ float4 SSGIBlurPS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1, 
 		zA = (zA > 0.0f && zA < 1000.0f) ? zA : (zCenter + 10000.0f);
 		zB = (zB > 0.0f && zB < 1000.0f) ? zB : (zCenter + 10000.0f);
 
+		float3 pA = GetViewPosition(projInfo, uvA, zA);
+		float3 pB = GetViewPosition(projInfo, uvB, zB);
+
+		float planeDistA = abs(dot(nCenter, pA - pCenter));
+		float planeDistB = abs(dot(nCenter, pB - pCenter));
+
+		float depthWeightA = saturate(1.0f - planeDistA / planeThreshold);
+		float depthWeightB = saturate(1.0f - planeDistB / planeThreshold);
+
 		float3 nA = GetSSGINormal(uvA);
 		float3 nB = GetSSGINormal(uvB);
 
-		float depthScale = max(zCenter * 0.03f, 0.05f);
-		float wA = exp(-i * i * 0.05f) * exp(-(abs(zA - zCenter) / depthScale) * sharpness) * saturate(dot(nA, nCenter));
-		float wB = exp(-i * i * 0.05f) * exp(-(abs(zB - zCenter) / depthScale) * sharpness) * saturate(dot(nB, nCenter));
+		float normalWeightA = saturate(dot(nA, nCenter));
+		float normalWeightB = saturate(dot(nB, nCenter));
+
+		float spatialWeight = exp(-i * i * 0.025f);
+
+		float wA = spatialWeight * depthWeightA * (normalWeightA * normalWeightA);
+		float wB = spatialWeight * depthWeightB * (normalWeightB * normalWeightB);
 
 		totalC += clamp(tex2Dlod(source, float4(uvA, 0, 0)), 0.0f, 100.0f) * wA;
 		totalC += clamp(tex2Dlod(source, float4(uvB, 0, 0)), 0.0f, 100.0f) * wB;
