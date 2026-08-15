@@ -85,24 +85,6 @@ sampler PSSM1Samp = sampler_state {
 	MinFilter = NONE; MagFilter = NONE; MipFilter = NONE;
 	AddressU = BORDER; AddressV = BORDER; BorderColor = 0.0;
 };
-shared texture PSSM2 : OFFSCREENRENDERTARGET;
-sampler PSSM2Samp = sampler_state {
-	texture = <PSSM2>;
-	MinFilter = NONE; MagFilter = NONE; MipFilter = NONE;
-	AddressU = BORDER; AddressV = BORDER; BorderColor = 0.0;
-};
-shared texture PSSM3 : OFFSCREENRENDERTARGET;
-sampler PSSM3Samp = sampler_state {
-	texture = <PSSM3>;
-	MinFilter = NONE; MagFilter = NONE; MipFilter = NONE;
-	AddressU = BORDER; AddressV = BORDER; BorderColor = 0.0;
-};
-shared texture PSSM4 : OFFSCREENRENDERTARGET;
-sampler PSSM4Samp = sampler_state {
-	texture = <PSSM4>;
-	MinFilter = NONE; MagFilter = NONE; MipFilter = NONE;
-	AddressU = BORDER; AddressV = BORDER; BorderColor = 0.0;
-};
 #endif
 #if OUTLINE_QUALITY
 shared texture OutlineMap : OFFSCREENRENDERTARGET;
@@ -203,10 +185,7 @@ float4 DebugControllerPS(in float2 coord : TEXCOORD0, in float3 viewdir : TEXCOO
 
 	#if SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE
 		float depth1 = tex2Dlod(PSSM1Samp, float4(coord * 2.0, 0, 0)).r;		
-		float depth2 = tex2Dlod(PSSM2Samp, float4(coord * 2.0 - float2(1.0, 0.0), 0, 0)).r;		
-		float depth3 = tex2Dlod(PSSM3Samp, float4(coord * 2.0 - float2(0.0, 1.0), 0, 0)).r;		
-		float depth4 = tex2Dlod(PSSM4Samp, float4(coord * 2.0 - float2(1.0, 1.0), 0, 0)).r;		
-		result += pow(saturate((depth1 + depth2 + depth3 + depth4) / 1500), 2) * showPSSM;
+		result += pow(saturate(depth1 / 1500), 2) * showPSSM;
 	#endif
 	
 	#if CONTACT_SHADOW_QUALITY >= 1

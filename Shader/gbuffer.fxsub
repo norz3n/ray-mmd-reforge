@@ -50,7 +50,8 @@ float3 DecodeNormal(float3 enc)
 	enc.xy += float2(floor(nz) / 16, frac(nz)) / 255;
 	float2 fenc = enc.xy * 4 - 2;
 	float f = dot(fenc, fenc);
-	float g = sqrt(1 - f / 4);
+	if (!(f >= 0.0f && f <= 10.0f)) return float3(0.0f, 1.0f, 0.0f);
+	float g = sqrt(max(1.0f - f / 4.0f, 0.0f));
 	float3 normal;
 	normal.xy = fenc * g;
 	normal.z = f / 2 - 1;
