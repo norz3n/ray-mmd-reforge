@@ -272,7 +272,8 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 	[branch]
 	if (mat.lightModel == SHADINGMODELID_SKIN || mat.lightModel == SHADINGMODELID_SUBSURFACE)
 	{
-		rawGi *= mat.albedo;
+		// Skin absorbs light internally through melanin & hemoglobin, preventing unnatural glow
+		rawGi *= mat.albedo * 0.5f;
 	}
 	else if (mat.lightModel == SHADINGMODELID_GLASS)
 	{
@@ -297,11 +298,10 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 	}
 
 #if GI_ENABLE >= 2
-	// UE5 Lumen Multi-Bounce Diffuse Radiance (Jimenez multi-scattering approximation)
-	// Compensates for secondary and tertiary ambient bounces between surfaces, filling shadows with rich colored light
-	float3 multiBounce = 1.0f + (mat.albedo * 1.5f) / max(1.0f - mat.albedo * 0.7f, 0.15f);
+	bool isSkin = (mat.lightModel == SHADINGMODELID_SKIN || mat.lightModel == SHADINGMODELID_SUBSURFACE);
+	float3 multiBounce = isSkin ? 1.0f : (1.0f + (mat.albedo * 1.5f) / max(1.0f - mat.albedo * 0.7f, 0.15f));
 	rawGi *= multiBounce;
-	return float4(clamp(rawGi * mSSGIIntensity * lerp(occlusion, 1.0f, 0.45f), 0.0f, 100.0f), 0.0f);
+	return float4(clamp(rawGi * mSSGIIntensity * (isSkin ? occlusion : lerp(occlusion, 1.0f, 0.45f)), 0.0f, 100.0f), 0.0f);
 #else
 	return float4(clamp(rawGi * mSSGIIntensity * occlusion, 0.0f, 100.0f), 0.0f);
 #endif
