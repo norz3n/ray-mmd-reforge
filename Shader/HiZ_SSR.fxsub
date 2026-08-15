@@ -1,32 +1,51 @@
-// Credit: material by dendewa (https://dendewa.vercel.app/)
-// Shared hierarchical depth traversal for SSR, contact shadows and future
-// screen-space effects.  The pyramid itself is built by ray.fx once per frame.
-#ifndef RAY_MMD_HIZ_TRACE_FXSUB
-#define RAY_MMD_HIZ_TRACE_FXSUB
-static const float2 kHZBMip1ViewportSize = floor(ViewportSize / 2.0);
-static const float2 kHZBMip2ViewportSize = floor(ViewportSize / 4.0);
-static const float2 kHZBMip3ViewportSize = floor(ViewportSize / 8.0);
-static const float2 kHZBMip4ViewportSize = floor(ViewportSize / 16.0);
-static const float2 kHZBMip5ViewportSize = floor(ViewportSize / 32.0);
-static const float2 kHZBMip6ViewportSize = floor(ViewportSize / 64.0);
-static const float2 kHZBMip7ViewportSize = floor(ViewportSize / 128.0);
-static const float2 kHZBMip8ViewportSize = floor(ViewportSize / 256.0);
-static const float2 kHZBMip9ViewportSize = floor(ViewportSize / 512.0);
-static const float2 kHZBMip10ViewportSize = floor(ViewportSize / 1024.0);
+/**
+ * Ray-MMD ReForge: Hierarchical Z-Buffer (Hi-Z) Depth Acceleration Structure
+ *
+ * Implements conservative depth pyramid construction and screen-space
+ * hierarchical raymarching (based on Assarsson, Akenine-Moller, and McGuire).
+ */
 
-#define MIP_DIV_1  (2)
-#define MIP_DIV_2  (MIP_DIV_1 * 2)
-#define MIP_DIV_3  (MIP_DIV_2 * 2)
-#define MIP_DIV_4  (MIP_DIV_3 * 2)
-#define MIP_DIV_5  (MIP_DIV_4 * 2)
-#define MIP_DIV_6  (MIP_DIV_5 * 2)
-#define MIP_DIV_7  (MIP_DIV_6 * 2)
-#define MIP_DIV_8  (MIP_DIV_7 * 2)
-#define MIP_DIV_9  (MIP_DIV_8 * 2)
-#define MIP_DIV_10 (MIP_DIV_9 * 2)
+#ifndef RAY_MMD_HIZ_SSR_FXSUB
+#define RAY_MMD_HIZ_SSR_FXSUB
+
+// Viewport dimensions for each mip level of the hierarchical depth pyramid
+static const float2 HZBMipSize[10] = {
+	floor(ViewportSize / 2.0f),
+	floor(ViewportSize / 4.0f),
+	floor(ViewportSize / 8.0f),
+	floor(ViewportSize / 16.0f),
+	floor(ViewportSize / 32.0f),
+	floor(ViewportSize / 64.0f),
+	floor(ViewportSize / 128.0f),
+	floor(ViewportSize / 256.0f),
+	floor(ViewportSize / 512.0f),
+	floor(ViewportSize / 1024.0f)
+};
+
+static const float2 kHZBMip1ViewportSize  = HZBMipSize[0];
+static const float2 kHZBMip2ViewportSize  = HZBMipSize[1];
+static const float2 kHZBMip3ViewportSize  = HZBMipSize[2];
+static const float2 kHZBMip4ViewportSize  = HZBMipSize[3];
+static const float2 kHZBMip5ViewportSize  = HZBMipSize[4];
+static const float2 kHZBMip6ViewportSize  = HZBMipSize[5];
+static const float2 kHZBMip7ViewportSize  = HZBMipSize[6];
+static const float2 kHZBMip8ViewportSize  = HZBMipSize[7];
+static const float2 kHZBMip9ViewportSize  = HZBMipSize[8];
+static const float2 kHZBMip10ViewportSize = HZBMipSize[9];
+
+#define MIP_DIV_1  2
+#define MIP_DIV_2  4
+#define MIP_DIV_3  8
+#define MIP_DIV_4  16
+#define MIP_DIV_5  32
+#define MIP_DIV_6  64
+#define MIP_DIV_7  128
+#define MIP_DIV_8  256
+#define MIP_DIV_9  512
+#define MIP_DIV_10 1024
 
 shared texture ZBufferMipmap1 : RENDERCOLORTARGET<
-	float2 ViewportRatio = {1.0/MIP_DIV_1, 1.0/MIP_DIV_1};
+	float2 ViewportRatio = {1.0 / MIP_DIV_1, 1.0 / MIP_DIV_1};
 	string Format = "R16F";
 >;
 sampler ZBufferMipmap1Samp = sampler_state {
@@ -34,8 +53,9 @@ sampler ZBufferMipmap1Samp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
+
 shared texture ZBufferMipmap2 : RENDERCOLORTARGET<
-	float2 ViewportRatio = {1.0/MIP_DIV_2, 1.0/MIP_DIV_2};
+	float2 ViewportRatio = {1.0 / MIP_DIV_2, 1.0 / MIP_DIV_2};
 	string Format = "R16F";
 >;
 sampler ZBufferMipmap2Samp = sampler_state {
@@ -43,8 +63,9 @@ sampler ZBufferMipmap2Samp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
+
 shared texture ZBufferMipmap3 : RENDERCOLORTARGET<
-	float2 ViewportRatio = {1.0/MIP_DIV_3, 1.0/MIP_DIV_3};
+	float2 ViewportRatio = {1.0 / MIP_DIV_3, 1.0 / MIP_DIV_3};
 	string Format = "R16F";
 >;
 sampler ZBufferMipmap3Samp = sampler_state {
@@ -52,8 +73,9 @@ sampler ZBufferMipmap3Samp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
+
 shared texture ZBufferMipmap4 : RENDERCOLORTARGET<
-	float2 ViewportRatio = {1.0/MIP_DIV_4, 1.0/MIP_DIV_4};
+	float2 ViewportRatio = {1.0 / MIP_DIV_4, 1.0 / MIP_DIV_4};
 	string Format = "R16F";
 >;
 sampler ZBufferMipmap4Samp = sampler_state {
@@ -61,8 +83,9 @@ sampler ZBufferMipmap4Samp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
+
 shared texture ZBufferMipmap5 : RENDERCOLORTARGET<
-	float2 ViewportRatio = {1.0/MIP_DIV_5, 1.0/MIP_DIV_5};
+	float2 ViewportRatio = {1.0 / MIP_DIV_5, 1.0 / MIP_DIV_5};
 	string Format = "R16F";
 >;
 sampler ZBufferMipmap5Samp = sampler_state {
@@ -70,8 +93,9 @@ sampler ZBufferMipmap5Samp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
+
 shared texture ZBufferMipmap6 : RENDERCOLORTARGET<
-	float2 ViewportRatio = {1.0/MIP_DIV_6, 1.0/MIP_DIV_6};
+	float2 ViewportRatio = {1.0 / MIP_DIV_6, 1.0 / MIP_DIV_6};
 	string Format = "R16F";
 >;
 sampler ZBufferMipmap6Samp = sampler_state {
@@ -79,8 +103,9 @@ sampler ZBufferMipmap6Samp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
+
 shared texture ZBufferMipmap7 : RENDERCOLORTARGET<
-	float2 ViewportRatio = {1.0/MIP_DIV_7, 1.0/MIP_DIV_7};
+	float2 ViewportRatio = {1.0 / MIP_DIV_7, 1.0 / MIP_DIV_7};
 	string Format = "R16F";
 >;
 sampler ZBufferMipmap7Samp = sampler_state {
@@ -88,8 +113,9 @@ sampler ZBufferMipmap7Samp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
+
 shared texture ZBufferMipmap8 : RENDERCOLORTARGET<
-	float2 ViewportRatio = {1.0/MIP_DIV_8, 1.0/MIP_DIV_8};
+	float2 ViewportRatio = {1.0 / MIP_DIV_8, 1.0 / MIP_DIV_8};
 	string Format = "R16F";
 >;
 sampler ZBufferMipmap8Samp = sampler_state {
@@ -97,8 +123,9 @@ sampler ZBufferMipmap8Samp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
+
 shared texture ZBufferMipmap9 : RENDERCOLORTARGET<
-	float2 ViewportRatio = {1.0/MIP_DIV_9, 1.0/MIP_DIV_9};
+	float2 ViewportRatio = {1.0 / MIP_DIV_9, 1.0 / MIP_DIV_9};
 	string Format = "R16F";
 >;
 sampler ZBufferMipmap9Samp = sampler_state {
@@ -106,8 +133,9 @@ sampler ZBufferMipmap9Samp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
+
 shared texture ZBufferMipmap10 : RENDERCOLORTARGET<
-	float2 ViewportRatio = {1.0/MIP_DIV_10, 1.0/MIP_DIV_10};
+	float2 ViewportRatio = {1.0 / MIP_DIV_10, 1.0 / MIP_DIV_10};
 	string Format = "R16F";
 >;
 sampler ZBufferMipmap10Samp = sampler_state {
@@ -126,231 +154,252 @@ sampler ZBufferMipmapSamp = sampler_state {
 	AddressU = CLAMP; AddressV = CLAMP;
 };
 
-float4 ZBufferMipmap_1_PS(in float2 pos: VPOS, in float2 coord : TEXCOORD0, uniform sampler source) : COLOR
+/**
+ * Builds Mip 1 from full-resolution G-Buffer linear depth (2x2 minimum reduction).
+ */
+float4 ZBufferMipmap_1_PS(in float2 pos : VPOS, in float2 coord : TEXCOORD0, uniform sampler source) : COLOR
 {
-    float2 uv0 = coord + ViewportOffset * float2(0.5 ,0.5);
-    float2 uv1 = coord + ViewportOffset * float2(0.5 ,1.5);
-    float2 uv2 = coord + ViewportOffset * float2(1.5 ,1.5);
-    float2 uv3 = coord + ViewportOffset * float2(1.5 ,0.5);
+	float2 halfTexel = ViewportOffset * 0.5f;
+	float d0 = tex2Dlod(source, float4(coord + halfTexel * float2(1.0, 1.0), 0, 0)).x;
+	float d1 = tex2Dlod(source, float4(coord + halfTexel * float2(1.0, 3.0), 0, 0)).x;
+	float d2 = tex2Dlod(source, float4(coord + halfTexel * float2(3.0, 3.0), 0, 0)).x;
+	float d3 = tex2Dlod(source, float4(coord + halfTexel * float2(3.0, 1.0), 0, 0)).x;
 
-    float depth = tex2Dlod(source, float4(uv0, 0, 0)).x;
-    depth = min(tex2Dlod(source, float4(uv1, 0, 0)).x, depth);
-    depth = min(tex2Dlod(source, float4(uv2, 0, 0)).x, depth);
-    depth = min(tex2Dlod(source, float4(uv3, 0, 0)).x, depth);
-
-    return float4(depth.xxx, 1);
+	float minDepth = min(min(d0, d1), min(d2, d3));
+	return float4(minDepth.xxx, 1.0f);
 }
 
-float4 ZBufferMipmap_N_PS(in float2 pos: VPOS, in float2 coord : TEXCOORD0, uniform sampler source, uniform float2 viewportSize, uniform float2 superSize) : COLOR
+/**
+ * Recursively downsamples Level (N-1) to Level N using conservative 4-tap min reduction.
+ */
+float4 ZBufferMipmap_N_PS(
+	in float2 pos : VPOS,
+	in float2 coord : TEXCOORD0,
+	uniform sampler source,
+	uniform float2 viewportSize,
+	uniform float2 superSize) : COLOR
 {
-    float2 invSuper = 0.5f / superSize;
-    float2 uv0 = coord + float2(1, 1) * invSuper;
-    float2 uv1 = coord + float2(1, 3) * invSuper;
-    float2 uv2 = coord + float2(3, 3) * invSuper;
-    float2 uv3 = coord + float2(3, 1) * invSuper;
+	float2 invSuperHalf = 0.5f / superSize;
+	float d0 = tex2Dlod(source, float4(coord + float2(1.0, 1.0) * invSuperHalf, 0, 0)).x;
+	float d1 = tex2Dlod(source, float4(coord + float2(1.0, 3.0) * invSuperHalf, 0, 0)).x;
+	float d2 = tex2Dlod(source, float4(coord + float2(3.0, 3.0) * invSuperHalf, 0, 0)).x;
+	float d3 = tex2Dlod(source, float4(coord + float2(3.0, 1.0) * invSuperHalf, 0, 0)).x;
 
-    float depth = tex2Dlod(source, float4(uv0, 0, 0)).x;
-    depth = min(tex2Dlod(source, float4(uv1, 0, 0)).x, depth);
-    depth = min(tex2Dlod(source, float4(uv2, 0, 0)).x, depth);
-    depth = min(tex2Dlod(source, float4(uv3, 0, 0)).x, depth);
-
-    return float4(depth.xxx, 1);
+	float minDepth = min(min(d0, d1), min(d2, d3));
+	return float4(minDepth.xxx, 1.0f);
 }
 
-static const float4 kMip2Rect = float4(0, 0, kHZBMip2ViewportSize / ViewportSize);
-static const float4 kMip3Rect = float4(0, kMip2Rect.y + kMip2Rect.w, kHZBMip3ViewportSize / ViewportSize);
-static const float4 kMip4Rect = float4(0, kMip3Rect.y + kMip3Rect.w, kHZBMip4ViewportSize / ViewportSize);
-static const float4 kMip5Rect = float4(0, kMip4Rect.y + kMip4Rect.w, kHZBMip5ViewportSize / ViewportSize);
-static const float4 kMip6Rect = float4(0, kMip5Rect.y + kMip5Rect.w, kHZBMip6ViewportSize / ViewportSize);
-static const float4 kMip7Rect = float4(0, kMip6Rect.y + kMip6Rect.w, kHZBMip7ViewportSize / ViewportSize);
-static const float4 kMip8Rect = float4(0, kMip7Rect.y + kMip7Rect.w, kHZBMip8ViewportSize / ViewportSize);
-static const float4 kMip9Rect = float4(0, kMip8Rect.y + kMip8Rect.w, kHZBMip9ViewportSize / ViewportSize);
+static const float4 kMip2Rect  = float4(0, 0, kHZBMip2ViewportSize / ViewportSize);
+static const float4 kMip3Rect  = float4(0, kMip2Rect.y + kMip2Rect.w, kHZBMip3ViewportSize / ViewportSize);
+static const float4 kMip4Rect  = float4(0, kMip3Rect.y + kMip3Rect.w, kHZBMip4ViewportSize / ViewportSize);
+static const float4 kMip5Rect  = float4(0, kMip4Rect.y + kMip4Rect.w, kHZBMip5ViewportSize / ViewportSize);
+static const float4 kMip6Rect  = float4(0, kMip5Rect.y + kMip5Rect.w, kHZBMip6ViewportSize / ViewportSize);
+static const float4 kMip7Rect  = float4(0, kMip6Rect.y + kMip6Rect.w, kHZBMip7ViewportSize / ViewportSize);
+static const float4 kMip8Rect  = float4(0, kMip7Rect.y + kMip7Rect.w, kHZBMip8ViewportSize / ViewportSize);
+static const float4 kMip9Rect  = float4(0, kMip8Rect.y + kMip8Rect.w, kHZBMip9ViewportSize / ViewportSize);
 static const float4 kMip10Rect = float4(0, kMip9Rect.y + kMip9Rect.w, kHZBMip10ViewportSize / ViewportSize);
 
 bool CoordInRect(float2 coord, float4 rect)
 {
-    return coord.x >= rect.x && coord.x < rect.x + rect.z && coord.y >= rect.y && coord.y < rect.y + rect.w;
+	return (coord.x >= rect.x && coord.x < (rect.x + rect.z) &&
+	        coord.y >= rect.y && coord.y < (rect.y + rect.w));
 }
 
+/**
+ * Combines mip levels 2 through 10 into a single 2D hierarchical depth atlas texture.
+ */
 float4 ZBufferMipmapCombinePS(in float2 coord : TEXCOORD0) : COLOR
 {
-    float color = 0;
+	float depthVal = 0.0f;
 
-    [flatten]
-    if (CoordInRect(coord, kMip2Rect)) {
-        color = tex2Dlod(ZBufferMipmap2Samp, float4((coord - kMip2Rect.xy)/kMip2Rect.zw, 0, 0)).x;
-    } 
-    else if (CoordInRect(coord, kMip3Rect)) {
-        color = tex2Dlod(ZBufferMipmap3Samp, float4((coord - kMip3Rect.xy)/kMip3Rect.zw, 0, 0)).x;
-    } 
-    else if (CoordInRect(coord, kMip4Rect)) {
-        color = tex2Dlod(ZBufferMipmap4Samp, float4((coord - kMip4Rect.xy)/kMip4Rect.zw, 0, 0)).x;
-    } 
-    else if (CoordInRect(coord, kMip5Rect)) {
-        color = tex2Dlod(ZBufferMipmap5Samp, float4((coord - kMip5Rect.xy)/kMip5Rect.zw, 0, 0)).x;
-    } 
-    else if (CoordInRect(coord, kMip6Rect)) {
-        color = tex2Dlod(ZBufferMipmap6Samp, float4((coord - kMip6Rect.xy)/kMip6Rect.zw, 0, 0)).x;
-    } 
-    else if (CoordInRect(coord, kMip7Rect)) {
-        color = tex2Dlod(ZBufferMipmap7Samp, float4((coord - kMip7Rect.xy)/kMip7Rect.zw, 0, 0)).x;
-    } 
-    else if (CoordInRect(coord, kMip8Rect)) {
-        color = tex2Dlod(ZBufferMipmap8Samp, float4((coord - kMip8Rect.xy)/kMip8Rect.zw, 0, 0)).x;
-    } 
-    else if (CoordInRect(coord, kMip9Rect)) {
-        color = tex2Dlod(ZBufferMipmap9Samp, float4((coord - kMip9Rect.xy)/kMip9Rect.zw, 0, 0)).x;
-    } 
-    else if (CoordInRect(coord, kMip10Rect)) {
-        color = tex2Dlod(ZBufferMipmap10Samp, float4((coord - kMip10Rect.xy)/kMip10Rect.zw, 0, 0)).x;
-    }
+	[flatten]
+	if (CoordInRect(coord, kMip2Rect))
+		depthVal = tex2Dlod(ZBufferMipmap2Samp, float4((coord - kMip2Rect.xy) / kMip2Rect.zw, 0, 0)).x;
+	else if (CoordInRect(coord, kMip3Rect))
+		depthVal = tex2Dlod(ZBufferMipmap3Samp, float4((coord - kMip3Rect.xy) / kMip3Rect.zw, 0, 0)).x;
+	else if (CoordInRect(coord, kMip4Rect))
+		depthVal = tex2Dlod(ZBufferMipmap4Samp, float4((coord - kMip4Rect.xy) / kMip4Rect.zw, 0, 0)).x;
+	else if (CoordInRect(coord, kMip5Rect))
+		depthVal = tex2Dlod(ZBufferMipmap5Samp, float4((coord - kMip5Rect.xy) / kMip5Rect.zw, 0, 0)).x;
+	else if (CoordInRect(coord, kMip6Rect))
+		depthVal = tex2Dlod(ZBufferMipmap6Samp, float4((coord - kMip6Rect.xy) / kMip6Rect.zw, 0, 0)).x;
+	else if (CoordInRect(coord, kMip7Rect))
+		depthVal = tex2Dlod(ZBufferMipmap7Samp, float4((coord - kMip7Rect.xy) / kMip7Rect.zw, 0, 0)).x;
+	else if (CoordInRect(coord, kMip8Rect))
+		depthVal = tex2Dlod(ZBufferMipmap8Samp, float4((coord - kMip8Rect.xy) / kMip8Rect.zw, 0, 0)).x;
+	else if (CoordInRect(coord, kMip9Rect))
+		depthVal = tex2Dlod(ZBufferMipmap9Samp, float4((coord - kMip9Rect.xy) / kMip9Rect.zw, 0, 0)).x;
+	else if (CoordInRect(coord, kMip10Rect))
+		depthVal = tex2Dlod(ZBufferMipmap10Samp, float4((coord - kMip10Rect.xy) / kMip10Rect.zw, 0, 0)).x;
 
-    return float4(color.xxx, 1);
+	return float4(depthVal.xxx, 1.0f);
 }
 
+/**
+ * Fetches the minimum depth value at a specific mip level in the hierarchical depth pyramid.
+ */
 float HZBSampleDepth(float2 uv, int level, float2 levelSize)
-{	
-    if (level == 0)
-    {
-        return tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).x;
-    }
+{
+	if (level == 0)
+		return tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).x;
 	else if (level == 1)
 	{
-		float2 screenPos = floor(uv * levelSize) + 0.5;
-		float2 coord = screenPos / kHZBMip1ViewportSize;
-		return tex2Dlod(ZBufferMipmap1Samp, float4(coord, 0, 0)).x;
+		float2 pixelCoord = (floor(uv * levelSize) + 0.5f) / kHZBMip1ViewportSize;
+		return tex2Dlod(ZBufferMipmap1Samp, float4(pixelCoord, 0, 0)).x;
 	}
-	float2 trans = level == 2 ? kMip2Rect.xy : 0;
-	trans = level == 3 ? kMip3Rect.xy : trans;
-	trans = level == 4 ? kMip4Rect.xy : trans;
-	trans = level == 5 ? kMip5Rect.xy : trans;
-	trans = level == 6 ? kMip6Rect.xy : trans;
-	trans = level == 7 ? kMip7Rect.xy : trans;
-	trans = level == 8 ? kMip8Rect.xy : trans;
-	trans = level == 9 ? kMip9Rect.xy : trans;
-	trans = level == 10 ? kMip10Rect.xy : trans;
 
-	float2 screenPos = floor(uv * levelSize) + 0.5;
-	float2 coord = screenPos / ViewportSize;
-	coord += trans;
-	return tex2Dlod(ZBufferMipmapSamp, float4(coord, 0, 0)).x;
+	float2 rectOffset = 0.0f;
+	if (level == 2) rectOffset = kMip2Rect.xy;
+	else if (level == 3) rectOffset = kMip3Rect.xy;
+	else if (level == 4) rectOffset = kMip4Rect.xy;
+	else if (level == 5) rectOffset = kMip5Rect.xy;
+	else if (level == 6) rectOffset = kMip6Rect.xy;
+	else if (level == 7) rectOffset = kMip7Rect.xy;
+	else if (level == 8) rectOffset = kMip8Rect.xy;
+	else if (level == 9) rectOffset = kMip9Rect.xy;
+	else if (level == 10) rectOffset = kMip10Rect.xy;
+
+	float2 atlasUV = (floor(uv * levelSize) + 0.5f) / ViewportSize + rectOffset;
+	return tex2Dlod(ZBufferMipmapSamp, float4(atlasUV, 0, 0)).x;
 }
 
-float IntersectCellBoundary(float3 begin, float3 delta, float2 cellId, float2 levelSize, float2 crossStep, float2 crossOffset) 
+/**
+ * Finds intersection parameter along 2D ray with the next cell boundary plane.
+ */
+float IntersectCellBoundary(float3 rayOrigin, float3 rayDelta, float2 cellIndex, float2 levelDim, float2 stepSign, float2 biasOffset)
 {
-	float2 cell = cellId + crossStep;
-	cell /= levelSize;
-	cell += crossOffset;
+	float2 targetBoundary = (cellIndex + stepSign) / levelDim + biasOffset;
+	float2 distToPlane = targetBoundary - rayOrigin.xy;
 
-    float kx = cell.x - begin.x;
-	float ky = cell.y - begin.y;
-    float k = 0;
+	float param = 0.0f;
+	float absDx = abs(rayDelta.x);
+	float absDy = abs(rayDelta.y);
 
-	float ax = abs(delta.x);
-	float ay = abs(delta.y);
+	[flatten]
+	if (absDx <= 1e-5f && absDy > 1e-5f)
+		param = distToPlane.y / rayDelta.y;
+	else if (absDx > 1e-5f && absDy <= 1e-5f)
+		param = distToPlane.x / rayDelta.x;
+	else if (absDx > 1e-5f && absDy > 1e-5f)
+		param = min(distToPlane.x / rayDelta.x, distToPlane.y / rayDelta.y);
 
-    [flatten]
-    if (ax <= 1e-5 && ay > 1e-5)
-        k = ky / delta.y;
-    else if (ax > 1e-5 && ay <= 1e-5)
-        k = kx / delta.x;
-    else if (ax > 1e-5 && ay > 1e-5)
-        k = min(kx / delta.x, ky / delta.y);
-
-	return k;
+	return param;
 }
 
-bool HZTrace(int count, float3 beginVS, float3 directionVS, float maxDistance, float3 ott, out float hitT, out float2 hitPixel, out float3 hitPos)
+/**
+ * Hierarchical Screen-Space Raymarching (Hi-Z Ray Tracing).
+ *
+ * Traverses the screen-space depth pyramid in log2(N) steps to find intersections.
+ */
+bool HZTrace(
+	int maxIterations,
+	float3 startVS,
+	float3 dirVS,
+	float maxTraceDist,
+	float3 traceParams,
+	out float hitProgress,
+	out float2 hitPixelUV,
+	out float3 hitPositionVS)
 {
-	int level = 0;
+	int currentMip = 0;
+	static const int kMaxMipLevel = 10;
 
-    static const int maxLevel = 10;
+	// Project start and end points from View Space to Screen Space [0, 1]
+	float4 startClip = mul(float4(startVS + dirVS * traceParams.x, 1.0f), matProject);
+	float3 startScreen = (startClip.xyz / startClip.w) * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
 
-    float4 beginClip = mul(float4(beginVS + directionVS * ott.x, 1), matProject);
-	float3 beginNDC = beginClip.xyz / beginClip.w;
-	float3 begin = beginNDC * float3(0.5, -0.5, 1) + float3(0.5, 0.5, 0);
+	float4 endClip = mul(float4(startVS + dirVS * maxTraceDist, 1.0f), matProject);
+	float3 endScreen = (endClip.xyz / endClip.w) * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
 
-	float4 endClip = mul(float4(beginVS + directionVS * maxDistance, 1), matProject);
-	float3 endNDC = endClip.xyz / endClip.w;
-	float3 end = endNDC * float3(0.5, -0.5, 1) + float3(0.5, 0.5, 0);
+	float3 rayDelta = endScreen - startScreen;
+	float rayT = 0.0f;
 
-	float3 delta = end - begin;
-	float k = 0;
+	float2 stepDir = sign(rayDelta.xy);
+	float2 boundaryOffset = stepDir * (0.005f / ViewportSize);
+	stepDir = saturate(stepDir);
 
-	float2 crossStep = sign(delta.xy);
-	float2 crossOffset = crossStep * 0.005 / ViewportSize;
-	crossStep = saturate(crossStep);
+	for (int iter = 0; iter < maxIterations && currentMip >= 0 && rayT < 1.0f; ++iter)
+	{
+		float3 currentRayPos = startScreen + rayT * rayDelta;
+		if (any(floor(currentRayPos.xy) != 0))
+			break;
 
-    for (int it = 0; it < count && level >= 0 && k < 1; it++)
-    {        
-		float3 ray = begin + k * delta;
-        if (any(floor(ray.xy) != 0)) break;
+		float2 currentMipSize = ViewportSize / exp2(currentMip);
+		int2 cellCoord = floor(currentRayPos.xy * currentMipSize);
 
-        float2 levelSize = ViewportSize / exp2(level);
-		int2 cellId = floor(ray.xy * levelSize);
+		float projDenom = currentRayPos.z - matProject[2][2];
+		projDenom = abs(projDenom) < 1e-6f ? sign(projDenom) * 1e-6f : projDenom;
+		float currentLinearZ = matProject[3][2] / projDenom;
 
-        float denom = ray.z - matProject[2][2];
-        denom = abs(denom) < 1e-6f ? sign(denom) * 1e-6f : denom;
-        if (denom == 0.0f) denom = 1e-6f;
-        float linearZ = matProject[3][2]/denom;
-		float linearMinZ = max(HZBSampleDepth(ray.xy, level, levelSize), 1e-6f);
-		float minZ = matProject[2][2] + matProject[3][2] / linearMinZ;
-		float t = k;
-		if (delta.z > 1e-6f)
+		float sampledMinLinearZ = max(HZBSampleDepth(currentRayPos.xy, currentMip, currentMipSize), 1e-6f);
+		float minHyperbolicZ = matProject[2][2] + matProject[3][2] / sampledMinLinearZ;
+
+		float nextT = rayT;
+		if (rayDelta.z > 1e-6f)
 		{
-			float deltaZ = minZ - ray.z;
-			t = deltaZ > 0.0 ? (t + deltaZ/delta.z) : t;
+			float zDist = minHyperbolicZ - currentRayPos.z;
+			nextT = (zDist > 0.0f) ? (nextT + zDist / rayDelta.z) : nextT;
 
-			float3 temp = begin + t * delta;
+			float3 candidatePos = startScreen + nextT * rayDelta;
+			int2 candidateCell = floor(candidatePos.xy * currentMipSize);
 
-			int2 newCellId = floor(temp.xy * levelSize);
-			if (cellId.x != newCellId.x || cellId.y != newCellId.y)
+			if (cellCoord.x != candidateCell.x || cellCoord.y != candidateCell.y)
 			{
-				t = IntersectCellBoundary(begin, delta, cellId, levelSize, crossStep, crossOffset);
-				level += 2;
+				nextT = IntersectCellBoundary(startScreen, rayDelta, cellCoord, currentMipSize, stepDir, boundaryOffset);
+				currentMip += 2;
 			}
-			else
+			else if (currentMip == 0 && abs(currentLinearZ - sampledMinLinearZ) >= traceParams.y)
 			{
-				if (level == 0 && abs(linearZ - linearMinZ) >= ott.y)
-				{
-					t = IntersectCellBoundary(begin, delta, cellId, levelSize, crossStep, crossOffset);
-					level = 1;
-				}
+				nextT = IntersectCellBoundary(startScreen, rayDelta, cellCoord, currentMipSize, stepDir, boundaryOffset);
+				currentMip = 1;
 			}
 		}
-		else if (ray.z < minZ)
+		else if (currentRayPos.z < minHyperbolicZ)
 		{
-			t = IntersectCellBoundary(begin, delta, cellId, levelSize, crossStep, crossOffset);
-			level += 2;
+			nextT = IntersectCellBoundary(startScreen, rayDelta, cellCoord, currentMipSize, stepDir, boundaryOffset);
+			currentMip += 2;
 		}
 
-		k = t;
-		--level;
-
-		level = min(maxLevel, level);
+		rayT = nextT;
+		--currentMip;
+		currentMip = min(kMaxMipLevel, currentMip);
 	}
-    float3 result = begin + k * delta;
-	hitT = k;
-	hitPixel = result.xy;
 
-    float3 resultNDC = (result - float3(0.5, 0.5, 0)) * float3(2, -2, 1);
-    float4 resultClip = float4(0,0,0, matProject[3][2]/(resultNDC.z - matProject[2][2]));
-    resultClip.xyz = resultNDC.xyz * resultClip.w;
-    hitPos = mul(resultClip, matProjectInverse).xyz;
+	float3 finalScreenPos = startScreen + rayT * rayDelta;
+	hitProgress = rayT;
+	hitPixelUV = finalScreenPos.xy;
 
-	return level < 0;
+	float3 finalNDC = (finalScreenPos - float3(0.5f, 0.5f, 0.0f)) * float3(2.0f, -2.0f, 1.0f);
+	float4 finalClip = float4(0.0f, 0.0f, 0.0f, matProject[3][2] / (finalNDC.z - matProject[2][2]));
+	finalClip.xyz = finalNDC * finalClip.w;
+	hitPositionVS = mul(finalClip, matProjectInverse).xyz;
+
+	return (currentMip < 0);
 }
 
-bool HZTrace(int count, float3 beginVS, float3 directionVS, float maxDistance, float3 ott, out float2 hitPixel, out float3 hitPos)
+bool HZTrace(
+	int count,
+	float3 beginVS,
+	float3 directionVS,
+	float maxDistance,
+	float3 ott,
+	out float2 hitPixel,
+	out float3 hitPos)
 {
-	float hitT = 0;
+	float hitT = 0.0f;
 	return HZTrace(count, beginVS, directionVS, maxDistance, ott, hitT, hitPixel, hitPos);
 }
 
-bool HZTrace(int count, float3 beginVS, float3 directionVS, float maxDistance, float3 ott, out float2 hitPixel)
+bool HZTrace(
+	int count,
+	float3 beginVS,
+	float3 directionVS,
+	float maxDistance,
+	float3 ott,
+	out float2 hitPixel)
 {
-    float3 hitPos = 0;
-    return HZTrace(count, beginVS, directionVS, maxDistance, ott, hitPixel, hitPos);
+	float3 hitPos = 0.0f;
+	return HZTrace(count, beginVS, directionVS, maxDistance, ott, hitPixel, hitPos);
 }
 
-#endif
+#endif // RAY_MMD_HIZ_SSR_FXSUB

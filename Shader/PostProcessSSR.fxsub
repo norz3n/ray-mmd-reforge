@@ -1,25 +1,45 @@
-// Credit: material by dendewa (https://dendewa.vercel.app/)
+/**
+ * Ray-MMD ReForge: Screen-Space Reflections (SSR) Post-Processing Pipeline
+ *
+ * Implements physically based screen-space cone-traced reflections with
+ * multi-resolution roughness pyramid filtering and Fresnel attenuation.
+ */
+
+#ifndef RAY_MMD_POST_PROCESS_SSR_FXSUB
+#define RAY_MMD_POST_PROCESS_SSR_FXSUB
+
 #if SSR_QUALITY == 1
-#	define SSR_HZB_LOOP_COUNT 16
+#	define SSR_MAX_RAY_STEPS 16
 #elif SSR_QUALITY == 2
-#	define SSR_HZB_LOOP_COUNT 32
+#	define SSR_MAX_RAY_STEPS 32
 #elif SSR_QUALITY >= 3
-#	define SSR_HZB_LOOP_COUNT 64
+#	define SSR_MAX_RAY_STEPS 64
 #else
-#	define SSR_HZB_LOOP_COUNT 16
+#	define SSR_MAX_RAY_STEPS 16
 #endif
 
-static const float2 SSRScale = mSSRBlur * float2(ViewportAspect, 1);
+// Blur filter offsets for roughness mip levels
+static const float2 SSRBlurKernelScale = mSSRBlur * float2(ViewportAspect, 1.0f);
 
-static const float2 SSROffsetX1 = float2(1 / SSRScale.x, 0.0);
-static const float2 SSROffsetX2 = float2(2 / SSRScale.x, 0.0);
-static const float2 SSROffsetX3 = float2(4 / SSRScale.x, 0.0);
-static const float2 SSROffsetX4 = float2(8 / SSRScale.x, 0.0);
+static const float2 SSRBlurStepX1 = float2(1.0f / SSRBlurKernelScale.x, 0.0f);
+static const float2 SSRBlurStepX2 = float2(2.0f / SSRBlurKernelScale.x, 0.0f);
+static const float2 SSRBlurStepX3 = float2(4.0f / SSRBlurKernelScale.x, 0.0f);
+static const float2 SSRBlurStepX4 = float2(8.0f / SSRBlurKernelScale.x, 0.0f);
 
-static const float2 SSROffsetY1 = float2(0.0, 1 / SSRScale.y);
-static const float2 SSROffsetY2 = float2(0.0, 2 / SSRScale.y);
-static const float2 SSROffsetY3 = float2(0.0, 4 / SSRScale.y);
-static const float2 SSROffsetY4 = float2(0.0, 8 / SSRScale.y);
+static const float2 SSRBlurStepY1 = float2(0.0f, 1.0f / SSRBlurKernelScale.y);
+static const float2 SSRBlurStepY2 = float2(0.0f, 2.0f / SSRBlurKernelScale.y);
+static const float2 SSRBlurStepY3 = float2(0.0f, 4.0f / SSRBlurKernelScale.y);
+static const float2 SSRBlurStepY4 = float2(0.0f, 8.0f / SSRBlurKernelScale.y);
+
+// For technique compatibility with ray.fx
+static const float2 SSROffsetX1 = SSRBlurStepX1;
+static const float2 SSROffsetX2 = SSRBlurStepX2;
+static const float2 SSROffsetX3 = SSRBlurStepX3;
+static const float2 SSROffsetX4 = SSRBlurStepX4;
+static const float2 SSROffsetY1 = SSRBlurStepY1;
+static const float2 SSROffsetY2 = SSRBlurStepY2;
+static const float2 SSROffsetY3 = SSRBlurStepY3;
+static const float2 SSROffsetY4 = SSRBlurStepY4;
 
 texture SSRLightX1Map : RENDERCOLORTARGET<float2 ViewportRatio = {1.0, 1.0}; string Format = "A16B16G16R16F";>;
 texture SSRLightX2Map : RENDERCOLORTARGET<float2 ViewportRatio = {0.5, 0.5}; string Format = "A16B16G16R16F";>;
@@ -30,123 +50,134 @@ texture SSRLightX2MapTemp : RENDERCOLORTARGET<float2 ViewportRatio = {0.5, 0.5};
 texture SSRLightX3MapTemp : RENDERCOLORTARGET<float2 ViewportRatio = {0.25, 0.25}; string Format = "A16B16G16R16F";>;
 texture SSRLightX4MapTemp : RENDERCOLORTARGET<float2 ViewportRatio = {0.125, 0.125}; string Format = "A16B16G16R16F";>;
 
-sampler SSRLightX1Samp = sampler_state { texture = <SSRLightX1Map>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE;};
-sampler SSRLightX2Samp = sampler_state { texture = <SSRLightX2Map>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE;};
-sampler SSRLightX3Samp = sampler_state { texture = <SSRLightX3Map>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE;};
-sampler SSRLightX4Samp = sampler_state { texture = <SSRLightX4Map>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE;};
-sampler SSRLightX1SampTemp = sampler_state { texture = <SSRLightX1MapTemp>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE;};
-sampler SSRLightX2SampTemp = sampler_state { texture = <SSRLightX2MapTemp>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE;};
-sampler SSRLightX3SampTemp = sampler_state { texture = <SSRLightX3MapTemp>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE;};
-sampler SSRLightX4SampTemp = sampler_state { texture = <SSRLightX4MapTemp>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE;};
+sampler SSRLightX1Samp = sampler_state { texture = <SSRLightX1Map>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE; };
+sampler SSRLightX2Samp = sampler_state { texture = <SSRLightX2Map>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE; };
+sampler SSRLightX3Samp = sampler_state { texture = <SSRLightX3Map>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE; };
+sampler SSRLightX4Samp = sampler_state { texture = <SSRLightX4Map>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE; };
+sampler SSRLightX1SampTemp = sampler_state { texture = <SSRLightX1MapTemp>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE; };
+sampler SSRLightX2SampTemp = sampler_state { texture = <SSRLightX2MapTemp>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE; };
+sampler SSRLightX3SampTemp = sampler_state { texture = <SSRLightX3MapTemp>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE; };
+sampler SSRLightX4SampTemp = sampler_state { texture = <SSRLightX4MapTemp>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE; };
 
+/**
+ * Screen-Space Raymarching & Reflection Hit-Testing Pixel Shader.
+ */
 float4 SSRConeTracingPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) : COLOR 
 {
-	float4 MRT3 = tex2Dlod(Gbuffer8Map, float4(coord.xy, 0, 0));
-	clip(MRT3.x - 1e-5);
+	float4 gbuffDepth = tex2Dlod(Gbuffer8Map, float4(coord.xy, 0, 0));
+	clip(gbuffDepth.x - 1e-5f);
 
-	float4 MRT0 = tex2Dlod(Gbuffer5Map, float4(coord.xy, 0, 0));
-	clip(MRT0.w - 0.05f);
+	float4 gbuffAlbedo = tex2Dlod(Gbuffer5Map, float4(coord.xy, 0, 0));
+	clip(gbuffAlbedo.w - 0.05f);
 
-	float4 MRT1 = tex2Dlod(Gbuffer6Map, float4(coord.xy, 0, 0));
-	float4 MRT2 = tex2Dlod(Gbuffer7Map, float4(coord.xy, 0, 0));
+	float4 gbuffNormal = tex2Dlod(Gbuffer6Map, float4(coord.xy, 0, 0));
+	float4 gbuffSpecular = tex2Dlod(Gbuffer7Map, float4(coord.xy, 0, 0));
 
-	MaterialParam material;
-	DecodeGbuffer(MRT0, MRT1, MRT2, MRT3, material);
+	MaterialParam surfaceMat;
+	DecodeGbuffer(gbuffAlbedo, gbuffNormal, gbuffSpecular, gbuffDepth, surfaceMat);
 
-	float3 test = material.albedo + material.specular;
-	clip(sum(test) - 1e-5);
+	float3 surfaceReflectivity = surfaceMat.albedo + surfaceMat.specular;
+	clip(sum(surfaceReflectivity) - 1e-5f);
 
-	float3 view = normalize(viewdir);
-	float3 viewPosition = viewdir * (material.linearDepth / viewdir.z);
-	float3 viewReflect = normalize(reflect(-view, material.normal));
+	float3 viewVector = normalize(viewdir);
+	float3 worldPosVS = viewdir * (surfaceMat.linearDepth / viewdir.z);
+	float3 reflectRayVS = normalize(reflect(-viewVector, surfaceMat.normal));
 
-	float atten = dot(viewReflect, -view);
-	clip(atten - 1e-5);
+	float reflectionFacingAngle = dot(reflectRayVS, -viewVector);
+	clip(reflectionFacingAngle - 1e-5f);
 
-	float sampleJitter = PseudoRandom(coord.zw);
-	float sampleDistance = mSSRRangeScale;
-	sampleDistance *= max(0, mSSRRangeMax - material.linearDepth) +  material.linearDepth;
-	sampleDistance *= pow(1 - saturate(dot(view, material.normal)) * (1 - SSR_QUALITY * 0.1), 5 - SSR_QUALITY);
+	float traceDistance = mSSRRangeScale;
+	traceDistance *= max(0.0f, mSSRRangeMax - surfaceMat.linearDepth) + surfaceMat.linearDepth;
+	traceDistance *= pow(1.0f - saturate(dot(viewVector, surfaceMat.normal)) * (1.0f - SSR_QUALITY * 0.1f), 5.0f - SSR_QUALITY);
 
-	float2 hitPixel = 0;
-	float3 ott = float3(mSSROffset * (1 - saturate(dot(view, material.normal))), mSSRThickness, 0);
-	bool hitTest = HZTrace(SSR_HZB_LOOP_COUNT, viewPosition, viewReflect, sampleDistance * 2.0f, ott, hitPixel);
-	if (!hitTest)
+	float2 hitScreenUV = 0.0f;
+	float3 traceConfig = float3(mSSROffset * (1.0f - saturate(dot(viewVector, surfaceMat.normal))), mSSRThickness, 0.0f);
+
+	bool isHit = HZTrace(SSR_MAX_RAY_STEPS, worldPosVS, reflectRayVS, traceDistance * 2.0f, traceConfig, hitScreenUV);
+	if (!isHit)
 		clip(-1);
 
-	float2 boundary = abs(coord.xy * 2 - 1);
-	float fadeDiffRcp = 1.0f / max(0.01, 1 - mSSRFadeStart);
-	float fadeOnBorder = 1.0f - saturate((boundary.x - mSSRFadeStart) * fadeDiffRcp);
-	fadeOnBorder *= 1.0f - saturate((boundary.y - mSSRFadeStart) * fadeDiffRcp);
-	fadeOnBorder = smoothstep(0.0f, 1.0f, fadeOnBorder);
+	// Screen-edge vignette fading to prevent hard reflection cutoff
+	float2 screenCenterDist = abs(coord.xy * 2.0f - 1.0f);
+	float invEdgeWidth = 1.0f / max(0.01f, 1.0f - mSSRFadeStart);
+	float edgeVignette = 1.0f - saturate((screenCenterDist.x - mSSRFadeStart) * invEdgeWidth);
+	edgeVignette *= 1.0f - saturate((screenCenterDist.y - mSSRFadeStart) * invEdgeWidth);
+	edgeVignette = smoothstep(0.0f, 1.0f, edgeVignette);
 
-	float fadeOnPerpendicular = saturate(atten);
-	float fadeOnTotal = fadeOnBorder * fadeOnPerpendicular;
+	float angleFade = saturate(reflectionFacingAngle);
+	float finalFade = edgeVignette * angleFade;
 
-	float ssrVisibility = tex2Dlod(SSRMapSamp, float4(coord.xy, 0, 0)).a;
-	fadeOnTotal *= ssrVisibility;
+	float ssrMask = tex2Dlod(SSRMapSamp, float4(coord.xy, 0, 0)).a;
+	finalFade *= ssrMask;
 
-	float4 totalColor = tex2Dlod(ShadingMapPointSamp, float4(hitPixel, 0, 0));
-	return float4(totalColor.rgb, 1) * fadeOnTotal;
+	float4 hitColor = tex2Dlod(ShadingMapPointSamp, float4(hitScreenUV, 0, 0));
+	return float4(hitColor.rgb, 1.0f) * finalFade;
 }
 
+/**
+ * 5-Tap Bilateral / Gaussian Separable Blur Filter.
+ */
 float4 SSRGaussionBlurPS(in float2 coord : TEXCOORD0, uniform sampler source, uniform float2 offset) : COLOR
 {
-	static const float w0 = 0.2023600f;
-	static const float w12 = 0.3030530f;
-	static const float w34 = 0.0957660f;
-	static const float o12 = 1.4091991f;
-	static const float o34 = 3.2979345f;
+	static const float kCenterWeight = 0.2023600f;
+	static const float kTapWeight12  = 0.3030530f;
+	static const float kTapWeight34  = 0.0957660f;
+	static const float kTapOffset12  = 1.4091991f;
+	static const float kTapOffset34  = 3.2979345f;
 
-	float4 color = tex2Dlod(source, float4(coord, 0, 0)) * w0;
-	color += tex2Dlod(source, float4(coord + offset * o12, 0, 0)) * w12;
-	color += tex2Dlod(source, float4(coord - offset * o12, 0, 0)) * w12;
-	color += tex2Dlod(source, float4(coord + offset * o34, 0, 0)) * w34;
-	color += tex2Dlod(source, float4(coord - offset * o34, 0, 0)) * w34;
+	float4 result = tex2Dlod(source, float4(coord, 0, 0)) * kCenterWeight;
+	result += tex2Dlod(source, float4(coord + offset * kTapOffset12, 0, 0)) * kTapWeight12;
+	result += tex2Dlod(source, float4(coord - offset * kTapOffset12, 0, 0)) * kTapWeight12;
+	result += tex2Dlod(source, float4(coord + offset * kTapOffset34, 0, 0)) * kTapWeight34;
+	result += tex2Dlod(source, float4(coord - offset * kTapOffset34, 0, 0)) * kTapWeight34;
 
-	return color;
+	return result;
 }
 
+/**
+ * Final Composite: Roughness-Weighted Mip Pyramidal Blending and PBR Fresnel Tinting.
+ */
 float4 SSRFinalCombinePS(in float2 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) : COLOR
 {
-	float4 MRT0 = tex2Dlod(Gbuffer5Map, float4(coord, 0, 0));
-	float4 MRT1 = tex2Dlod(Gbuffer6Map, float4(coord, 0, 0));
-	float4 MRT2 = tex2Dlod(Gbuffer7Map, float4(coord, 0, 0));
-	float4 MRT3 = tex2Dlod(Gbuffer8Map, float4(coord, 0, 0));
+	float4 gbuffAlbedo   = tex2Dlod(Gbuffer5Map, float4(coord, 0, 0));
+	float4 gbuffNormal   = tex2Dlod(Gbuffer6Map, float4(coord, 0, 0));
+	float4 gbuffSpecular = tex2Dlod(Gbuffer7Map, float4(coord, 0, 0));
+	float4 gbuffDepth    = tex2Dlod(Gbuffer8Map, float4(coord, 0, 0));
 
-	MaterialParam material;
-	DecodeGbuffer(MRT0, MRT1, MRT2, MRT3, material);
+	MaterialParam surfaceMat;
+	DecodeGbuffer(gbuffAlbedo, gbuffNormal, gbuffSpecular, gbuffDepth, surfaceMat);
 
-	float gloss = material.smoothness;
-	gloss += mSSRSmoothness;
-	gloss = saturate(gloss);
-	float gloss2 = gloss * gloss;
+	float surfaceGlossiness = saturate(surfaceMat.smoothness + mSSRSmoothness);
+	float glossSq = surfaceGlossiness * surfaceGlossiness;
 
-	float weight = frac(min(gloss2, 0.9999) * 3);
+	float mipBlendWeight = frac(min(glossSq, 0.9999f) * 3.0f);
 
-	float4 refl0 = tex2Dlod(SSRLightX1Samp, float4(coord, 0, 0));
-	float4 refl1 = tex2Dlod(SSRLightX2Samp, float4(coord, 0, 0));
-	float4 refl2 = tex2Dlod(SSRLightX3Samp, float4(coord, 0, 0));
-	float4 refl3 = tex2Dlod(SSRLightX4Samp, float4(coord, 0, 0));
+	float4 mip0Color = tex2Dlod(SSRLightX1Samp, float4(coord, 0, 0));
+	float4 mip1Color = tex2Dlod(SSRLightX2Samp, float4(coord, 0, 0));
+	float4 mip2Color = tex2Dlod(SSRLightX3Samp, float4(coord, 0, 0));
+	float4 mip3Color = tex2Dlod(SSRLightX4Samp, float4(coord, 0, 0));
 
-	float4 color = 0;
+	float4 blendedReflection = 0.0f;
 
 	[branch]
-	if (gloss2 > 2.0 / 3.0)
-		color = lerp(refl1, refl0, weight * weight);
-	else if (gloss2 > 1.0 / 3.0)
-		color = lerp(refl2, refl1, weight);
+	if (glossSq > (2.0f / 3.0f))
+		blendedReflection = lerp(mip1Color, mip0Color, mipBlendWeight * mipBlendWeight);
+	else if (glossSq > (1.0f / 3.0f))
+		blendedReflection = lerp(mip2Color, mip1Color, mipBlendWeight);
 	else
-		color = lerp(refl3, refl2, weight);
+		blendedReflection = lerp(mip3Color, mip2Color, mipBlendWeight);
 
-	float3 N = material.normal;
-	float3 V = normalize(viewdir);
-	float3 f0 = material.specular;
-	float3 fresnelColor = EnvironmentSpecularUnreal4(abs(dot(N, V)), gloss, f0);
+	float3 normalVS = surfaceMat.normal;
+	float3 viewVector = normalize(viewdir);
+	float3 specularF0 = surfaceMat.specular;
 
-	float brightness = mSSRBrightness;
-	float fresnel = lerp(0, luminance(fresnelColor), saturate(mSSRFresnel * 2));
-	fresnel = lerp(fresnel, 1, saturate(mSSRFresnel * 2 - 1));
+	float3 pbrFresnelColor = EnvironmentSpecularUnreal4(abs(dot(normalVS, viewVector)), surfaceGlossiness, specularF0);
 
-	return float4(color.rgb * fresnelColor * brightness, color.a * fresnel);
+	float userBrightness = mSSRBrightness;
+	float fresnelFactor = lerp(0.0f, luminance(pbrFresnelColor), saturate(mSSRFresnel * 2.0f));
+	fresnelFactor = lerp(fresnelFactor, 1.0f, saturate(mSSRFresnel * 2.0f - 1.0f));
+
+	return float4(blendedReflection.rgb * pbrFresnelColor * userBrightness, blendedReflection.a * fresnelFactor);
 }
+
+#endif // RAY_MMD_POST_PROCESS_SSR_FXSUB
