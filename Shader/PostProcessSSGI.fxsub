@@ -68,11 +68,15 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 	float3 pOrigin = GetViewPosition(projInfo, uvCoord.xy, zOrigin);
 
 	// World radius for large-scale / world-wide gather (scaled by mSSGIScale)
+#if GI_ENABLE >= 2
+	float maxWorldDistance = max(mSSGIScale * 75.0f, 5.0f);
+	float projScale = max(abs(projInfo.x), 1e-4f);
+	float screenRadius = clamp(maxWorldDistance / (zOrigin * projScale), 0.02f, 0.85f);
+#else
 	float maxWorldDistance = max(mSSGIScale * 35.0f, 2.0f);
-	
-	// Perspective screen-space search radius in UV units
 	float projScale = max(abs(projInfo.x), 1e-4f);
 	float screenRadius = clamp(maxWorldDistance / (zOrigin * projScale), 0.01f, 0.6f);
+#endif
 
 	float2 screenPixel = uvCoord.xy * ViewportSize;
 	float noiseAngle = InterleavedGradientNoise(screenPixel);
@@ -127,20 +131,21 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 						// Emitter cosine factor (sample must face the receiver, or be an active omnidirectional emissive light source)
 						float3 nSample = GetSSGINormal(currentUv);
 						float NsDotMinusL = dot(nSample, -lightVector);
+					#if GI_ENABLE >= 2
+						if (NsDotMinusL > -0.5f || isEmissive)
+						{
+							float geomFactor = saturate(NdotL) * (isEmissive ? 1.0f : saturate(NsDotMinusL * 0.5f + 0.5f));
+							float distRatio = saturate(dist / maxWorldDistance);
+							float fade = 1.0f - distRatio * distRatio;
+							float falloffRate = isEmissive ? 0.03f : 0.08f;
+					#else
 						if (NsDotMinusL > -0.15f || isEmissive)
 						{
 							float geomFactor = saturate(NdotL) * (isEmissive ? 1.0f : saturate(NsDotMinusL * 0.85f + 0.15f));
-							
-							// Distance attenuation with smooth window cutoff & physical inverse falloff
 							float distRatio = saturate(dist / maxWorldDistance);
 							float fade = 1.0f - distRatio * distRatio;
-						#if GI_ENABLE >= 2
-							// Mode 2 (Indirect Lighting): Wider reach across the room for UE5-style indirect diffuse bounce
-							float falloffRate = isEmissive ? 0.05f : 0.16f;
-						#else
-							// Mode 1 (Accent): Focused local bounce & emissive accents
 							float falloffRate = isEmissive ? 0.08f : 0.35f;
-						#endif
+					#endif
 							float invDistFalloff = 1.0f / (1.0f + dist * falloffRate);
 							float atten = (fade * fade) * invDistFalloff;
 							
@@ -176,7 +181,7 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 
 	float intensityMultiplier = lerp(lerp(1.0f, 3.0f, mSSGIIntensityPlus), 0.0f, mSSGIIntensityMinus);
 #if GI_ENABLE >= 2
-	float modeMultiplier = 2.4f; // Strong room-filling indirect bounce for Mode 2 (UE5 Indirect)
+	float modeMultiplier = 5.0f; // Broad, rich room illumination
 #else
 	float modeMultiplier = 1.0f; // Subtle accent bounce for Mode 1 (Accent)
 #endif
@@ -197,7 +202,11 @@ float4 SSGIBlurPS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1, 
 	float4 cCenter = tex2Dlod(source, float4(uvCoord, 0, 0));
 	cCenter = clamp(cCenter, 0.0f, 100.0f);
 	
+#if GI_ENABLE >= 2
+	float2 blurDir = (stepSize < 2.0f ? float2(ViewportOffset2.x, 0.0f) : float2(0.0f, ViewportOffset2.y)) * 1.5f;
+#else
 	float2 blurDir = stepSize < 2.0f ? float2(ViewportOffset2.x, 0.0f) : float2(0.0f, ViewportOffset2.y);
+#endif
 	float planeThreshold = max(zCenter * 0.04f, 0.25f);
 	
 	float totalW = 1.0f;
