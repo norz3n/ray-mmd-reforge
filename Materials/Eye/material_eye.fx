@@ -126,9 +126,4 @@ const float customAMapLoopNum = 1.0;
 const float3 customB = 0.0;
 const float2 customBMapLoopNum = 1.0;
 
-#define PROCEDURAL_EYE 1
-#define PROCEDURAL_EYE_CURVATURE 0.85
-#define PROCEDURAL_EYE_RADIUS 0.98
-#define PROCEDURAL_EYE_LIMBAL_RING 0.65
-
 #include "../material_common_2.0.fxsub"
