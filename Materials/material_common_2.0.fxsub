@@ -739,6 +739,9 @@ GbufferParam EncodeGbuffer(MaterialParam material, float linearDepth)
 	gbuffer.buffer1.w = material.smoothness;
 
 	material.normal = mul(material.normal, (float3x3)matWorldView);
+#if CONVEX_NORMAL
+	material.normal.xy = -material.normal.xy;
+#endif
 	material.normal = normalize(material.normal);
 
 	gbuffer.buffer2.xyz = EncodeNormal(material.normal);

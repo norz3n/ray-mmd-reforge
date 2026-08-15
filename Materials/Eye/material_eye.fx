@@ -126,4 +126,7 @@ const float customAMapLoopNum = 1.0;
 const float3 customB = 0.0;
 const float2 customBMapLoopNum = 1.0;
 
+// Inverts the concave anime eye mesh curvature into a convex spherical dome
+#define CONVEX_NORMAL 1
+
 #include "../material_common_2.0.fxsub"
