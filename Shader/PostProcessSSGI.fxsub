@@ -175,7 +175,12 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 	}
 
 	float intensityMultiplier = lerp(lerp(1.0f, 3.0f, mSSGIIntensityPlus), 0.0f, mSSGIIntensityMinus);
-	float3 finalGi = (totalGi / float(SSGI_ANGLES)) * (PI * intensityMultiplier);
+#if GI_ENABLE >= 2
+	float modeMultiplier = 2.4f; // Strong room-filling indirect bounce for Mode 2 (UE5 Indirect)
+#else
+	float modeMultiplier = 1.0f; // Subtle accent bounce for Mode 1 (Accent)
+#endif
+	float3 finalGi = (totalGi / float(SSGI_ANGLES)) * (PI * intensityMultiplier * modeMultiplier);
 	
 	return float4(clamp(finalGi, 0.0f, 100.0f), 1.0f);
 }
@@ -283,11 +288,12 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 	}
 
 #if GI_ENABLE >= 2
-	// UE5-style Multi-Bounce Global Illumination (Jimenez / Fdez-Aguera multi-scattering approximation)
+	// UE5 Lumen Multi-Bounce Diffuse Radiance (Jimenez multi-scattering approximation)
 	// Compensates for secondary and tertiary ambient bounces between surfaces, filling shadows with rich colored light
-	float3 multiBounce = 1.0f + (mat.albedo * rawGi) / max(1.0f - mat.albedo * saturate(occlusion), 0.1f);
-	rawGi *= multiBounce * 1.35f;
-#endif
-
+	float3 multiBounce = 1.0f + (mat.albedo * 1.5f) / max(1.0f - mat.albedo * 0.7f, 0.15f);
+	rawGi *= multiBounce;
+	return float4(clamp(rawGi * mSSGIIntensity * lerp(occlusion, 1.0f, 0.45f), 0.0f, 100.0f), 0.0f);
+#else
 	return float4(clamp(rawGi * mSSGIIntensity * occlusion, 0.0f, 100.0f), 0.0f);
+#endif
 }
