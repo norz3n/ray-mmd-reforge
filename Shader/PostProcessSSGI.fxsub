@@ -131,10 +131,17 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 						{
 							float geomFactor = saturate(NdotL) * (isEmissive ? 1.0f : saturate(NsDotMinusL * 0.85f + 0.15f));
 							
-							// Distance attenuation with smooth window cutoff & physical inverse falloff (wider reach for emissive lights)
+							// Distance attenuation with smooth window cutoff & physical inverse falloff
 							float distRatio = saturate(dist / maxWorldDistance);
 							float fade = 1.0f - distRatio * distRatio;
-							float invDistFalloff = 1.0f / (1.0f + dist * (isEmissive ? 0.08f : 0.35f));
+						#if GI_ENABLE >= 2
+							// Mode 2 (Indirect Lighting): Wider reach across the room for UE5-style indirect diffuse bounce
+							float falloffRate = isEmissive ? 0.05f : 0.16f;
+						#else
+							// Mode 1 (Accent): Focused local bounce & emissive accents
+							float falloffRate = isEmissive ? 0.08f : 0.35f;
+						#endif
+							float invDistFalloff = 1.0f / (1.0f + dist * falloffRate);
 							float atten = (fade * fade) * invDistFalloff;
 							
 							// Thickness visibility weighting
@@ -274,6 +281,13 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 	{
 		rawGi *= mat.albedo;
 	}
+
+#if GI_ENABLE >= 2
+	// UE5-style Multi-Bounce Global Illumination (Jimenez / Fdez-Aguera multi-scattering approximation)
+	// Compensates for secondary and tertiary ambient bounces between surfaces, filling shadows with rich colored light
+	float3 multiBounce = 1.0f + (mat.albedo * rawGi) / max(1.0f - mat.albedo * saturate(occlusion), 0.1f);
+	rawGi *= multiBounce * 1.35f;
+#endif
 
 	return float4(clamp(rawGi * mSSGIIntensity * occlusion, 0.0f, 100.0f), 0.0f);
 }
