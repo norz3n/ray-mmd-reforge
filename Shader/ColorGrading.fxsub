@@ -212,29 +212,28 @@ float3 TonemapACESFitted(float3 color)
 	return saturate(mul(ACESOutputMat, color));
 }
 
-// AgX Tonemapping (Troy Sobotka / Blender 4.0 standard) - preserves chromatic purity and hue in extreme highlights
+// AgX Tonemapping (Troy Sobotka / Blender 4.0 OCIO standard) - preserves chromatic purity and hue in extreme highlights
 float3 TonemapAgX(float3 val)
 {
 	static const float3x3 AgXInsetMat = {
-		0.842479065f, 0.0784336f, 0.079223745f,
-		0.04232824f, 0.87846864f, 0.079166127f,
-		0.042375655f, 0.0784336f, 0.87914297f
+		0.842479065f, 0.078433600f, 0.079223745f,
+		0.042328242f, 0.878468640f, 0.079166127f,
+		0.042375655f, 0.078433600f, 0.879142973f
 	};
 	static const float3x3 AgXOutMat = {
-		1.196879f, -0.05289685f, -0.052971635f,
-		-0.09802088f, 1.1519031f, -0.09804345f,
-		-0.09902975f, -0.07547978f, 1.1510731f
+		 1.1968790f, -0.05289685f, -0.05297164f,
+		-0.09802088f,  1.15190312f, -0.09804345f,
+		-0.09902975f, -0.07547978f,  1.15107314f
 	};
 
-	val = max(0.0f, val);
+	val = max(1e-6f, val);
 	val = mul(AgXInsetMat, val);
 
-	// Log2 curve: mapping [-10 EV, +6.5 EV]
-	val = clamp((log2(max(1e-5f, val)) + 10.0f) / 16.5f, 0.0f, 1.0f);
+	// Normalized log2 encoding over [-10.0 EV, +6.5 EV] range (16.5 stops dynamic range)
+	val = clamp((log2(val) + 10.0f) / 16.5f, 0.0f, 1.0f);
 
-	// AgX Sigmoid S-curve approximation
-	val = val * val * (3.0f - 2.0f * val);
-	val = val * val * (3.0f - 2.0f * val);
+	// Exact 6th-order polynomial fit of the official Blender 4.0 / OCIO AgX Base Contrast S-Curve
+	val = val * (val * (val * (val * (val * (15.5f * val - 40.14f) + 31.96f) - 6.868f) + 0.4298f) + 0.1191f) - 0.00232f;
 
 	val = mul(AgXOutMat, val);
 	return saturate(val);
