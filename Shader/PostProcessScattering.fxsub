@@ -35,30 +35,29 @@ float4 SSSGaussBlurPS(
 	const float3 profileVarArr[2] = { float3(6.6, 5.6, 2.8), float3(9.6, 2.8, 2.2) };
 	const float4 profileSpikeRadArr[2] = { float4(0.30, 0.30, 0.80, 8.0 ), float4(0.35, 0.40, 0.50, 1.0) };
 
-	float4 MRT1 = tex2Dlod(Gbuffer1Map, float4(coord, 0, 0));
 	float4 MRT2 = tex2Dlod(Gbuffer2Map, float4(coord, 0, 0));
-	float4 MRT3 = tex2Dlod(Gbuffer3Map, float4(coord, 0, 0));
 	float4 MRT4 = tex2Dlod(Gbuffer4Map, float4(coord, 0, 0));
 
-	MaterialParam material;
-	DecodeGbuffer(MRT1, MRT2, MRT3, MRT4, material);
+	float3 N = DecodeNormal(MRT2.xyz);
+	float linearDepth = MRT4.x;
+	float customDataA = MRT2.w;
+	int lightModel = (int)floor(MRT4.w);
 
-	float3 N = material.normal;
-	float3 P = GetViewPosition(projConstant, coord, material.linearDepth);
+	float3 P = GetViewPosition(projConstant, coord, linearDepth);
 
 	float perspectiveScaleX = dot(normalize(N.xz), normalize(-P.xz));
 	float perspectiveScaleY = dot(normalize(N.yz), normalize(-P.yz));
 	float perspectiveScale = max(dot(direction, float2(perspectiveScaleX, perspectiveScaleY)), 0.3);
 
-	float sssAmount = material.customDataA;
-	float sssIndex = (material.lightModel != SHADINGMODELID_SKIN) ? 0 : 1;
-	float sssStrength = (material.lightModel != SHADINGMODELID_SKIN) ? sssAmount : 1;
-	float sssWidth = (material.lightModel != SHADINGMODELID_SKIN) ? mSSSSScale * 3 : mSSSSScale;
+	float sssAmount = customDataA;
+	float sssIndex = (lightModel != SHADINGMODELID_SKIN) ? 0 : 1;
+	float sssStrength = (lightModel != SHADINGMODELID_SKIN) ? sssAmount : 1;
+	float sssWidth = (lightModel != SHADINGMODELID_SKIN) ? mSSSSScale * 3 : mSSSSScale;
 	float sssRadius = 0.0055 * profileSpikeRadArr[sssIndex].w * sssStrength * perspectiveScale / sssWidth;
 
 	float3 sampleWeight = 1;
 	float4 sampleColor = tex2Dlod(source, float4(coord, 0, 0));
-	float2 sampleStep = direction * sssRadius / material.linearDepth;
+	float2 sampleStep = direction * sssRadius / linearDepth;
 
 	[unroll]
 	for (int i = 0; i < 6; i++)
@@ -69,8 +68,8 @@ float4 SSSGaussBlurPS(
 		float4 sampleColor1 = tex2Dlod(source, float4(offset1, 0, 0));
 		float4 sampleColor2 = tex2Dlod(source, float4(offset2, 0, 0));
 
-		float depthDiff1 = (sampleColor1.a - material.linearDepth) * 1000 * mSSSSScale;
-		float depthDiff2 = (sampleColor2.a - material.linearDepth) * 1000 * mSSSSScale;
+		float depthDiff1 = (sampleColor1.a - linearDepth) * 1000 * mSSSSScale;
+		float depthDiff2 = (sampleColor2.a - linearDepth) * 1000 * mSSSSScale;
 
 		float3 weight1 = exp(-(offsets[i] * offsets[i] + depthDiff1 * depthDiff1) / profileVarArr[sssIndex]);
 		float3 weight2 = exp(-(offsets[i] * offsets[i] + depthDiff2 * depthDiff2) / profileVarArr[sssIndex]);

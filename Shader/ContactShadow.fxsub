@@ -181,6 +181,9 @@ float TraceScreenSpaceShadow(
 
 float GetContactShadow(float3 viewPosition, float3 shadingNormal, float3 L, float2 screenCoord, float linearDepth)
 {
+	if (linearDepth > 30.0f)
+		return 1.0f;
+
 	// Scale the micro-shadow range near the camera, then cap it before distant
 	// occluders can turn screen-space depth discontinuities into long shadows.
 	float maxDistance = min(0.5f, max(0.025f, linearDepth * 0.015f));

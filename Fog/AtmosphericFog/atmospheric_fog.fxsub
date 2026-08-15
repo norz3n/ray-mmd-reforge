@@ -73,27 +73,21 @@ float4 AtmosphericFogPS(
 	in float3 mieLambda : TEXCOORD2,
 	in float3 rayleight : TEXCOORD3) : COLOR
 {
-	float4 MRT5 = tex2Dlod(Gbuffer5Map, float4(coord, 0, 0));
-	float4 MRT6 = tex2Dlod(Gbuffer6Map, float4(coord, 0, 0));
-	float4 MRT7 = tex2Dlod(Gbuffer7Map, float4(coord, 0, 0));
 	float4 MRT8 = tex2Dlod(Gbuffer8Map, float4(coord, 0, 0));
+	clip(MRT8.x - 1e-5);
 
-	MaterialParam material;
-	DecodeGbuffer(MRT5, MRT6, MRT7, MRT8, material);
+	float linearDepth = MRT8.x;
 
 	float3 V = normalize(viewdir);
 	float3 L = mul(SunDirection, (float3x3)matView);
 
 #if FOG_WITH_GODRAY
-	float3 fogAmount = ComputeSkyFogMie(V, L, mieLambda, rayleight, mFogMiePhase, mFogRange, mFogDensity, material.linearDepth) * mFogIntensity;
+	float3 fogAmount = ComputeSkyFogMie(V, L, mieLambda, rayleight, mFogMiePhase, mFogRange, mFogDensity, linearDepth) * mFogIntensity;
 #else
-	#if FOG_DISCARD_SKY
-		clip(sum(material.albedo + material.specular) - 1e-5);
-	#endif
-	float3 fogAmount = ComputeSkyFogApproximation(V, L, mieLambda, rayleight, mFogMiePhase, mFogRange, mFogDensity, material.linearDepth) * mFogIntensity;
+	float3 fogAmount = ComputeSkyFogApproximation(V, L, mieLambda, rayleight, mFogMiePhase, mFogRange, mFogDensity, linearDepth) * mFogIntensity;
 #endif
 
-	return float4(fogAmount, luminance(mWaveLength) * material.linearDepth * mFogDensity);
+	return float4(fogAmount, luminance(mWaveLength) * linearDepth * mFogDensity);
 }
 
 #if FOG_WITH_GODRAY

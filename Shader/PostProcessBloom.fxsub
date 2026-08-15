@@ -206,20 +206,17 @@ float4 GlareDetectionPS(
 
 float4 BloomBlurPS(in float2 coord : TEXCOORD0, uniform sampler source, uniform float2 offset) : COLOR
 {
-	const float weights[9] = { 0.048297,0.08393,0.124548,0.157829,0.170793,0.157829,0.124548,0.08393,0.048297 };
+	static const float w0 = 0.1707930f;
+	static const float w12 = 0.2823770f;
+	static const float w34 = 0.1322270f;
+	static const float o12 = 1.4410699f;
+	static const float o34 = 3.3652582f;
 
-	float2 coords = coord - offset * 4.0;
-
-	float4 color = 0;
-	color += tex2Dlod(source, float4(coords, 0, 0)) * weights[0]; coords += offset;
-	color += tex2Dlod(source, float4(coords, 0, 0)) * weights[1]; coords += offset;
-	color += tex2Dlod(source, float4(coords, 0, 0)) * weights[2]; coords += offset;
-	color += tex2Dlod(source, float4(coords, 0, 0)) * weights[3]; coords += offset;
-	color += tex2Dlod(source, float4(coords, 0, 0)) * weights[4]; coords += offset;
-	color += tex2Dlod(source, float4(coords, 0, 0)) * weights[5]; coords += offset;
-	color += tex2Dlod(source, float4(coords, 0, 0)) * weights[6]; coords += offset;
-	color += tex2Dlod(source, float4(coords, 0, 0)) * weights[7]; coords += offset;
-	color += tex2Dlod(source, float4(coords, 0, 0)) * weights[8];
+	float4 color = tex2Dlod(source, float4(coord, 0, 0)) * w0;
+	color += tex2Dlod(source, float4(coord + offset * o12, 0, 0)) * w12;
+	color += tex2Dlod(source, float4(coord - offset * o12, 0, 0)) * w12;
+	color += tex2Dlod(source, float4(coord + offset * o34, 0, 0)) * w34;
+	color += tex2Dlod(source, float4(coord - offset * o34, 0, 0)) * w34;
 
 	return color;
 }

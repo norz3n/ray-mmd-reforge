@@ -143,10 +143,11 @@ float4 ZBufferMipmap_1_PS(in float2 pos: VPOS, in float2 coord : TEXCOORD0, unif
 
 float4 ZBufferMipmap_N_PS(in float2 pos: VPOS, in float2 coord : TEXCOORD0, uniform sampler source, uniform float2 viewportSize, uniform float2 superSize) : COLOR
 {
-    float2 uv0 = coord + (0.5 * float2(1, 1)) / superSize;
-    float2 uv1 = coord + (0.5 * float2(1, 3)) / superSize;
-    float2 uv2 = coord + (0.5 * float2(3, 3)) / superSize;
-    float2 uv3 = coord + (0.5 * float2(3, 1)) / superSize;
+    float2 invSuper = 0.5f / superSize;
+    float2 uv0 = coord + float2(1, 1) * invSuper;
+    float2 uv1 = coord + float2(1, 3) * invSuper;
+    float2 uv2 = coord + float2(3, 3) * invSuper;
+    float2 uv3 = coord + float2(3, 1) * invSuper;
 
     float depth = tex2Dlod(source, float4(uv0, 0, 0)).x;
     depth = min(tex2Dlod(source, float4(uv1, 0, 0)).x, depth);

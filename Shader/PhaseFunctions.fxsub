@@ -24,21 +24,21 @@ float3 ComputeWaveLengthRayleigh(float3 lambda)
 float ComputePhaseMie(float theta, float g)
 {
 	float g2 = g * g;
-
 	float theta2 = theta * theta;
 
-	float leftTop = 3.0 * (1.0 - g2);
-	float leftBottom = 2.0 * (2.0 + g2);
-	float rightTop = 1.0 + theta2;
-	float rightBottom = pow(max(1e-5, 1.0 + g2 - 2.0 * g * saturate(theta)), 1.5);
+	float left = (3.0f * (1.0f - g2)) / (2.0f * (2.0f + g2));
+	float rightTop = 1.0f + theta2;
+	float invRoot = rsqrt(max(1.0f + g2 - 2.0f * g * saturate(theta), 1e-5f));
+	float right = rightTop * (invRoot * invRoot * invRoot);
 
-	return ((leftTop / leftBottom) * (rightTop / rightBottom)) / (4.0 * PI);
+	return (left * right) * (1.0f / (4.0f * PI));
 }
 
 float ComputePhaseMieHG(float theta, float g)
 {
 	float g2 = g * g;
-	return (1.0 - g2) / pow(1.0 + g2 - 2.0 * g * saturate(theta), 1.5) / (4.0 * PI);
+	float invRoot = rsqrt(max(1.0f + g2 - 2.0f * g * saturate(theta), 1e-5f));
+	return (1.0f - g2) * (invRoot * invRoot * invRoot) * (1.0f / (4.0f * PI));
 }
 
 float ComputePhaseRayleigh(float theta)

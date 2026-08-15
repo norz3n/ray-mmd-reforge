@@ -41,10 +41,14 @@ sampler SSRLightX4SampTemp = sampler_state { texture = <SSRLightX4MapTemp>; MinF
 
 float4 SSRConeTracingPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) : COLOR 
 {
+	float4 MRT3 = tex2Dlod(Gbuffer8Map, float4(coord.xy, 0, 0));
+	clip(MRT3.x - 1e-5);
+
 	float4 MRT0 = tex2Dlod(Gbuffer5Map, float4(coord.xy, 0, 0));
+	clip(MRT0.w - 0.05f);
+
 	float4 MRT1 = tex2Dlod(Gbuffer6Map, float4(coord.xy, 0, 0));
 	float4 MRT2 = tex2Dlod(Gbuffer7Map, float4(coord.xy, 0, 0));
-	float4 MRT3 = tex2Dlod(Gbuffer8Map, float4(coord.xy, 0, 0));
 
 	MaterialParam material;
 	DecodeGbuffer(MRT0, MRT1, MRT2, MRT3, material);
@@ -53,7 +57,7 @@ float4 SSRConeTracingPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOOR
 	clip(sum(test) - 1e-5);
 
 	float3 view = normalize(viewdir);
-	float3 viewPosition = view * material.linearDepth / view.z;
+	float3 viewPosition = viewdir * (material.linearDepth / viewdir.z);
 	float3 viewReflect = normalize(reflect(-view, material.normal));
 
 	float atten = dot(viewReflect, -view);
@@ -88,20 +92,17 @@ float4 SSRConeTracingPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOOR
 
 float4 SSRGaussionBlurPS(in float2 coord : TEXCOORD0, uniform sampler source, uniform float2 offset) : COLOR
 {
-	static const float weights[5] = {0.20236, 0.179044, 0.124009, 0.067234, 0.028532};
+	static const float w0 = 0.2023600f;
+	static const float w12 = 0.3030530f;
+	static const float w34 = 0.0957660f;
+	static const float o12 = 1.4091991f;
+	static const float o34 = 3.2979345f;
 
-	float2 start = coord - offset * 4;
-
-	float4 color = 0;
-	color += tex2Dlod(source, float4(start, 0, 0)) * weights[4]; start += offset;
-	color += tex2Dlod(source, float4(start, 0, 0)) * weights[3]; start += offset;
-	color += tex2Dlod(source, float4(start, 0, 0)) * weights[2]; start += offset;
-	color += tex2Dlod(source, float4(start, 0, 0)) * weights[1]; start += offset;
-	color += tex2Dlod(source, float4(start, 0, 0)) * weights[0]; start += offset;
-	color += tex2Dlod(source, float4(start, 0, 0)) * weights[1]; start += offset;
-	color += tex2Dlod(source, float4(start, 0, 0)) * weights[2]; start += offset;
-	color += tex2Dlod(source, float4(start, 0, 0)) * weights[3]; start += offset;
-	color += tex2Dlod(source, float4(start, 0, 0)) * weights[4];
+	float4 color = tex2Dlod(source, float4(coord, 0, 0)) * w0;
+	color += tex2Dlod(source, float4(coord + offset * o12, 0, 0)) * w12;
+	color += tex2Dlod(source, float4(coord - offset * o12, 0, 0)) * w12;
+	color += tex2Dlod(source, float4(coord + offset * o34, 0, 0)) * w34;
+	color += tex2Dlod(source, float4(coord - offset * o34, 0, 0)) * w34;
 
 	return color;
 }

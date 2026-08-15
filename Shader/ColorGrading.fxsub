@@ -59,9 +59,9 @@ float3 ColorCorrect(
 {
 	float3 lum = luminance(color);
 	color = max(0, lerp(lum, color, colorSaturation));
-	color = pow(color * (1.0 / 0.18), colorContrast) * 0.18;
-	color = pow(color, colorGamma);
-	color = color * (colorGainP + 1.0 - colorGainM);
+	float combinedExponent = colorContrast * colorGamma;
+	float scale = pow(0.18f, colorGamma);
+	color = pow(color * (1.0f / 0.18f), combinedExponent) * (scale * (colorGainP + 1.0f - colorGainM));
 	return color;
 }
 

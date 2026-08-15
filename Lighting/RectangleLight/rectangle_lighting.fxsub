@@ -173,6 +173,9 @@ float ShadingShadow(MaterialParam material, float3 viewPosition)
 void ShadingMaterial(MaterialParam material, float3 P, float3 V, inout float3 diffuse, inout float3 specular)
 {
 	float3 L = viewLightPosition - P;
+	if (dot(L, viewLightDirection) >= 0.0f)
+		return;
+
 	float3 Lw = RectangleDirection(L, viewLightRight, viewLightUp, viewLightDirection, LightRect);
 	float3 L2 = normalize(Lw);
 
@@ -201,10 +204,12 @@ void ShadingMaterial(MaterialParam material, float3 P, float3 V, inout float3 di
 
 void GetGbufferParams(float2 coord, out MaterialParam material, out MaterialParam materialAlpha)
 {
+	float4 MRT8 = tex2Dlod(Gbuffer8Map, float4(coord, 0, 0));
+	clip(MRT8.x - 1e-5);
+
 	float4 MRT5 = tex2Dlod(Gbuffer5Map, float4(coord, 0, 0));
 	float4 MRT6 = tex2Dlod(Gbuffer6Map, float4(coord, 0, 0));
 	float4 MRT7 = tex2Dlod(Gbuffer7Map, float4(coord, 0, 0));
-	float4 MRT8 = tex2Dlod(Gbuffer8Map, float4(coord, 0, 0));
 
 	DecodeGbuffer(MRT5, MRT6, MRT7, MRT8, materialAlpha);
 
@@ -243,15 +248,20 @@ void LightSourcePS(
 	GetGbufferParams(coord, material, materialAlpha);
 
 	float3 V = normalize(viewdir);
+	float rcpZ = 1.0f / viewdir.z;
 
-	float3 P1 = V * material.linearDepth / V.z;
-	float3 P2 = V * materialAlpha.linearDepth / V.z;
+	float3 P1 = viewdir * (material.linearDepth * rcpZ);
+	float3 P2 = viewdir * (materialAlpha.linearDepth * rcpZ);
 
-	float3 diffuse, specular = 0;
+	float3 diffuse = 0, specular = 0;
 	ShadingMaterial(material, P1, V, diffuse, specular);
 
-	float3 diffuseAlpha, specularAlpha = 0;
-	ShadingMaterial(materialAlpha, P2, V, diffuseAlpha, specularAlpha);
+	float3 diffuseAlpha = 0, specularAlpha = 0;
+	[branch]
+	if (any(materialAlpha.albedo + materialAlpha.specular))
+	{
+		ShadingMaterial(materialAlpha, P2, V, diffuseAlpha, specularAlpha);
+	}
 
 	oColor0 = float4(diffuse, 0);
 	oColor1 = float4(specular, 0);
@@ -279,15 +289,20 @@ void LightSourceShadowlessPS(
 	GetGbufferParams(coord, material, materialAlpha);
 
 	float3 V = normalize(viewdir);
+	float rcpZ = 1.0f / viewdir.z;
 
-	float3 P1 = V * material.linearDepth / V.z;
-	float3 P2 = V * materialAlpha.linearDepth / V.z;
+	float3 P1 = viewdir * (material.linearDepth * rcpZ);
+	float3 P2 = viewdir * (materialAlpha.linearDepth * rcpZ);
 
 	float3 diffuse, specular = 0;
 	ShadingMaterial(material, P1, V, diffuse, specular);
 
 	float3 diffuseAlpha, specularAlpha = 0;
-	ShadingMaterial(materialAlpha, P2, V, diffuseAlpha, specularAlpha);
+	[branch]
+	if (any(materialAlpha.albedo + materialAlpha.specular))
+	{
+		ShadingMaterial(materialAlpha, P2, V, diffuseAlpha, specularAlpha);
+	}
 
 	oColor0 = float4(diffuse, 0);
 	oColor1 = float4(specular, 0);

@@ -15,8 +15,7 @@ float3 ComputeSkyFogMie(float3 V, float3 L, float3 waveLambdaMie, float3 waveLam
 
 	float3 inscattering = betaMie / (inscatteringMie + inscatteringRayleigh);
 
-	float3 extinction = exp(-(inscatteringMie + inscatteringRayleigh) * distance * fogDensity);
-	extinction = pow(extinction, fogRange);
+	float3 extinction = exp(-(inscatteringMie + inscatteringRayleigh) * (distance * fogDensity * fogRange));
 
 	return max(0, inscattering * (1.0 - extinction));
 }
@@ -38,8 +37,7 @@ float3 ComputeSkyFogRayleigh(float3 V, float3 L, float3 waveLambdaMie, float3 wa
 
 	float3 inscattering = betaRayleigh / (inscatteringMie + inscatteringRayleigh);
 
-	float3 extinction = exp(-(inscatteringMie + inscatteringRayleigh) * distance * fogDensity);
-	extinction = pow(extinction, fogRange);
+	float3 extinction = exp(-(inscatteringMie + inscatteringRayleigh) * (distance * fogDensity * fogRange));
 
 	return max(0, inscattering * (1.0 - extinction));
 }
@@ -62,8 +60,7 @@ float3 ComputeSkyFogApproximation(float3 V, float3 L, float3 waveLambdaMie, floa
 
 	float3 inscattering = betaScattering / (inscatteringMie + inscatteringRayleigh);
 
-	float3 extinction = exp(-(inscatteringMie + inscatteringRayleigh) * distance * fogDensity);
-	extinction = pow(extinction, fogRange);
+	float3 extinction = exp(-(inscatteringMie + inscatteringRayleigh) * (distance * fogDensity * fogRange));
 
 	return max(0, inscattering * (1.0 - extinction));
 }

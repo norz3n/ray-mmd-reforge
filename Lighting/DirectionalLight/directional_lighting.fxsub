@@ -246,10 +246,12 @@ void GetGbufferParams(float4 texcoord, out MaterialParam material, out MaterialP
 {
 	float2 coord = texcoord.xy / texcoord.w;
 
+	float4 MRT8 = tex2Dlod(Gbuffer8Map, float4(coord, 0, 0));
+	clip(MRT8.x - 1e-5);
+
 	float4 MRT5 = tex2Dlod(Gbuffer5Map, float4(coord, 0, 0));
 	float4 MRT6 = tex2Dlod(Gbuffer6Map, float4(coord, 0, 0));
 	float4 MRT7 = tex2Dlod(Gbuffer7Map, float4(coord, 0, 0));
-	float4 MRT8 = tex2Dlod(Gbuffer8Map, float4(coord, 0, 0));
 
 	DecodeGbuffer(MRT5, MRT6, MRT7, MRT8, materialAlpha);
 
@@ -290,29 +292,43 @@ void LightSourcePS(
 	GetGbufferParams(coord, material, materialAlpha);
 
 	float3 V = normalize(viewdir);
+	float rcpZ = 1.0f / viewdir.z;
 
-	float3 P1 = V * material.linearDepth / V.z;
-	float3 P2 = V * materialAlpha.linearDepth / V.z;
+	float3 P1 = viewdir * (material.linearDepth * rcpZ);
+	float3 P2 = viewdir * (materialAlpha.linearDepth * rcpZ);
 
 	float shadow = 1;
 #if SHADOW_MAP_FROM >= 1
-	shadow = ShadingShadow(materialAlpha, P2, coord.xy / coord.w);
+	[branch]
+	if (dot(materialAlpha.normal, viewLightDirection) > 0.0f || materialAlpha.lightModel == SHADINGMODELID_SKIN || materialAlpha.lightModel == SHADINGMODELID_SUBSURFACE)
+	{
+		shadow = ShadingShadow(materialAlpha, P2, coord.xy / coord.w);
 #if CONTACT_SHADOW_QUALITY >= 1
-	float contactShadow = GetContactShadow(P2, materialAlpha.normal, viewLightDirection, coord.xy / coord.w, materialAlpha.linearDepth);
+		float contactShadow = GetContactShadow(P2, materialAlpha.normal, viewLightDirection, coord.xy / coord.w, materialAlpha.linearDepth);
 #if PCSS_SHADOW_ENABLE
-	shadow = min(shadow, contactShadow);
+		shadow = min(shadow, contactShadow);
 #else
-	shadow *= contactShadow;
+		shadow *= contactShadow;
 #endif
 #endif
-	clip(shadow - 1e-5);
+		clip(shadow - 1e-5);
+	}
+	else
+	{
+		shadow = 0;
+	}
 #endif
 
 	float3 diffuse = 0, specular = 0;
 	float3 diffuseAlpha = 0, specularAlpha = 0;
 
 	ShadingMaterial(material, P1, V, shadow, diffuse, specular);
-	ShadingMaterial(materialAlpha, P2, V, shadow, diffuseAlpha, specularAlpha);
+
+	[branch]
+	if (any(materialAlpha.albedo + materialAlpha.specular))
+	{
+		ShadingMaterial(materialAlpha, P2, V, shadow, diffuseAlpha, specularAlpha);
+	}
 
 	oColor0 = float4(diffuse, 0);
 	oColor1 = float4(specular, 0);
@@ -331,15 +347,21 @@ void LightSourceShadowlessPS(
 	GetGbufferParams(coord, material, materialAlpha);
 
 	float3 V = normalize(viewdir);
+	float rcpZ = 1.0f / viewdir.z;
 
-	float3 P1 = V * material.linearDepth / V.z;
-	float3 P2 = V * materialAlpha.linearDepth / V.z;
+	float3 P1 = viewdir * (material.linearDepth * rcpZ);
+	float3 P2 = viewdir * (materialAlpha.linearDepth * rcpZ);
 
 	float3 diffuse = 0, specular = 0;
 	float3 diffuseAlpha = 0, specularAlpha = 0;
 
 	ShadingMaterial(material, P1, V, 1, diffuse, specular);
-	ShadingMaterial(materialAlpha, P2, V, 1, diffuseAlpha, specularAlpha);
+
+	[branch]
+	if (any(materialAlpha.albedo + materialAlpha.specular))
+	{
+		ShadingMaterial(materialAlpha, P2, V, 1, diffuseAlpha, specularAlpha);
+	}
 
 	oColor0 = float4(diffuse, 0);
 	oColor1 = float4(specular, 0);

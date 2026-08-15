@@ -77,10 +77,12 @@ void ShadingOpacityPS(
 	out float4 oColor0 : COLOR0,
 	out float4 oColor1 : COLOR1)
 {
+	float4 MRT4 = tex2Dlod(Gbuffer4Map, float4(coord, 0, 0));
+	clip(MRT4.x - 1e-5);
+
 	float4 MRT1 = tex2Dlod(Gbuffer1Map, float4(coord, 0, 0));
 	float4 MRT2 = tex2Dlod(Gbuffer2Map, float4(coord, 0, 0));
 	float4 MRT3 = tex2Dlod(Gbuffer3Map, float4(coord, 0, 0));
-	float4 MRT4 = tex2Dlod(Gbuffer4Map, float4(coord, 0, 0));
 
 	MaterialParam material;
 	DecodeGbuffer(MRT1, MRT2, MRT3, MRT4, material);
@@ -138,10 +140,12 @@ float4 ShadingTransparentPS(
 	in float3 viewdir: TEXCOORD1, 
 	in float4 screenPosition : SV_Position) : COLOR
 {
+	float4 MRT8 = tex2Dlod(Gbuffer8Map, float4(coord, 0, 0));
+	clip(MRT8.x - 1e-5);
+
 	float4 MRT5 = tex2Dlod(Gbuffer5Map, float4(coord, 0, 0));
 	float4 MRT6 = tex2Dlod(Gbuffer6Map, float4(coord, 0, 0));
 	float4 MRT7 = tex2Dlod(Gbuffer7Map, float4(coord, 0, 0));
-	float4 MRT8 = tex2Dlod(Gbuffer8Map, float4(coord, 0, 0));
 
 	MaterialParam material;
 	DecodeGbuffer(MRT5, MRT6, MRT7, MRT8, material);

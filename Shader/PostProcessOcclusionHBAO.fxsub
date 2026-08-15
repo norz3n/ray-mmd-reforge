@@ -51,9 +51,7 @@ float3 GetNormal(float2 uv)
 
 float3 ComputeViewSpacePosition(float2 uv, float linearEyeDepth)
 {
-	float3 V = normalize(-mul(float4(CoordToPos(uv), 0, 1), matProjectInverse).xyz);
-	float3 viewPosition = V * linearEyeDepth / V.z;
-	return viewPosition;
+	return GetViewPosition(GetProjConstant(), uv, linearEyeDepth);
 }
 
 float Falloff(float distanceSquare, float maxRadius)
@@ -91,7 +89,8 @@ float4 HorizonOcclusion(
 	float2 direction,
 	float  maxRadius,
 	float  jitter,
-	float  bias)
+	float  bias,
+	float4 projConstant)
 {
 	float2 sampleStepDelta = direction * maxRadius / HBAO_SAMPLER_COUNT;
 	float2 sampleDirection = direction + frac(jitter) * sampleStepDelta;
@@ -115,10 +114,10 @@ float4 HorizonOcclusion(
 		sampleOffset[3] = mad(samplePoint[3], sampleTexelSize, uv);
 
 		float3 samplePosition[4];
-		samplePosition[0] = ComputeViewSpacePosition(sampleOffset[0], linearizeDepth(sampleOffset[0] + ViewportOffset));
-		samplePosition[1] = ComputeViewSpacePosition(sampleOffset[1], linearizeDepth(sampleOffset[1] + ViewportOffset));
-		samplePosition[2] = ComputeViewSpacePosition(sampleOffset[2], linearizeDepth(sampleOffset[2] + ViewportOffset));
-		samplePosition[3] = ComputeViewSpacePosition(sampleOffset[3], linearizeDepth(sampleOffset[3] + ViewportOffset));
+		samplePosition[0] = GetViewPosition(projConstant, sampleOffset[0], linearizeDepth(sampleOffset[0] + ViewportOffset));
+		samplePosition[1] = GetViewPosition(projConstant, sampleOffset[1], linearizeDepth(sampleOffset[1] + ViewportOffset));
+		samplePosition[2] = GetViewPosition(projConstant, sampleOffset[2], linearizeDepth(sampleOffset[2] + ViewportOffset));
+		samplePosition[3] = GetViewPosition(projConstant, sampleOffset[3], linearizeDepth(sampleOffset[3] + ViewportOffset));
 
 		float3 sampleDir[4];
 		sampleDir[0] = samplePosition[0] - viewPosition;
@@ -208,11 +207,12 @@ float4 ScreenSpaceDirOccPassVS(
 
 float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_POSITION) : COLOR
 {
+	float4 projConstant = GetProjConstant();
 	float maxRadius = lerp(lerp(20.0, 60.0, mSSAORadiusP), 2.0, mSSAORadiusM);
 
 	float2 samplePixel = screen / ViewportSize;
 	float3 sampleNormal = GetNormal(uv.xy);
-	float3 samplePosition = ComputeViewSpacePosition(samplePixel, linearizeDepth(uv.xy));
+	float3 samplePosition = GetViewPosition(projConstant, samplePixel, linearizeDepth(uv.xy));
 	int frameCounter = (int)fmod(time * 60.0, 16.0);
 	float2 sampleRandom = float2(InterleavedGradientNoise(screen, frameCounter), PseudoRandom(screen + frameCounter));
 
@@ -234,7 +234,7 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 	[loop]
 	for (int d = 0; d < HBAO_DIRECTION_COUNT; ++d)
 	{
-		occlusion += HorizonOcclusion(samplePixel, sampleNormal, samplePosition, direction, radius, sampleRandom.y, mAmbientOcclusionBias);
+		occlusion += HorizonOcclusion(samplePixel, sampleNormal, samplePosition, direction, radius, sampleRandom.y, mAmbientOcclusionBias, projConstant);
 
 		// Rotate direction vector iteratively using a 2D rotation matrix (2 mad operations instead of cos/sin)
 		direction = float2(
@@ -259,13 +259,14 @@ float4 ScreenSpaceDirOccBlurPS(
 	uniform sampler source,
 	uniform float2 offset) : COLOR
 {
+	float4 projConstant = GetProjConstant();
 	float center_d = linearizeDepth(uv);
 
 	float total_w = 1.0f;
 	float4 total_c = tex2Dlod(source, float4(uv, 0, 0));
 
 	float3 normal = GetNormal(uv);
-	float3 center_pos = ComputeViewSpacePosition(uv, center_d);
+	float3 center_pos = GetViewPosition(projConstant, uv, center_d);
 
 	float angle = pow2(saturate(dot(normal, normalize(viewdir))));
 
@@ -279,8 +280,8 @@ float4 ScreenSpaceDirOccBlurPS(
 	for (int r = 1; r < SSDO_BLUR_RADIUS; ++r)
 	{
 		float2 depth = float2(linearizeDepth(offset1), linearizeDepth(offset2));
-		float3 pos1 = ComputeViewSpacePosition(offset1, depth.x);
-		float3 pos2 = ComputeViewSpacePosition(offset2, depth.y);
+		float3 pos1 = GetViewPosition(projConstant, offset1, depth.x);
+		float3 pos2 = GetViewPosition(projConstant, offset2, depth.y);
 
 		float planeDist1 = abs(dot(normal, pos1 - center_pos));
 		float planeDist2 = abs(dot(normal, pos2 - center_pos));

@@ -14,42 +14,71 @@ static float4x4 matLightViewFromCameraView = mul(matViewInverse, matLightView);
 static float4x4 matLightProjectFromCameraView = mul(matViewInverse, matLightViewProject);
 static float4x4 lightCropParams = CreateLightCropParams(matLightViewFromCameraView, SHADOW_MAP_SIZE);
 
-float2 VogelDiskSample(int i, int numSamples, float noise)
-{
-	float r = sqrt((i + 0.5) / float(numSamples));
-	float theta = i * 2.3999632 + noise * PI_2;
-	return float2(cos(theta), sin(theta)) * r;
-}
+static const float3 kVogelDisk[25] = {
+	float3(0.1414214f, 0.0000000f, 0.8585786f),
+	float3(-0.1806177f, 0.1654607f, 0.7550510f),
+	float3(0.0276464f, -0.3150169f, 0.6837722f),
+	float3(0.2276570f, 0.2969382f, 0.6258343f),
+	float3(-0.4177786f, -0.0738991f, 0.5757359f),
+	float3(0.3957563f, -0.2517478f, 0.5309584f),
+	float3(-0.1323727f, 0.4924200f, 0.4900980f),
+	float3(-0.2524493f, -0.4860755f, 0.4522774f),
+	float3(0.5477138f, 0.2000240f, 0.4169048f),
+	float3(-0.5698048f, 0.2352073f, 0.3835586f),
+	float3(0.2746834f, -0.5869830f, 0.3519259f),
+	float3(0.2029844f, 0.6471455f, 0.3217670f),
+	float3(-0.6117968f, -0.3545485f, 0.2928932f),
+	float3(0.7177071f, -0.1577862f, 0.2651531f),
+	float3(-0.4380053f, 0.6230180f, 0.2384227f),
+	float3(-0.1011898f, -0.7808717f, 0.2125992f),
+	float3(0.6212040f, 0.5235509f, 0.1875962f),
+	float3(-0.8359455f, 0.0345694f, 0.1633400f),
+	float3(0.6097578f, -0.6067911f, 0.1397675f),
+	float3(-0.0407947f, 0.8822334f, 0.1168239f),
+	float3(-0.5801872f, -0.6952574f, 0.0944615f),
+	float3(0.9190800f, 0.1236603f, 0.0726382f),
+	float3(-0.7787342f, 0.5418238f, 0.0513167f),
+	float3(0.2127944f, -0.9458956f, 0.0304640f),
+	float3(0.4921846f, 0.8589263f, 0.0100505f),
+};
+static const float kInvWeightSum[4] = {
+	0.1201636f, // 25 samples (cascade 0)
+	0.1341286f, // 16 samples (cascade 1)
+	0.1855560f, // 9 samples  (cascade 2)
+	0.3420866f  // 4 samples  (cascade 3)
+};
 
 float ShadowPCF(sampler source, float2 coord, float radius, float receiverDepth, float noise, int cascadeIndex)
 {
 	float shadow = 0.0;
-	float weightSum = 0.0;
 	
 	// Масштабируем радиус для каскадов, чтобы тени не размывались слишком сильно вдали.
 	// cascadeIndex 0 = 1.0, 1 = 0.66, 2 = 0.5, 3 = 0.4
 	float cascadeScale = 1.0 / (1.0 + cascadeIndex * 0.5); 
 	float finalRadius = radius * cascadeScale;
 
-	[unroll]
-	for (int i = 0; i < SHADOW_POISSON_COUNT; i++)
+	float2 rot;
+	sincos(noise * PI_2, rot.y, rot.x);
+	float2x2 rotMat = float2x2(rot.x, -rot.y, rot.y, rot.x);
+
+	int sampleCount = (cascadeIndex == 0) ? 25 : ((cascadeIndex == 1) ? 16 : ((cascadeIndex == 2) ? 9 : 4));
+
+	[loop]
+	for (int i = 0; i < sampleCount; i++)
 	{
-		float2 vogel = VogelDiskSample(i, SHADOW_POISSON_COUNT, noise);
+		float2 vogel = mul(kVogelDisk[i].xy, rotMat);
 		float2 pos = coord + vogel * finalRadius;
 		
 		// Экспоненциальное сглаживание. Увеличиваем жесткость (-40 вместо -20)
-		// и используем max(0, diff), чтобы избежать переполнения exp.
+		// для предотвращения артефакта ореола/тени на ярких поверхностях.
 		float zMap = tex2Dlod(source, float4(pos, 0, 0)).r;
 		float diff = receiverDepth - zMap;
 		float sampleShadow = saturate(exp(-40.0 * max(0.0, diff)));
 		
-		// Придаем больший вес семплам ближе к центру (имитация Гауссиана)
-		float weight = 1.0 - length(vogel);
-		shadow += sampleShadow * weight;
-		weightSum += weight;
+		shadow += sampleShadow * kVogelDisk[i].z;
 	}
 	
-	return shadow / weightSum;
+	return shadow * kInvWeightSum[cascadeIndex];
 }
 
 float ShadingShadow(MaterialParam material, float3 viewPosition)
@@ -78,30 +107,31 @@ float ShadingShadow(MaterialParam material, float3 viewPosition)
 
 	coord.xy += 0.5 / float(SHADOW_MAP_SIZE);
 
-	[branch]
-	if (coord.w == 0)
-		clip(tex2Dlod(PSSM1Samp, float4(coord.xy, 0, 0)).r - 1e-5);
-	else if (coord.w == 1)
-		clip(tex2Dlod(PSSM2Samp, float4(coord.xy, 0, 0)).r - 1e-5);
-	else if (coord.w == 2)
-		clip(tex2Dlod(PSSM3Samp, float4(coord.xy, 0, 0)).r - 1e-5);
-	else
-		clip(tex2Dlod(PSSM4Samp, float4(coord.xy, 0, 0)).r - 1e-5);
-
 	float shadow = 0;
 	float radius = 2.0 / SHADOW_MAP_SIZE;
-
 	float noise = InterleavedGradientNoise(coord.xy * SHADOW_MAP_SIZE);
 
 	[branch]
 	if (coord.w == 0)
+	{
+		clip(tex2Dlod(PSSM1Samp, float4(coord.xy, 0, 0)).r - 1e-5);
 		shadow = ShadowPCF(PSSM1Samp, coord.xy, radius, receiverDepth, noise, 0);
+	}
 	else if (coord.w == 1)
+	{
+		clip(tex2Dlod(PSSM2Samp, float4(coord.xy, 0, 0)).r - 1e-5);
 		shadow = ShadowPCF(PSSM2Samp, coord.xy, radius, receiverDepth, noise, 1);
+	}
 	else if (coord.w == 2)
+	{
+		clip(tex2Dlod(PSSM3Samp, float4(coord.xy, 0, 0)).r - 1e-5);
 		shadow = ShadowPCF(PSSM3Samp, coord.xy, radius, receiverDepth, noise, 2);
+	}
 	else
+	{
+		clip(tex2Dlod(PSSM4Samp, float4(coord.xy, 0, 0)).r - 1e-5);
 		shadow = ShadowPCF(PSSM4Samp, coord.xy, radius, receiverDepth, noise, 3);
+	}
 
 	return shadow;
 }
@@ -110,22 +140,22 @@ float4 ShadowMapGenPS(
 	in float2 coord : TEXCOORD0,
 	in float3 viewdir : TEXCOORD1) : COLOR
 {
-	float4 MRT5 = tex2Dlod(Gbuffer5Map, float4(coord, 0, 0));
-	float4 MRT6 = tex2Dlod(Gbuffer6Map, float4(coord, 0, 0));
-	float4 MRT7 = tex2Dlod(Gbuffer7Map, float4(coord, 0, 0));
 	float4 MRT8 = tex2Dlod(Gbuffer8Map, float4(coord, 0, 0));
+	clip(MRT8.x - 1e-5);
 
 	MaterialParam material;
-	DecodeGbuffer(MRT5, MRT6, MRT7, MRT8, material);
+	material.linearDepth = MRT8.x;
+	material.visibility = MRT8.z;
 
 	clip(any(material.visibility) - 1e-5);
 
-	float3 view = normalize(viewdir);
-	float3 viewPosition = view * material.linearDepth / view.z;
+	float3 viewPosition = viewdir * (material.linearDepth / viewdir.z);
 
 	float shadow = ShadingShadow(material, viewPosition);
 
 #if CONTACT_SHADOW_QUALITY >= 1
+	float4 MRT6 = tex2Dlod(Gbuffer6Map, float4(coord, 0, 0));
+	material.normal = DecodeNormal(MRT6.xyz);
 	float3 L = mul(-SunDirection, (float3x3)matView);
 	float contactShadow = GetContactShadow(viewPosition, material.normal, L, coord, material.linearDepth);
 	shadow *= contactShadow;

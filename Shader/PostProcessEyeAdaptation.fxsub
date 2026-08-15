@@ -74,7 +74,7 @@ float4 EyeDownsamplePS(
 	float l3 = clamp(luminance(tex2Dlod(source, float4(coord3, 0, 0)).rgb), 0.02, 100.0);
 	float l4 = clamp(luminance(tex2Dlod(source, float4(coord4, 0, 0)).rgb), 0.02, 100.0);
 
-	float color = (log(l1) + log(l2) + log(l3) + log(l4)) * 0.25;
+	float color = log(l1 * l2 * l3 * l4) * 0.25f;
 
 	return color;
 }

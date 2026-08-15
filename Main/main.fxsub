@@ -135,12 +135,9 @@ float3 ComputeTangentBinormalNormal(float3 N, float3 P, float2 coord, float3 tan
 	float3 T = mul(float2(duv1.x, duv2.x), I);
 	float3 B = mul(float2(duv1.y, duv2.y), I);
 
-	float scaleT = 1.0f / (dot(T, T) + 1e-6);
-	float scaleB = 1.0f / (dot(B, B) + 1e-6);
-
 	float3x3 tbnTransform;
-	tbnTransform[0] = normalize(T * scaleT);
-	tbnTransform[1] = -normalize(B * scaleB);
+	tbnTransform[0] = T * rsqrt(dot(T, T) + 1e-6f);
+	tbnTransform[1] = -B * rsqrt(dot(B, B) + 1e-6f);
 	tbnTransform[2] = N;
 
 	return normalize(mul(tangentNormal, tbnTransform));
