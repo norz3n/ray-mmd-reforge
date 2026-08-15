@@ -52,11 +52,6 @@ float ShadowPCF(sampler source, float2 coord, float radius, float receiverDepth,
 {
 	float shadow = 0.0;
 	
-	// Масштабируем радиус для каскадов, чтобы тени не размывались слишком сильно вдали.
-	// cascadeIndex 0 = 1.0, 1 = 0.66, 2 = 0.5, 3 = 0.4
-	float cascadeScale = 1.0 / (1.0 + cascadeIndex * 0.5); 
-	float finalRadius = radius * cascadeScale;
-
 	float2 rot;
 	sincos(noise * PI_2, rot.y, rot.x);
 	float2x2 rotMat = float2x2(rot.x, -rot.y, rot.y, rot.x);
@@ -67,13 +62,11 @@ float ShadowPCF(sampler source, float2 coord, float radius, float receiverDepth,
 	for (int i = 0; i < sampleCount; i++)
 	{
 		float2 vogel = mul(kVogelDisk[i].xy, rotMat);
-		float2 pos = coord + vogel * finalRadius;
+		float2 pos = coord + vogel * radius;
 		
-		// Экспоненциальное сглаживание. Увеличиваем жесткость (-40 вместо -20)
-		// для предотвращения артефакта ореола/тени на ярких поверхностях.
 		float zMap = tex2Dlod(source, float4(pos, 0, 0)).r;
 		float diff = receiverDepth - zMap;
-		float sampleShadow = saturate(exp(-40.0 * max(0.0, diff)));
+		float sampleShadow = (diff <= 0.0f) ? 1.0f : saturate(exp(-12.0f * diff));
 		
 		shadow += sampleShadow * kVogelDisk[i].z;
 	}
@@ -108,7 +101,7 @@ float ShadingShadow(MaterialParam material, float3 viewPosition)
 	coord.xy += 0.5 / float(SHADOW_MAP_SIZE);
 
 	float shadow = 0;
-	float radius = 2.0 / SHADOW_MAP_SIZE;
+	float radius = 3.5 / SHADOW_MAP_SIZE;
 	float noise = InterleavedGradientNoise(coord.xy * SHADOW_MAP_SIZE);
 
 	[branch]

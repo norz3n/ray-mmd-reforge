@@ -205,6 +205,7 @@ def parse_and_add_morphs(filepath, new_morph_names, output_filepath=None):
         m_start = p.pos
         name_j = p.read_string(encoding)
         name_e = p.read_string(encoding)
+        after_names_pos = p.pos
         panel = p.read_byte()
         m_type = p.read_byte()
         o_cnt = p.read_int()
@@ -234,8 +235,20 @@ def parse_and_add_morphs(filepath, new_morph_names, output_filepath=None):
                 p.read_bytes(1 + 12 + 12)
 
         m_end = p.pos
-        morph_data_bytes.extend(p.data[m_start:m_end])
-        existing_morphs.append(name_j)
+        
+        if 'VXGI' in name_j or 'VXGI' in name_e:
+            new_name_j = name_j.replace('VXGI', 'SSGI')
+            new_name_e = name_e.replace('VXGI', 'SSGI')
+            m_bin = bytearray()
+            m_bin.extend(write_string(new_name_j, encoding))
+            m_bin.extend(write_string(new_name_e, encoding))
+            m_bin.extend(p.data[after_names_pos:m_end])
+            morph_data_bytes.extend(m_bin)
+            existing_morphs.append(new_name_j)
+            print(f"[*] Renamed Morph: {name_j} -> {new_name_j}")
+        else:
+            morph_data_bytes.extend(p.data[m_start:m_end])
+            existing_morphs.append(name_j)
 
     # Filter out already existing morphs
     added_morph_indices = []
@@ -247,7 +260,7 @@ def parse_and_add_morphs(filepath, new_morph_names, output_filepath=None):
             m_bin = bytearray()
             m_bin.extend(write_string(new_name, encoding))
             m_bin.extend(write_string(new_name, encoding))
-            m_bin.append(4) # Panel: 4 = Other
+            m_bin.append(2) # Panel: 2 = Eyes
             m_bin.append(0) # Type: 0 = Group
             m_bin.extend(struct.pack('<i', 0)) # Offset count = 0
             
@@ -314,9 +327,9 @@ def parse_and_add_morphs(filepath, new_morph_names, output_filepath=None):
     print(f"[SUCCESS] Updated PMX saved to {output_filepath}")
 
 if __name__ == '__main__':
-    target = r'Extension\Debug\DebugController.pmx'
+    target = r'ray_controller.pmx'
     if len(sys.argv) > 1:
         target = sys.argv[1]
     
-    new_morphs = ['VXGI', 'VXGIIntensity', 'VXGIConeAngle', 'VXGIBias']
+    new_morphs = ['SSGI+', 'SSGI-']
     parse_and_add_morphs(target, new_morphs)
