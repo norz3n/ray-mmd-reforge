@@ -3,6 +3,13 @@
 #define PROCEDURAL_HAIR_INTENSITY 0.5
 #endif
 
+#ifndef PROCEDURAL_EYE
+#define PROCEDURAL_EYE 0
+#define PROCEDURAL_EYE_CURVATURE 0.75
+#define PROCEDURAL_EYE_RADIUS 0.95
+#define PROCEDURAL_EYE_LIMBAL_RING 0.65
+#endif
+
 float4x4 matView : VIEW;
 float4x4 matWorld : WORLD;
 float4x4 matWorldView : WORLDVIEW;
@@ -1120,6 +1127,26 @@ float3 GetNormal(float3 N, float3 P, float2 coord)
 		T_fake = normalize(T_fake);
 
 		return normalize(N + T_fake * hairNoise * PROCEDURAL_HAIR_INTENSITY);
+	#elif PROCEDURAL_EYE > 0
+		float2 eyeUV = (coord - 0.5) * 2.0;
+		float r2 = dot(eyeUV, eyeUV);
+		if (r2 < PROCEDURAL_EYE_RADIUS)
+		{
+			float z = sqrt(max(0.0, 1.0 - r2));
+			float3 corneaN = normalize(float3(eyeUV * PROCEDURAL_EYE_CURVATURE, z));
+			
+			float3 dp1 = ddx(P);
+			float3 dp2 = ddy(P);
+			float2 duv1 = ddx(coord);
+			float2 duv2 = ddy(coord);
+			float3x3 M = float3x3(dp1, dp2, N);
+			float2x3 I = float2x3(cross(M[1], M[2]), cross(M[2], M[0]));
+			float3 T = normalize(mul(float2(duv1.x, duv2.x), I));
+			float3 B = normalize(mul(float2(duv1.y, duv2.y), I));
+			
+			return normalize(T * corneaN.x + B * corneaN.y + N * corneaN.z);
+		}
+		return N;
 	#else
 		return N;
 	#endif
