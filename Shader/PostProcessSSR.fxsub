@@ -3,6 +3,8 @@
  *
  * Implements physically based screen-space cone-traced reflections with
  * multi-resolution roughness pyramid filtering and Fresnel attenuation.
+ *
+ * Credit: material by dendewa (Ray-LAB) - implementation reference.
  */
 
 #ifndef RAY_MMD_POST_PROCESS_SSR_FXSUB

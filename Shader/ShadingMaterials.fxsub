@@ -171,14 +171,14 @@ float4 ShadingTransparentPS(
 	lighting += (material.lightModel == SHADINGMODELID_GLASS ? 0.0f : iblDiffuse * material.albedo) + iblSpecular;
 #endif
 
-	float2 ior = (material.lightModel != SHADINGMODELID_GLASS) ? 0 : mul(material.normal, (float3x3)matViewInverse).xy * (material.customDataA * 0.008f);
+	float2 ior = (material.lightModel != SHADINGMODELID_GLASS) ? 0 : mul(material.normal, (float3x3)matViewInverse).xy * (material.customDataA * 0.003f);
 	float3 prefilteredRefract;
 
 	if (material.lightModel == SHADINGMODELID_GLASS)
 	{
-		float2 iorR = ior * 0.50f;
+		float2 iorR = ior * 0.90f;
 		float2 iorG = ior * 1.00f;
-		float2 iorB = ior * 1.50f;
+		float2 iorB = ior * 1.10f;
 
 		float3 bgR = tex2Dlod(ShadingMapTempPointSamp, float4(coord + iorR, 0, 0)).rgb;
 		float3 bgG = tex2Dlod(ShadingMapTempPointSamp, float4(coord + iorG, 0, 0)).rgb;

@@ -3,6 +3,8 @@
  *
  * Implements conservative depth pyramid construction and screen-space
  * hierarchical raymarching (based on Assarsson, Akenine-Moller, and McGuire).
+ *
+ * Credit: material by dendewa (Ray-LAB) - implementation reference.
  */
 
 #ifndef RAY_MMD_HIZ_SSR_FXSUB
