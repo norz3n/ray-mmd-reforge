@@ -1,11 +1,11 @@
-#define ALBEDO_MAP_FROM 3
+#define ALBEDO_MAP_FROM 0
 #define ALBEDO_MAP_UV_FLIP 0
 #define ALBEDO_MAP_APPLY_SCALE 0
-#define ALBEDO_MAP_APPLY_DIFFUSE 1
+#define ALBEDO_MAP_APPLY_DIFFUSE 0
 #define ALBEDO_MAP_APPLY_MORPH_COLOR 0
 #define ALBEDO_MAP_FILE "albedo.png"
 
-const float3 albedo = 1.0;
+const float3 albedo = 0.0;
 const float2 albedoMapLoopNum = 1.0;
 
 #define ALBEDO_SUB_ENABLE 0
@@ -17,12 +17,12 @@ const float2 albedoMapLoopNum = 1.0;
 const float3 albedoSub = 1.0;
 const float2 albedoSubMapLoopNum = 1.0;
 
-#define ALPHA_MAP_FROM 3
+#define ALPHA_MAP_FROM 0
 #define ALPHA_MAP_UV_FLIP 0
 #define ALPHA_MAP_SWIZZLE 3
 #define ALPHA_MAP_FILE "alpha.png"
 
-const float alpha = 1.0;
+const float alpha = 0.05;
 const float alphaMapLoopNum = 1.0;
 
 #define NORMAL_MAP_FROM 0
@@ -110,7 +110,7 @@ const float2 emissiveMapLoopNum = 1.0;
 #define CUSTOM_A_MAP_APPLY_SCALE 0
 #define CUSTOM_A_MAP_FILE "custom.png"
 
-const float customA = 0.0;
+const float customA = 1.5;
 const float customAMapLoopNum = 1.0;
 
 #define CUSTOM_B_MAP_FROM 0
