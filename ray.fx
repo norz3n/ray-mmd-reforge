@@ -30,6 +30,7 @@ float mFocalDistanceP : CONTROLOBJECT<string name="ray_controller.pmx"; string i
 float mFocalDistanceM : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "FocalDistance-";>;
 float mFocalRegionP : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "FocalRegion+";>;
 float mFocalRegionM : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "FocalRegion-";>;
+float mBladeCountM : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "BladeCount-";>;
 float mMeasureMode : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "MeasureMode";>;
 float mTestMode : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "TestMode";>;
 float mVignette : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "Vignette";>;
@@ -95,6 +96,10 @@ static float mColorContrast = lerp(lerp(1, 2, mContrastP), 0.5, mContrastM);
 static float mColorSaturation = lerp(lerp(1, 2, mSaturationP), 0.0, mSaturationM);
 static float mColorGamma = lerp(lerp(1.0, 0.45, mGammaP), 2.2, mGammaM);
 static float mColorTemperature = lerp(lerp(mTemperature, 1000, mTemperatureP), 40000, mTemperatureM);
+static float mFstop = lerp(lerp(5.6, 32.0, mFstopP), 1.0, mFstopM);
+static float mFocalDistance = lerp(lerp(1, 10.0, mFocalDistanceP), -10.0, mFocalDistanceM);
+static float mFocalRegion = lerp(0.0, 10.0, mFocalRegionP);
+static float mBladeCount = lerp(10, 5, mBladeCountM);
 static float3 mColorShadowSunP = pow(float3(mSunShadowRP, mSunShadowGP, mSunShadowBP), 2);
 static float3 mColorBalanceP = float3(mColBalanceRP, mColBalanceGP, mColBalanceBP);
 static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceBM);
@@ -146,8 +151,14 @@ static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceB
 #	include "shader/PostProcessSSGI.fxsub"
 #endif
 
-#if BOKEH_QUALITY
-#	include "shader/PostProcessHexDOF.fxsub"
+#ifndef BOKEH_MODE
+#	define BOKEH_MODE BOKEH_QUALITY
+#endif
+
+#if BOKEH_MODE == 1
+#	include "shader/PostProcessBokeh.fxsub"
+#elif BOKEH_MODE == 2
+#	include "shader/PostProcessHexagonalBokeh.fxsub"
 #endif
 
 #if HDR_EYE_ADAPTATION
@@ -317,30 +328,39 @@ technique DeferredLighting<
 	"RenderColorTarget=ShadingMap;		  Pass=SSRFinalCombine;"
 #endif
 
-#if BOKEH_QUALITY
-	"RenderColorTarget0=AutoFocalMap; Pass=ComputeFocalDistance;"
+#if BOKEH_MODE == 1
+	"RenderColorTarget=AutoFocalMap;          Clear=Color; Pass=ComputeFocalDistance;"
+	"RenderColorTarget=FocalBokehKernelMap;   Clear=Color; Pass=ComputeBokehKernel;"
+	"RenderColorTarget=FocalCoCMap;           Clear=Color; Pass=ComputeBokehWeight;"
+	"RenderColorTarget=FocalBokehMap;         Clear=Color; Pass=ComputeBokehFarPrefilter;"
+	"RenderColorTarget=FocalBokehFarMap;      Clear=Color; Pass=ComputeBokehFar;"
+	"RenderColorTarget=FocalBokehMap;         Clear=Color; Pass=ComputeBokehNearPrefilter;"
+	"RenderColorTarget=FocalBokehNearMap;     Clear=Color; Pass=ComputeBokehNear;"
+	"RenderColorTarget=FocalBokehNearBlurMap; Clear=Color; Pass=ComputeBilinearBlur;"
 
-	"RenderColorTarget0=FocalBokehMap; Pass=ComputeDepthBokeh;"
+	"RenderColorTarget=ShadingMap; Pass=ComputeBokehFinal;"
+#endif
 
+#if BOKEH_MODE == 2
+	"RenderColorTarget=AutoFocalMap;          Clear=Color; Pass=ComputeFocalDistance;"
+	"RenderColorTarget=FocalCoCMap;           Clear=Color; Pass=ComputeBokehWeight;"
+
+	"RenderColorTarget=FocalBokehMap;         Clear=Color; Pass=ComputeBokehFarPrefilter;"
 	"RenderColorTarget0=FocalBlur1Map;"
 	"RenderColorTarget1=FocalBlur2Map;"
 	"Clear=Color;"
-	"Pass=ComputeHexBlurFarX;"
-
-	"RenderColorTarget0=FocalBokehFarMap;"
+	"Pass=ComputeHexagonalBlurX;"
 	"RenderColorTarget1=;"
+
+	"RenderColorTarget=FocalHexBokehMap;"
 	"Clear=Color;"
-	"Pass=ComputeHexBlurFarY;"
+	"Pass=ComputeHexagonalBlurY;"
 
-	"RenderColorTarget=FocalBokehTempMap; Pass=ComputeBokehFarGather;"
+	"RenderColorTarget=FocalBokehMap;         Clear=Color; Pass=ComputeBokehNearPrefilter;"
+	"RenderColorTarget=FocalBlur2Map;         Clear=Color; Pass=ComputeBokehBlur;"
+	"RenderColorTarget=FocalBlur1Map;         Clear=Color; Pass=ComputeBilinearBlur;"
 
-	"RenderColorTarget=FocalBokehCoCNearMap; Pass=ComputeNearDown;"
-	"RenderColorTarget=FocalBokehTempMap;    Clear=Color; Pass=ComputeSmoothingNearX;"
-	"RenderColorTarget=FocalBokehCoCNearMap; Clear=Color; Pass=ComputeSmoothingNearY;"
-	"RenderColorTarget=FocalBokehTempMap;    Clear=Color; Pass=ComputeNearCoC;"
-	"RenderColorTarget=FocalBokehCoCNearMap; Clear=Color; Pass=ComputeNearSamllBlur;"
-
-	"RenderColorTarget=ShadingMap; Pass=ComputeBokehGatherFinal;"
+	"RenderColorTarget=ShadingMap; Pass=ComputeBokehFinal;"
 #endif
 
 #if HDR_EYE_ADAPTATION
@@ -748,73 +768,117 @@ technique DeferredLighting<
 		PixelShader  = compile ps_3_0 SSGIFinalCombinePS();
 	}
 #endif
-#if BOKEH_QUALITY
+#if BOKEH_MODE == 1
 	pass ComputeFocalDistance<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 ComputeFocalDistancePS(ShadingMapPointSamp);
+		PixelShader  = compile ps_3_0 ComputeFocalDistancePS();
 	}
-	pass ComputeDepthBokeh<string Script= "Draw=Buffer;";>{
+	pass ComputeBokehKernel<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ComputeDepthBokehVS();
-		PixelShader  = compile ps_3_0 ComputeDepthBokeh4XPS(ShadingMapPointSamp);
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 ComputeBokehKernelPS();
 	}
-	pass ComputeHexBlurFarX<string Script= "Draw=Buffer;";>{
+	pass ComputeBokehWeight<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ComputeHexBlurXVS();
-		PixelShader  = compile ps_3_0 ComputeHexBlurXFarPS(FocalBokehMapPointSamp, FocalBokehMapSamp);
+		VertexShader = compile vs_3_0 ComputeBokehWeightVS();
+		PixelShader  = compile ps_3_0 ComputeBokehWeightPS();
 	}
-	pass ComputeHexBlurFarY<string Script= "Draw=Buffer;";>{
+	pass ComputeBokehNearPrefilter<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ComputeHexBlurYVS();
-		PixelShader  = compile ps_3_0 ComputeHexBlurYFarPS(FocalBokehMapPointSamp, FocalBlur1MapSamp, FocalBlur2MapSamp);
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 ComputeBokehPrefilterPS(ShadingMapPointSamp, _FocalCoCMap_TexelSize, -1.0f);
 	}
-	pass ComputeBokehFarGather<string Script= "Draw=Buffer;";>{
+	pass ComputeBokehFarPrefilter<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ComputeBokehGatherVS();
-		PixelShader  = compile ps_3_0 ComputeBokehFarGatherPS(FocalBokehMapSamp, FocalBokehFarMapSamp);
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 ComputeBokehPrefilterPS(ShadingMapPointSamp, _FocalCoCMap_TexelSize, 1.0f);
 	}
-	pass ComputeNearDown<string Script= "Draw=Buffer;";>{
+	pass ComputeBokehFar<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(1.0 / (ViewportSize * mFocalMapScale));
-		PixelShader  = compile ps_3_0 ComputeNearDownPS(FocalBokehTempMapPointSamp, 1.0 / mFocalStepScale);
+		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(_FocalBokehMap_TexelSize.xy);
+		PixelShader  = compile ps_3_0 ComputeBokehFarPS(FocalBokehMapPointSamp, FocalBokehMapLinearSamp, _FocalBokehMap_TexelSize);
 	}
-	pass ComputeSmoothingNearX<string Script= "Draw=Buffer;";>{
+	pass ComputeBokehNear<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(1.0 / (ViewportSize * mFocalMapScale));
-		PixelShader  = compile ps_3_0 ComputeSmoothingNearPS(FocalBokehCoCNearMapSamp, float2(1.0 / mFocalStepScale.x, 0));
+		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(_FocalBokehMap_TexelSize.xy);
+		PixelShader  = compile ps_3_0 ComputeBokehNearPS(FocalBokehMapPointSamp, FocalBokehMapLinearSamp, _FocalBokehMap_TexelSize);
 	}
-	pass ComputeSmoothingNearY<string Script= "Draw=Buffer;";>{
+	pass ComputeBilinearBlur<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(1.0 / (ViewportSize * mFocalMapScale));
-		PixelShader  = compile ps_3_0 ComputeSmoothingNearPS(FocalBokehTempMapSamp, float2(0, 1.0 / mFocalStepScale.y));
+		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(_FocalBokehMap_TexelSize.xy);
+		PixelShader  = compile ps_3_0 ComputeBilinearBlurPS(FocalBokehNearMapLinearSamp, _FocalBokehMap_TexelSize);
 	}
-	pass ComputeNearCoC<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(1.0 / (ViewportSize * mFocalMapScale));
-		PixelShader  = compile ps_3_0 ComputeNearCoCPS(FocalBokehMapPointSamp, FocalBokehCoCNearMapSamp);
-	}
-	pass ComputeNearSamllBlur<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(1.0 / (ViewportSize * mFocalMapScale));
-		PixelShader  = compile ps_3_0 ComputeNearSamllBlurPS(FocalBokehTempMapSamp, float2(0, 1.0 / mFocalStepScale.y));
-	}
-	pass ComputeBokehGatherFinal<string Script= "Draw=Buffer;";>{
+	pass ComputeBokehFinal<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = true; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		DestBlend = INVSRCALPHA; SrcBlend = SRCALPHA;
-		VertexShader = compile vs_3_0 ComputeBokehGatherVS();
-		PixelShader  = compile ps_3_0 ComputeBokehGatherFinalPS(FocalBokehMapPointSamp, FocalBokehCoCNearMapSamp, 1.0 / mFocalStepScale);
+		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(float2(0.0f, 0.0f));
+		PixelShader  = compile ps_3_0 ComputeBokehFinalPS();
+	}
+#elif BOKEH_MODE == 2
+	pass ComputeFocalDistance<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 ComputeFocalDistancePS();
+	}
+	pass ComputeBokehWeight<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ComputeBokehWeightVS();
+		PixelShader  = compile ps_3_0 ComputeBokehWeightPS();
+	}
+	pass ComputeBokehNearPrefilter<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 ComputeBokehPrefilterPS(ShadingMapPointSamp, _FocalCoCMap_TexelSize, -1.0f);
+	}
+	pass ComputeBokehFarPrefilter<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 ComputeBokehPrefilterPS(ShadingMapPointSamp, _FocalCoCMap_TexelSize, 1.0f);
+	}
+	pass ComputeHexagonalBlurX<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ComputeHexagonalBlurXVS(_FocalBokehMap_TexelSize);
+		PixelShader  = compile ps_3_0 ComputeHexagonalBlurXPS(FocalBokehMapLinearSamp, _FocalBokehMap_TexelSize);
+	}
+	pass ComputeHexagonalBlurY<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ComputeHexagonalBlurYVS(_FocalBokehMap_TexelSize);
+		PixelShader  = compile ps_3_0 ComputeHexagonalBlurYPS(FocalBlur1MapLinearSamp, FocalBlur2MapLinearSamp, _FocalBokehMap_TexelSize);
+	}
+	pass ComputeBokehBlur<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(_FocalBokehMap_TexelSize.xy);
+		PixelShader  = compile ps_3_0 ComputeBokehBlurPS(FocalBokehMapPointSamp, FocalBokehMapLinearSamp, _FocalBokehMap_TexelSize);
+	}
+	pass ComputeBilinearBlur<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(_FocalBokehMap_TexelSize.xy);
+		PixelShader  = compile ps_3_0 ComputeBilinearBlurPS(FocalBlur2MapLinearSamp, _FocalBokehMap_TexelSize);
+	}
+	pass ComputeBokehFinal<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = true; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		DestBlend = INVSRCALPHA; SrcBlend = SRCALPHA;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(float2(0.0f, 0.0f));
+		PixelShader  = compile ps_3_0 ComputeBokehFinalPS();
 	}
 #endif
 #if HDR_EYE_ADAPTATION

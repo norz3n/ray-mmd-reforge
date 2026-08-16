@@ -33,3 +33,5 @@ Fog/VolumetricFog
 /Materials/Hair/DX RayCast Hair Pack - hbee.zip
 Extension/Debug/add_morph.py
 wiki
+__pycache__/
+*.py[cod]

@@ -236,7 +236,16 @@ def parse_and_add_morphs(filepath, new_morph_names, output_filepath=None):
 
         m_end = p.pos
         
-        if 'VXGI' in name_j or 'VXGI' in name_e:
+        if 'Blade' in name_j or 'Blade' in name_e:
+            m_bin = bytearray()
+            m_bin.extend(write_string(name_j, encoding))
+            m_bin.extend(write_string(name_e, encoding))
+            m_bin.append(3) # Panel: 3 = Mouth/Lip (Camera & DOF)
+            m_bin.extend(p.data[after_names_pos + 1:m_end])
+            morph_data_bytes.extend(m_bin)
+            existing_morphs.append(name_j)
+            print(f"[*] Updated Morph Panel: {name_j} -> Panel 3 (Mouth/Lip)")
+        elif 'VXGI' in name_j or 'VXGI' in name_e:
             new_name_j = name_j.replace('VXGI', 'SSGI')
             new_name_e = name_e.replace('VXGI', 'SSGI')
             m_bin = bytearray()
@@ -257,17 +266,18 @@ def parse_and_add_morphs(filepath, new_morph_names, output_filepath=None):
     for new_name in new_morph_names:
         if new_name not in existing_morphs:
             # Build dummy Group morph (type 0, 0 offsets)
+            panel_id = 3 if any(k in new_name for k in ('Blade', 'Fstop', 'Focal', 'Measure')) else 2
             m_bin = bytearray()
             m_bin.extend(write_string(new_name, encoding))
             m_bin.extend(write_string(new_name, encoding))
-            m_bin.append(2) # Panel: 2 = Eyes
+            m_bin.append(panel_id) # Panel: 3 = Mouth/Lip (Camera/DOF), 2 = Eyes
             m_bin.append(0) # Type: 0 = Group
             m_bin.extend(struct.pack('<i', 0)) # Offset count = 0
             
             morph_data_bytes.extend(m_bin)
             added_morph_indices.append(current_morph_count)
             current_morph_count += 1
-            print(f"[+] Morph added: {new_name} (index {current_morph_count-1})")
+            print(f"[+] Morph added: {new_name} (index {current_morph_count-1}, panel {panel_id})")
         else:
             print(f"[=] Morph already exists: {new_name}")
 
