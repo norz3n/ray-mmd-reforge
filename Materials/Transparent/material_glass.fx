@@ -5,7 +5,7 @@
 #define ALBEDO_MAP_APPLY_MORPH_COLOR 0
 #define ALBEDO_MAP_FILE "albedo.png"
 
-const float3 albedo = 0.0;
+const float3 albedo = 1.0;
 const float2 albedoMapLoopNum = 1.0;
 
 #define ALBEDO_SUB_ENABLE 0
@@ -22,7 +22,7 @@ const float2 albedoSubMapLoopNum = 1.0;
 #define ALPHA_MAP_SWIZZLE 3
 #define ALPHA_MAP_FILE "alpha.png"
 
-const float alpha = 0.05;
+const float alpha = 1.0;
 const float alphaMapLoopNum = 1.0;
 
 #define NORMAL_MAP_FROM 0
