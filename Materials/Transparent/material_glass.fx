@@ -22,7 +22,7 @@ const float2 albedoSubMapLoopNum = 1.0;
 #define ALPHA_MAP_SWIZZLE 3
 #define ALPHA_MAP_FILE "alpha.png"
 
-const float alpha = 1.0;
+const float alpha = 0.95;
 const float alphaMapLoopNum = 1.0;
 
 #define NORMAL_MAP_FROM 0
@@ -67,7 +67,7 @@ const float metalnessMapLoopNum = 1.0;
 #define SPECULAR_MAP_APPLY_SCALE 0
 #define SPECULAR_MAP_FILE "specular.png"
 
-const float3 specular = 0.35;
+const float3 specular = 0.05;
 const float2 specularMapLoopNum = 1.0;
 
 #define OCCLUSION_MAP_FROM 0
@@ -110,7 +110,7 @@ const float2 emissiveMapLoopNum = 1.0;
 #define CUSTOM_A_MAP_APPLY_SCALE 0
 #define CUSTOM_A_MAP_FILE "custom.png"
 
-const float customA = 1.5;
+const float customA = 1.0;
 const float customAMapLoopNum = 1.0;
 
 #define CUSTOM_B_MAP_FROM 0
@@ -119,7 +119,7 @@ const float customAMapLoopNum = 1.0;
 #define CUSTOM_B_MAP_APPLY_SCALE 0
 #define CUSTOM_B_MAP_FILE "custom.png"
 
-const float3 customB = 1.0;
+const float3 customB = 0.0;
 const float2 customBMapLoopNum = 1.0;
 
 #include "../material_common_2.0.fxsub"
