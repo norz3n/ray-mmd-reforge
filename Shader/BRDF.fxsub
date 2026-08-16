@@ -123,12 +123,20 @@ float3 ToonBasedShading(float nl, float vh, float nv, float3 shadowColor, float3
 
 float3 CelShading(float nl, float vh, float nv, float3 shadowColor, float3 specular, float shadow, float roughness, float threshold)
 {
-	float bias = 0.02;
-	float x = threshold;
-	float darkness = (nl * 0.5 + 0.5) * shadow;
-	float3 I = lerp(shadowColor, 1.0, smoothstep(x - bias, x, darkness));
+	float halfLambert = nl * 0.5f + 0.5f;
+	float litFactor = halfLambert * shadow;
+	
+	// Anti-aliased 2-band anime shadow ramp with soft secondary core shadow
+	float band1 = smoothstep(threshold - 0.035f, threshold + 0.035f, litFactor);
+	float band2 = smoothstep(threshold * 0.5f - 0.025f, threshold * 0.5f + 0.025f, litFactor);
+	
+	float3 deepShadow = shadowColor * shadowColor;
+	float3 midShadow = shadowColor;
+	
+	float3 celRamp = lerp(deepShadow, midShadow, band2);
+	celRamp = lerp(celRamp, 1.0f, band1);
 
-	return I;
+	return celRamp;
 }
 
 float3 SpecularBRDF_Blinn(float nh, float nl, float vh, float nv, float smoothness, float3 specular, float NormalizationFactor)

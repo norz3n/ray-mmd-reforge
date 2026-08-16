@@ -101,7 +101,9 @@ float ShadingShadow(MaterialParam material, float3 viewPosition)
 	coord.xy += 0.5 / float(SHADOW_MAP_SIZE);
 
 	float shadow = 0;
-	float radius = 3.5 / SHADOW_MAP_SIZE;
+	// Variable Penumbra Soft Shadow (Contact Hardening Heuristic)
+	float contactFactor = saturate(material.linearDepth * 0.035f);
+	float radius = lerp(1.5f, 4.0f, contactFactor) / float(SHADOW_MAP_SIZE);
 	float noise = InterleavedGradientNoise(coord.xy * SHADOW_MAP_SIZE);
 
 	[branch]

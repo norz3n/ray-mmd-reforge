@@ -99,15 +99,20 @@ float4 SSRConeTracingPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOOR
 	if (!isHit)
 		clip(-1);
 
-	// Screen-edge vignette fading to prevent hard reflection cutoff
+	// Screen-edge vignette fading for both ray origin and target hit destination to eliminate edge cutoff
 	float2 screenCenterDist = abs(coord.xy * 2.0f - 1.0f);
 	float invEdgeWidth = 1.0f / max(0.01f, 1.0f - mSSRFadeStart);
 	float edgeVignette = 1.0f - saturate((screenCenterDist.x - mSSRFadeStart) * invEdgeWidth);
 	edgeVignette *= 1.0f - saturate((screenCenterDist.y - mSSRFadeStart) * invEdgeWidth);
-	edgeVignette = smoothstep(0.0f, 1.0f, edgeVignette);
+
+	float2 hitCenterDist = abs(hitScreenUV * 2.0f - 1.0f);
+	float hitVignette = 1.0f - saturate((hitCenterDist.x - 0.85f) / 0.15f);
+	hitVignette *= 1.0f - saturate((hitCenterDist.y - 0.85f) / 0.15f);
+
+	float finalVignette = smoothstep(0.0f, 1.0f, edgeVignette * hitVignette);
 
 	float angleFade = saturate(reflectionFacingAngle);
-	float finalFade = edgeVignette * angleFade;
+	float finalFade = finalVignette * angleFade;
 
 	float ssrMask = tex2Dlod(SSRMapSamp, float4(coord.xy, 0, 0)).a;
 	finalFade *= ssrMask;

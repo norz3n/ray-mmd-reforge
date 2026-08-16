@@ -175,7 +175,13 @@ float4 GlareDetectionPS(
 	color = clamp(color, 0, 65535);
 
 #if HDR_BLOOM_MODE == 1
-	float3 bloom = max(0, color - mBloomThreshold);
+	// Physical soft-knee threshold curve (prevents abrupt blooming edges)
+	float knee = max(0.01f, mBloomThreshold * 0.5f);
+	float3 curve = float3(mBloomThreshold - knee, knee * 2.0f, 0.25f / knee);
+	float lum = luminance(color) * coord1.z;
+	float rq = clamp(lum - curve.x, 0.0f, curve.y);
+	rq = curve.z * rq * rq;
+	float3 bloom = color * (max(rq, lum - mBloomThreshold) / max(lum, 1e-5f));
 #elif HDR_BLOOM_MODE == 2
 	float3 bloom = saturate(color - mBloomThreshold);
 #elif HDR_BLOOM_MODE == 3
