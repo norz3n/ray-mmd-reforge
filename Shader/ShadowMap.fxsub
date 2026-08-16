@@ -52,6 +52,10 @@ float ShadowPCF(sampler source, float2 coord, float radius, float receiverDepth,
 {
 	float shadow = 0.0;
 	
+	// Gentle cascade scaling to preserve smooth anti-aliasing across all cascades
+	float cascadeScale = 1.0 / (1.0 + cascadeIndex * 0.2f);
+	float finalRadius = radius * cascadeScale;
+
 	float2 rot;
 	sincos(noise * PI_2, rot.y, rot.x);
 	float2x2 rotMat = float2x2(rot.x, -rot.y, rot.y, rot.x);
@@ -62,11 +66,11 @@ float ShadowPCF(sampler source, float2 coord, float radius, float receiverDepth,
 	for (int i = 0; i < sampleCount; i++)
 	{
 		float2 vogel = mul(kVogelDisk[i].xy, rotMat);
-		float2 pos = coord + vogel * radius;
+		float2 pos = coord + vogel * finalRadius;
 		
 		float zMap = tex2Dlod(source, float4(pos, 0, 0)).r;
 		float diff = receiverDepth - zMap;
-		float sampleShadow = (diff <= 0.0f) ? 1.0f : saturate(exp(-12.0f * diff));
+		float sampleShadow = (diff <= 0.0f) ? 1.0f : saturate(exp(-20.0f * diff));
 		
 		shadow += sampleShadow * kVogelDisk[i].z;
 	}
@@ -101,9 +105,7 @@ float ShadingShadow(MaterialParam material, float3 viewPosition)
 	coord.xy += 0.5 / float(SHADOW_MAP_SIZE);
 
 	float shadow = 0;
-	// Variable Penumbra Soft Shadow (Contact Hardening Heuristic)
-	float contactFactor = saturate(material.linearDepth * 0.035f);
-	float radius = lerp(1.5f, 4.0f, contactFactor) / float(SHADOW_MAP_SIZE);
+	float radius = 3.0 / float(SHADOW_MAP_SIZE);
 	float noise = InterleavedGradientNoise(coord.xy * SHADOW_MAP_SIZE);
 
 	[branch]
