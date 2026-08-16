@@ -14,7 +14,7 @@ static const float4 _FocalBokehMap_TexelSize = float4(2.0f / ViewportSize, Viewp
 
 texture AutoFocalMap : RENDERCOLORTARGET<int2 Dimensions = {1, 1}; string Format="R16F";>;
 texture FocalCoCMap : RENDERCOLORTARGET<float2 ViewportRatio={1.0, 1.0}; string Format="R16F";>;
-texture FocalBokehMap : RENDERCOLORTARGET<float2 ViewportRatio={0.5, 0.5}; string Format="A16B16G16R16F"; int Miplevels = 0;>;
+texture FocalBokehMap : RENDERCOLORTARGET<float2 ViewportRatio={0.5, 0.5}; string Format="A16B16G16R16F";>;
 texture FocalBokehFarMap : RENDERCOLORTARGET<float2 ViewportRatio={0.5, 0.5}; string Format="A16B16G16R16F";>;
 texture FocalBokehNearMap : RENDERCOLORTARGET<float2 ViewportRatio={0.5, 0.5}; string Format="A16B16G16R16F";>;
 texture FocalBokehNearBlurMap : RENDERCOLORTARGET<float2 ViewportRatio={0.5, 0.5}; string Format="A16B16G16R16F";>;
@@ -56,14 +56,14 @@ sampler FocalCoCMapLinearSamp = sampler_state
 sampler FocalBokehMapPointSamp = sampler_state
 {
 	texture = <FocalBokehMap>;
-	MinFilter = POINT; MagFilter = POINT; MipFilter = LINEAR;
+	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
 
 sampler FocalBokehMapLinearSamp = sampler_state
 {
 	texture = <FocalBokehMap>;
-	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = LINEAR;
+	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
 
