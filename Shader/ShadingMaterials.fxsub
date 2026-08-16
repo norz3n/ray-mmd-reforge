@@ -171,14 +171,14 @@ float4 ShadingTransparentPS(
 	lighting += (material.lightModel == SHADINGMODELID_GLASS ? 0.0f : iblDiffuse * material.albedo) + iblSpecular;
 #endif
 
-	float2 ior = (material.lightModel != SHADINGMODELID_GLASS) ? 0 : mul(material.normal, (float3x3)matViewInverse).xy * (material.customDataA * 0.005f);
+	float2 ior = (material.lightModel != SHADINGMODELID_GLASS) ? 0 : mul(material.normal, (float3x3)matViewInverse).xy * (material.customDataA * 0.008f);
 	float3 prefilteredRefract;
 
 	if (material.lightModel == SHADINGMODELID_GLASS)
 	{
-		float2 iorR = ior * 0.80f;
+		float2 iorR = ior * 0.50f;
 		float2 iorG = ior * 1.00f;
-		float2 iorB = ior * 1.20f;
+		float2 iorB = ior * 1.50f;
 
 		float3 bgR = tex2Dlod(ShadingMapTempPointSamp, float4(coord + iorR, 0, 0)).rgb;
 		float3 bgG = tex2Dlod(ShadingMapTempPointSamp, float4(coord + iorG, 0, 0)).rgb;
@@ -205,18 +205,24 @@ float4 ShadingTransparentPS(
 	}
 
 #if FOG_ENABLE
-	float4 fog = tex2Dlod(FogMapSamp, float4(coord, 0, 0));
-	lighting *= exp(-fog.a);
-	lighting += fog.rgb;
+	if (material.lightModel != SHADINGMODELID_GLASS)
+	{
+		float4 fog = tex2Dlod(FogMapSamp, float4(coord, 0, 0));
+		lighting *= exp(-fog.a);
+		lighting += fog.rgb;
+	}
 #endif
 
-	float4 MRT3 = tex2Dlod(Gbuffer3Map, float4(coord, 0, 0));
-	float4 MRT4 = tex2Dlod(Gbuffer4Map, float4(coord, 0, 0));
+	if (material.lightModel != SHADINGMODELID_GLASS)
+	{
+		float4 MRT3 = tex2Dlod(Gbuffer3Map, float4(coord, 0, 0));
+		float4 MRT4 = tex2Dlod(Gbuffer4Map, float4(coord, 0, 0));
 
-	float3 emissive0 = DecodeGBufferEmissive(MRT3, MRT4);
-	float3 emissive1 = material.customDataB * material.customDataA * any(material.lightModel == SHADINGMODELID_EMISSIVE);
+		float3 emissive0 = DecodeGBufferEmissive(MRT3, MRT4);
+		float3 emissive1 = material.customDataB * material.customDataA * any(material.lightModel == SHADINGMODELID_EMISSIVE);
 
-	lighting += lerp(emissive0, emissive1, MRT8.a) * lerp(1.0, float3(0.6,0.45,0.25), pow(1.0 - saturate(dot(material.normal, V)), 2.5));
+		lighting += lerp(emissive0, emissive1, MRT8.a) * lerp(1.0, float3(0.6,0.45,0.25), pow(1.0 - saturate(dot(material.normal, V)), 2.5));
+	}
 
 #if OUTLINE_QUALITY
 	#if OUTLINE_QUALITY == 1
