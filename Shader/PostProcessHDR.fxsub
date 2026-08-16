@@ -42,6 +42,17 @@ float3 ColorDispersion(sampler source, float2 coord, float inner, float outer)
 	float2 dist = ViewportOffset2 * L * (mDispersion * 16) * scale;
 	float2 offset = (coord * 2 - 1.0) * dist;
 	return ChromaticAberration(source, coord, offset);
+#elif POST_DISPERSION_MODE == 3
+	// Cinematic Barrel Lens Dispersion: Quadratic radial offset (r^2) with spectral separation
+	float2 ndc = coord * 2.0f - 1.0f;
+	float r2 = dot(ndc, ndc);
+	float lensDistort = r2 * (mDispersion * 0.02f + 0.005f);
+	float2 offsetR = ndc * (lensDistort * 1.25f) * ViewportOffset2 * 100.0f;
+	float2 offsetB = ndc * (lensDistort * 0.65f) * ViewportOffset2 * 100.0f;
+	float r = tex2Dlod(source, float4(coord + offsetR, 0, 0)).r;
+	float g = tex2Dlod(source, float4(coord, 0, 0)).g;
+	float b = tex2Dlod(source, float4(coord - offsetB, 0, 0)).b;
+	return float3(r, g, b);
 #else
 	if (mDispersion > 1e-4)
 	{

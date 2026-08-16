@@ -34,8 +34,11 @@ float3 ColorDithering(float3 color, float2 uv)
 
 float3 ColorVignette(float3 color, float2 coord)		
 {		
-	float L = length(coord * 2 - 1);		
-	return color * smoothstep(mVignetteOuter - mVignette * 2, mVignetteInner - mVignette, L);		
+	float2 ndc = coord * 2.0f - 1.0f;
+	float L = length(ndc);
+	float falloff = smoothstep(mVignetteOuter - mVignette * 2.0f, mVignetteInner - mVignette, L);
+	float cosFalloff = saturate(1.0f - L * L * 0.15f * saturate(mVignette + 0.5f));
+	return color * (falloff * cosFalloff);		
 }
 
 float3 ColorTemperature(float3 color, float kelvin)

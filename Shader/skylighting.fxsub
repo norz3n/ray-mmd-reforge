@@ -131,7 +131,12 @@ void ShadingMaterial(MaterialParam material, float3 worldView, out float3 diffus
 	prefilteredDiffuse = ColorBalance(prefilteredDiffuse, mBalanceDiffuse);
 	prefilteredSpeculr = ColorBalance(prefilteredSpeculr, mBalanceSpecular);
 
-	diffuse = prefilteredDiffuse * mEnvIntensityDiff;
+	// Spherical harmonics / hemispherical ground-to-sky gradient irradiance blend
+	float skyWeight = saturate(N.y * 0.5f + 0.5f);
+	float3 groundBounce = prefilteredDiffuse * float3(0.6f, 0.55f, 0.5f);
+	float3 skyDiffuse = lerp(groundBounce, prefilteredDiffuse, skyWeight);
+
+	diffuse = skyDiffuse * mEnvIntensityDiff;
 	specular = prefilteredSpeculr * fresnel;
 
 	[branch]

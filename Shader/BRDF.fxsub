@@ -39,6 +39,23 @@ float3 SubsurfaceShadingPennerSkin(MaterialParam material, float3 N, float3 L)
 	return sss;
 }
 
+float3 SubsurfaceTranslucency(MaterialParam material, float3 N, float3 L, float3 V)
+{
+	float nl = dot(N, L);
+	if (nl > 0.1f) return 0; // Only activate when light is penetrating from behind the surface
+
+	// Subsurface transmission for thin organic features (ears, nose, fingers under backlight)
+	float3 distortedN = normalize(N - L * 0.4f);
+	float backlight = saturate(dot(-distortedN, V));
+	float transPower = 6.0f;
+	float transIntensity = pow(backlight, transPower) * saturate(1.0f - nl * 2.0f);
+	
+	// Thickness attenuation based on curvature / customDataA
+	float thickness = saturate(1.0f - material.customDataA * 0.5f);
+	
+	return material.customDataB * (transIntensity * thickness * 0.5f);
+}
+
 float3 SubsurfaceShadingPreIntegratedSkin(MaterialParam material, float3 N, float3 L)
 {
 	float ndotl = dot(N, L);
@@ -140,11 +157,14 @@ float3 SpecularBRDF_GGX(float nh, float nl, float vh, float nv, float roughness,
 
 float3 DualLobeSkinSpecular(float nh, float nl, float vh, float nv, float roughness, float3 specular, float normalizeFactor)
 {
-	float r1 = roughness;
-	float r2 = saturate(roughness * 0.45f + 0.05f);
+	// Dual-lobe GGX model for organic skin:
+	// Lobe 1 (Base Dermal Layer): Broad, matte lobe representing subsurface reflection and micro-porosity
+	// Lobe 2 (Epidermal / Sebum Layer): Tight, sharper specular representing skin moisture and lipid coating
+	float r1 = saturate(roughness * 1.15f + 0.05f);
+	float r2 = saturate(roughness * 0.35f + 0.02f);
 	float3 lobe1 = SpecularBRDF_GGX(nh, nl, vh, nv, r1, specular, normalizeFactor);
 	float3 lobe2 = SpecularBRDF_GGX(nh, nl, vh, nv, r2, specular, normalizeFactor);
-	return lobe1 * 0.6f + lobe2 * 0.4f;
+	return lobe1 * 0.70f + lobe2 * 0.30f;
 }
 
 float3 SpecularBRDF_GGXAniso(float3 N, float3 H, float nh, float nl, float vh, float nv, float3 specular, float3 albedo, float roughness, float anisotropic, float3 shift, float NormalizationFactor)
@@ -199,6 +219,10 @@ float3 ClothShading(MaterialParam material, float nh, float nl, float vh, float 
 	float3 sheenColor = material.customDataB;
 	float3 sheenTerm = sheenColor * (D_Charlie * V_Neubelt);
 	
+	// Microfiber rim fuzz scattering (for velvet, cotton, wool)
+	float fuzzRim = pow5(1.0f - nv) * saturate(nl + 0.2f);
+	float3 fuzzTerm = sheenColor * (fuzzRim * 0.4f * saturate(roughness * 2.0f));
+	
 	float r2 = pow2(clampedSheenRoughness);
 	float isSmooth = step(clampedSheenRoughness, 0.25f);
 	
@@ -221,7 +245,7 @@ float3 ClothShading(MaterialParam material, float nh, float nl, float vh, float 
 	albedoScaling = saturate(1.0f - maxSheenColor * directionalAlbedo);
 	
 	float3 specBase = SpecularBRDF_GGX(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);
-	return (specBase * albedoScaling) + sheenTerm;
+	return (specBase * albedoScaling) + sheenTerm + fuzzTerm;
 }
 
 float4 SpecularBRDF_ClearCoat(float nh, float nl, float vh, float nv, float roughness, float specular, float NormalizationFactor)
@@ -260,7 +284,11 @@ float3 SubsurfaceShading(MaterialParam material, float3 N, float3 L, float3 V)
 {
 	[branch]
 	if (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE)
-		return SubsurfaceShadingPennerSkin(material, N, L);
+	{
+		float3 forwardSSS = SubsurfaceShadingPennerSkin(material, N, L);
+		float3 transmittance = SubsurfaceTranslucency(material, N, L, V);
+		return forwardSSS + transmittance;
+	}
 	else
 		return 0;
 }
