@@ -117,7 +117,8 @@ Contact:
 
 Credits :
 --------
-* Hierarchical Z-Buffer Screen Space Reflections and HBSSDO implementations by [dendewa](https://dendewa.vercel.app/).
+* Clean Room Hierarchical Z-Buffer (Hi-Z) & PBR Screen-Space Reflections based on Morgan McGuire & Michael Mara (2014) and Yasin Uludag (GPU Pro 5, 2014).
+* HBSSDO rendering concepts referenced from [dendewa](https://dendewa.vercel.app/).
 
 References :
 --------
