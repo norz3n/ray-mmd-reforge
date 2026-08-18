@@ -118,9 +118,10 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 							float invDistFalloff = 1.0f / (1.0f + dist * falloffRate);
 							float atten = (fade * fade) * invDistFalloff;
 
-							// Thickness visibility weighting
+							// Thickness and SSGI emitter visibility weighting
+							float emitterVis = tex2Dlod(SSGIVisibilityMapSamp, float4(currentUv, 0.0f, 0.0f)).a;
 							float thickWeight = isEmissive ? 1.0f : ComputeThicknessWeight(pSample.z - pOrigin.z, pOrigin.z, dist);
-							float w = saturate(geomFactor * atten * thickWeight);
+							float w = saturate(geomFactor * atten * thickWeight * emitterVis);
 
 							if (w > 1e-3f)
 							{
