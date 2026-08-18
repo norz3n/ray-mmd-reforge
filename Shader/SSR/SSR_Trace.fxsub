@@ -2,7 +2,7 @@
  * Ray-MMD ReForge: Screen-Space Reflections (SSR) Ray Tracing Pass
  *
  * Module: SSR_Trace.fxsub
- * Clean Room Academic Implementation (McGuire 2014 / Uludag 2014 / Karis 2013).
+ * Independent SSR ray tracing pass (Karis 2013 / Uludag 2014).
  * Traces specular reflection rays across the conservative Hi-Z depth pyramid with analytical windowing.
  */
 
@@ -45,7 +45,7 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	clip(sum(specularAlbedo) - 1e-5f);
 
 	float3 viewVector = normalize(viewdir);
-	float3 worldPosVS = viewdir * (surfaceMat.linearDepth / viewdir.z);
+	float3 positionVS = viewdir * (surfaceMat.linearDepth / viewdir.z);
 	float3 reflectRayVS = normalize(reflect(-viewVector, surfaceMat.normal));
 
 	// Ray must travel into camera hemisphere
@@ -55,37 +55,31 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	float NdotV = saturate(dot(viewVector, surfaceMat.normal));
 
 	// Physical max distance scaling based on depth and grazing incidence
-	float traceDistance = mSSRRangeScale * (max(0.0f, mSSRRangeMax - surfaceMat.linearDepth) + surfaceMat.linearDepth);
-	traceDistance *= (1.0f - NdotV * 0.5f);
-
-	float2 hitUV = 0.0f;
-	float3 hitPosVS = 0.0f;
-	float hitProgress = 0.0f;
+	float traceDistance = mSSRRangeMax * mSSRRangeScale * (1.0f - NdotV * 0.5f);
 
 	// Slope-scaled normal bias for self-intersection mitigation
 	float normalBias = mSSROffset * (1.0f - NdotV * 0.5f);
-	float3 traceConfig = float3(normalBias, mSSRThickness, 0.0f);
 
-	bool isHit = HiZ_TraceRay(SSR_MAX_RAY_STEPS, worldPosVS, reflectRayVS, traceDistance * 2.0f, traceConfig, hitProgress, hitUV, hitPosVS);
-	if (!isHit)
+	HiZTraceResult traceHit = HiZ_TraceRayDetailed(SSR_MAX_RAY_STEPS, positionVS, reflectRayVS, traceDistance, normalBias, mSSRThickness);
+	if (!traceHit.isHit)
 		clip(-1);
 
 	// Analytical dual-window edge attenuation (source coordinate and destination hit UV)
 	float sourceWindow = SSR_ComputeScreenWindow(coord.xy, max(0.02f, 1.0f - mSSRFadeStart));
-	float hitTargetWindow = SSR_ComputeScreenWindow(hitUV, 0.08f);
+	float hitTargetWindow = SSR_ComputeScreenWindow(traceHit.hitUV, 0.08f);
 	float edgeVignette = sourceWindow * hitTargetWindow;
 
-	// Physical distance falloff
-	float distanceFalloff = 1.0f - saturate(hitProgress * hitProgress);
+	// Distance falloff along ray
+	float distanceFalloff = 1.0f - saturate(traceHit.hitProgress * traceHit.hitProgress);
 
-	// Surface normal facing confidence
-	float confidence = edgeVignette * distanceFalloff * saturate(facingAngle);
+	// Surface normal facing confidence combined with thickness penetration quality
+	float confidence = edgeVignette * distanceFalloff * saturate(facingAngle) * traceHit.confidence;
 
 	// SSR visibility mask (user exclusions / controller toggle)
 	float ssrMask = tex2Dlod(SSRMapSamp, float4(coord.xy, 0.0f, 0.0f)).a;
 	confidence *= ssrMask;
 
-	float4 hitRadiance = tex2Dlod(ShadingMapPointSamp, float4(hitUV, 0.0f, 0.0f));
+	float4 hitRadiance = tex2Dlod(ShadingMapPointSamp, float4(traceHit.hitUV, 0.0f, 0.0f));
 	return float4(hitRadiance.rgb, 1.0f) * confidence;
 }
 

@@ -2,7 +2,7 @@
  * Ray-MMD ReForge: Screen-Space Reflections (SSR) Common Declarations
  *
  * Module: SSR_Common.fxsub
- * Clean Room Implementation of PBR Screen-Space Reflections Pipeline.
+ * Independent PBR Screen-Space Reflections Pipeline.
  * Provides quality constants, multi-resolution roughness render targets, and samplers.
  */
 

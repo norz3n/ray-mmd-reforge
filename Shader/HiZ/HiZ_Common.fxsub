@@ -2,8 +2,8 @@
  * Ray-MMD ReForge: Hierarchical Z-Buffer (Hi-Z) Core Infrastructure
  *
  * Module: HiZ_Common.fxsub
- * Clean Room Academic Implementation (McGuire 2014 / Uludag 2014).
- * Provides depth pyramid texture definitions, atlas layout, and viewport configuration.
+ * Independent depth pyramid texture definitions, atlas layout, and viewport configuration.
+ * Based on published conservative depth hierarchy methods (Uludag 2014, McGuire 2014).
  */
 
 #ifndef RAY_MMD_HIZ_COMMON_FXSUB
@@ -158,5 +158,34 @@ static const float4 kAtlasMip7Rect  = float4(0.0f, kAtlasMip6Rect.y + kAtlasMip6
 static const float4 kAtlasMip8Rect  = float4(0.0f, kAtlasMip7Rect.y + kAtlasMip7Rect.w, kHiZMip8Size / ViewportSize);
 static const float4 kAtlasMip9Rect  = float4(0.0f, kAtlasMip8Rect.y + kAtlasMip8Rect.w, kHiZMip9Size / ViewportSize);
 static const float4 kAtlasMip10Rect = float4(0.0f, kAtlasMip9Rect.y + kAtlasMip9Rect.w, kHiZMip10Size / ViewportSize);
+
+// Fast constant lookup arrays for direct indexed access (zero branching)
+static const float2 kAllMipDimensions[11] = {
+	ViewportSize,
+	kHiZMip1Size,
+	kHiZMip2Size,
+	kHiZMip3Size,
+	kHiZMip4Size,
+	kHiZMip5Size,
+	kHiZMip6Size,
+	kHiZMip7Size,
+	kHiZMip8Size,
+	kHiZMip9Size,
+	kHiZMip10Size
+};
+
+static const float2 kAtlasOffsets[11] = {
+	float2(0.0f, 0.0f),
+	float2(0.0f, 0.0f),
+	kAtlasMip2Rect.xy,
+	kAtlasMip3Rect.xy,
+	kAtlasMip4Rect.xy,
+	kAtlasMip5Rect.xy,
+	kAtlasMip6Rect.xy,
+	kAtlasMip7Rect.xy,
+	kAtlasMip8Rect.xy,
+	kAtlasMip9Rect.xy,
+	kAtlasMip10Rect.xy
+};
 
 #endif // RAY_MMD_HIZ_COMMON_FXSUB

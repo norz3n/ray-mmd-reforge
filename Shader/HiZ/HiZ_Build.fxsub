@@ -2,8 +2,8 @@
  * Ray-MMD ReForge: Hierarchical Z-Buffer (Hi-Z) Conservative Pyramid Construction
  *
  * Module: HiZ_Build.fxsub
- * Clean Room Academic Implementation (McGuire 2014 / Uludag 2014).
- * Builds conservative minimum-depth mip pyramid via 2x2 box reduction.
+ * Conservative minimum-depth hierarchy builder.
+ * Builds conservative minimum-depth mip pyramid via 2x2 box reduction (Uludag 2014, McGuire 2014).
  */
 
 #ifndef RAY_MMD_HIZ_BUILD_FXSUB

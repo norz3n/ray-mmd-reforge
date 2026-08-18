@@ -2,8 +2,8 @@
  * Ray-MMD ReForge: Screen-Space Reflections (SSR) Resolve & PBR Composite
  *
  * Module: SSR_Resolve.fxsub
- * Clean Room Academic Implementation (Karis 2013 / Uludag 2014).
- * Reconstructs pre-filtered radiance across continuous roughness LOD and applies Split-Sum PBR BRDF.
+ * Roughness-aware multi-scale prefiltered radiance resolve (Karis 2013 / Unreal Engine 4 Split-Sum BRDF).
+ * Reconstructs pre-filtered reflection radiance across continuous roughness LOD and applies Split-Sum PBR BRDF.
  */
 
 #ifndef RAY_MMD_SSR_RESOLVE_FXSUB
@@ -12,7 +12,7 @@
 #include "shader/SSR/SSR_Common.fxsub"
 
 /**
- * Resolves specular cone radiance across multi-scale pre-filtered hierarchy and applies PBR Fresnel.
+ * Resolves pre-filtered radiance across continuous roughness LOD levels and applies PBR Fresnel.
  */
 float4 SSR_ResolvePS(in float2 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) : COLOR
 {
@@ -31,24 +31,26 @@ float4 SSR_ResolvePS(in float2 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1)
 	// Continuous roughness LOD level in pyramid [0, 3]
 	float pyramidLOD = clamp(linearRoughness * 3.0f, 0.0f, 3.0f);
 
-	float4 mip0 = tex2Dlod(SSRLightX1Samp, float4(coord, 0.0f, 0.0f));
-	float4 mip1 = tex2Dlod(SSRLightX2Samp, float4(coord, 0.0f, 0.0f));
-	float4 mip2 = tex2Dlod(SSRLightX3Samp, float4(coord, 0.0f, 0.0f));
-	float4 mip3 = tex2Dlod(SSRLightX4Samp, float4(coord, 0.0f, 0.0f));
-
 	float4 blendedReflection = 0.0f;
 
+	// Optimized LOD texture sampling: only fetch the two adjacent mip levels
 	[flatten]
 	if (pyramidLOD < 1.0f)
 	{
+		float4 mip0 = tex2Dlod(SSRLightX1Samp, float4(coord, 0.0f, 0.0f));
+		float4 mip1 = tex2Dlod(SSRLightX2Samp, float4(coord, 0.0f, 0.0f));
 		blendedReflection = lerp(mip0, mip1, pyramidLOD);
 	}
 	else if (pyramidLOD < 2.0f)
 	{
+		float4 mip1 = tex2Dlod(SSRLightX2Samp, float4(coord, 0.0f, 0.0f));
+		float4 mip2 = tex2Dlod(SSRLightX3Samp, float4(coord, 0.0f, 0.0f));
 		blendedReflection = lerp(mip1, mip2, pyramidLOD - 1.0f);
 	}
 	else
 	{
+		float4 mip2 = tex2Dlod(SSRLightX3Samp, float4(coord, 0.0f, 0.0f));
+		float4 mip3 = tex2Dlod(SSRLightX4Samp, float4(coord, 0.0f, 0.0f));
 		blendedReflection = lerp(mip2, mip3, pyramidLOD - 2.0f);
 	}
 
