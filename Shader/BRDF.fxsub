@@ -39,7 +39,7 @@ float3 SubsurfaceShadingPennerSkin(MaterialParam material, float3 N, float3 L)
 	return sss;
 }
 
-float3 SubsurfaceTranslucency(MaterialParam material, float3 N, float3 L, float3 V)
+float3 SubsurfaceTranslucency(MaterialParam material, float3 N, float3 L, float3 V, float2 coord = float2(0, 0))
 {
 	float nl = dot(N, L);
 	if (nl > 0.25f) return 0; // Only activate when light is penetrating from behind the surface
@@ -56,9 +56,20 @@ float3 SubsurfaceTranslucency(MaterialParam material, float3 N, float3 L, float3
 	// Multi-spectral flesh transmission (red wavelength penetrates deep into dermis/subcutis)
 	float3 spectralTrans = float3(1.0f, 0.36f, 0.10f) * material.customDataB;
 
-	// Thickness/Curvature-dependent exponential extinction
+	// Screen-space depth-thickness measurement:
+	// Sample back-surface depth along light vector direction to determine physical mesh thickness
+	float thicknessScale = 1.0f;
+	if (any(coord))
+	{
+		float2 lightOffset = -L.xy * (0.015f / max(material.linearDepth, 1.0f));
+		float backDepth = tex2Dlod(Gbuffer8Map, float4(coord + lightOffset, 0, 0)).r;
+		float geoThickness = max(0.0f, backDepth - material.linearDepth);
+		thicknessScale = exp(-geoThickness * 4.5f);
+	}
+
+	// Curvature & geometric thickness extinction
 	float curvature = max(material.customDataA, 0.01f);
-	float opticalDensity = exp(-curvature * 2.8f);
+	float opticalDensity = exp(-curvature * 2.8f) * thicknessScale;
 
 	return spectralTrans * ((forwardScatter + wrapScatter) * opticalDensity * 0.6f);
 }
@@ -295,13 +306,13 @@ float3 ClearCoatShading(MaterialParam material, float nh, float nl, float vh, fl
 	return (specBase * albedoScaling) + clearCoatSpecular;
 }
 
-float3 SubsurfaceShading(MaterialParam material, float3 N, float3 L, float3 V)
+float3 SubsurfaceShading(MaterialParam material, float3 N, float3 L, float3 V, float2 coord = float2(0, 0))
 {
 	[branch]
 	if (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE)
 	{
 		float3 forwardSSS = SubsurfaceShadingPennerSkin(material, N, L);
-		float3 transmittance = SubsurfaceTranslucency(material, N, L, V);
+		float3 transmittance = SubsurfaceTranslucency(material, N, L, V, coord);
 		return forwardSSS + transmittance;
 	}
 	else
