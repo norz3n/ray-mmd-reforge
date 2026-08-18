@@ -1,3 +1,6 @@
+#ifndef RAY_MMD_CONTACT_SHADOW_FXSUB
+#define RAY_MMD_CONTACT_SHADOW_FXSUB
+
 #ifndef CONTACT_QUALITY
 #	ifdef CONTACT_SHADOW_QUALITY
 #		define CONTACT_QUALITY CONTACT_SHADOW_QUALITY
@@ -6,48 +9,19 @@
 #	endif
 #endif
 
-// Contact shadows are deliberately short rays.  More samples do not solve the
-// missing off-screen geometry problem, so keep this within the SM3 instruction
-// budget and let TAA integrate the stochastic distribution.
 #if CONTACT_QUALITY <= 1
-#	define CONTACT_SHADOW_STEP_COUNT 8
-#	define CONTACT_SHADOW_HIZ_LOOP_COUNT 20
+#	define CONTACT_SHADOW_HIZ_LOOP_COUNT 16
 #elif CONTACT_QUALITY == 2
-#	define CONTACT_SHADOW_STEP_COUNT 12
-#	define CONTACT_SHADOW_HIZ_LOOP_COUNT 28
+#	define CONTACT_SHADOW_HIZ_LOOP_COUNT 24
 #else
-#	define CONTACT_SHADOW_STEP_COUNT 16
-#	define CONTACT_SHADOW_HIZ_LOOP_COUNT 36
+#	define CONTACT_SHADOW_HIZ_LOOP_COUNT 32
 #endif
 
-// Gbuffer8Map is point sampled by default.  The point tap preserves silhouette
-// discontinuities while this filtered tap reconstructs the local surface.  A
-// ray must pass behind both before it can be considered occluded.
-sampler ContactShadowDepthLinear = sampler_state
-{
-	texture = <Gbuffer8RT>;
-	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
-	AddressU = CLAMP; AddressV = CLAMP;
-};
-
-float2 ContactShadowProject(float3 viewPosition)
-{
-	float4 clipPosition = mul(float4(viewPosition, 1.0f), matProject);
-	return clipPosition.xy / clipPosition.w * float2(0.5f, -0.5f) + 0.5f;
-}
-
-float2 ContactShadowSampleDepth(float2 screenUV)
-{
-	// Gbuffer8.x is the positive linear view-space depth.
-	float pointDepth = abs(tex2Dlod(Gbuffer8Map, float4(screenUV, 0.0f, 0.0f)).x);
-	float linearDepth = abs(tex2Dlod(ContactShadowDepthLinear, float4(screenUV, 0.0f, 0.0f)).x);
-	return float2(pointDepth, linearDepth);
-}
-
+/**
+ * Reconstructs geometric normal vector from screen-space view position partial derivatives.
+ */
 float3 ContactShadowGeometricNormal(float3 tangentX, float3 tangentY, float3 shadingNormal)
 {
-	// This normal intentionally ignores normal-map detail, so the origin bias
-	// is stable even on materials with high-frequency normal maps.
 	float3 geometricNormal = cross(tangentY, tangentX);
 	float normalLengthSquared = dot(geometricNormal, geometricNormal);
 
@@ -56,10 +30,19 @@ float3 ContactShadowGeometricNormal(float3 tangentX, float3 tangentY, float3 sha
 	else
 		geometricNormal = shadingNormal;
 
-	// Keep the reconstructed hemisphere compatible with the G-buffer normal.
 	return geometricNormal * (dot(geometricNormal, shadingNormal) < 0.0f ? -1.0f : 1.0f);
 }
 
+/**
+ * Traces a directional screen-space ray towards the light source to compute micro-occlusion.
+ *
+ * @param viewPosition Ray starting point in view space.
+ * @param shadingNormal Surface shading normal vector.
+ * @param lightDirectionVS Direction vector towards the light in view space.
+ * @param maxDistance Maximum shadow ray travel distance.
+ * @param jitter Stochastic dither value for TAA accumulation.
+ * @return Shadow visibility scalar in [0, 1] (1 = unshadowed, 0 = fully occluded).
+ */
 float TraceScreenSpaceShadow(
 	float3 viewPosition,
 	float3 shadingNormal,
@@ -67,7 +50,6 @@ float TraceScreenSpaceShadow(
 	float maxDistance,
 	float jitter)
 {
-	// Keep derivative instructions outside all early exits and loop branches.
 	float3 viewPositionDx = ddx(viewPosition);
 	float3 viewPositionDy = ddy(viewPosition);
 	float3 geometricNormal = ContactShadowGeometricNormal(viewPositionDx, viewPositionDy, shadingNormal);
@@ -82,111 +64,68 @@ float TraceScreenSpaceShadow(
 	float3 lightDirection = normalize(lightDirectionVS);
 	float shadingNdotL = dot(shadingNormal, lightDirection);
 	float geometricNdotL = dot(geometricNormal, lightDirection);
+
 	if (shadingNdotL <= 0.0f || geometricNdotL <= 0.0f || maxDistance <= 0.0f)
 		return 1.0f;
 
-	// A smooth normal may be lit even when the real low-poly face points away
-	// from the light.  In that case tracing would start inside the face.  Fade
-	// against both hemispheres before the ray can create a terminator artifact.
+	// Dual-hemisphere terminator fade to eliminate low-poly shadow silhouette acne
 	float shadingTerminatorFade = smoothstep(0.0f, 0.15f, shadingNdotL);
 	float geometricTerminatorFade = smoothstep(0.0f, 0.12f, geometricNdotL);
 	float terminatorFade = shadingTerminatorFade * geometricTerminatorFade;
 
-	// A footprint-aware, slope-scaled bias stays valid at different resolutions
-	// and depths.  Offset only along the geometric normal, never a normal map.
+	// Slope-scaled normal bias for self-intersection mitigation
 	float slopeScale = 1.0f - saturate(min(shadingNdotL, geometricNdotL));
 	float normalBias = max(0.0035f, pixelFootprint * 0.75f) * (1.0f + 3.0f * slopeScale);
 	float3 rayOrigin = viewPosition + geometricNormal * normalBias;
 
-	float stepLength = maxDistance / (float)CONTACT_SHADOW_STEP_COUNT;
-	float thickness = max(stepLength * 1.1f, normalBias * 2.0f);
+	// Physical shadow occluder thickness threshold
+	float thickness = max(maxDistance * 0.25f, normalBias * 2.5f);
 
-#if defined(CONTACT_SHADOW_USE_HIZ)
-	// Hi-Z skips empty cells, then confirms the candidate at mip 0.  Its start
-	// offset is along the ray; the normal offset has already been applied above.
-	float traceOffset = min(maxDistance * 0.25f, normalBias + frac(jitter) * thickness);
-	float hitT = 1.0f;
-	float2 hitUV = 0.0f;
-	float3 hitPosition = 0.0f;
-	bool hit = HiZ_TraceRay(
+	// Perform hierarchical screen-space raymarch towards light
+	HiZTraceResult traceHit = HiZ_TraceRayDetailed(
 		CONTACT_SHADOW_HIZ_LOOP_COUNT,
 		rayOrigin,
 		lightDirection,
 		maxDistance,
-		float3(traceOffset, thickness, 0.0f),
-		hitT,
-		hitUV,
-		hitPosition);
+		normalBias,
+		thickness);
 
-	if (hit)
+	if (traceHit.isHit)
 	{
-		// The hierarchy is conservative.  Confirm against both point and linear
-		// depth before darkening the pixel, preserving the false-wall rejection.
-		float2 sceneDepth = ContactShadowSampleDepth(hitUV);
-		float nearestDepth = min(sceneDepth.x, sceneDepth.y);
-		float farthestDepth = max(sceneDepth.x, sceneDepth.y);
-		float behindSurface = hitPosition.z - farthestDepth;
-		float penetration = hitPosition.z - nearestDepth;
-
-		if (behindSurface > 0.0f && penetration <= thickness)
-		{
-			float traceRange = max(maxDistance - traceOffset, 1e-5f);
-			float contactT = saturate((traceOffset + hitT * traceRange) / maxDistance);
-			float distanceFade = 1.0f - smoothstep(0.65f, 1.0f, contactT);
-			return 1.0f - terminatorFade * distanceFade;
-		}
+		// Distance falloff along the contact ray
+		float distanceFade = 1.0f - smoothstep(0.65f, 1.0f, traceHit.hitProgress);
+		float occlusion = traceHit.confidence * terminatorFade * distanceFade;
+		return 1.0f - occlusion;
 	}
 
 	return 1.0f;
-#else
-	float occlusion = 0.0f;
-	float hitT = 1.0f;
-
-	[loop]
-	for (int stepIndex = 0; stepIndex < CONTACT_SHADOW_STEP_COUNT; ++stepIndex)
-	{
-		// Jitter within the current interval; the half-step offset avoids testing
-		// the origin itself and converts banding into TAA-friendly noise.
-		float rayT = ((float)stepIndex + 0.5f + 0.5f * frac(jitter)) /
-			(float)CONTACT_SHADOW_STEP_COUNT;
-		float3 rayPosition = rayOrigin + lightDirection * (rayT * maxDistance);
-		float2 sampleUV = ContactShadowProject(rayPosition);
-
-		if (any(sampleUV < 0.0f) || any(sampleUV > 1.0f))
-			break;
-
-		float2 sceneDepth = ContactShadowSampleDepth(sampleUV);
-		float nearestDepth = min(sceneDepth.x, sceneDepth.y);
-		float farthestDepth = max(sceneDepth.x, sceneDepth.y);
-
-		// The ray has to descend below both the discrete and reconstructed depth
-		// surfaces.  Its penetration is then limited by the thickness heuristic;
-		// overly deep samples are skipped so foreground silhouettes do not become
-		// 2.5D "false walls" on the background.
-		float behindSurface = rayPosition.z - farthestDepth;
-		float penetration = rayPosition.z - nearestDepth;
-		if (behindSurface > 0.0f && penetration <= thickness)
-		{
-			occlusion = 1.0f;
-			hitT = rayT;
-			break;
-		}
-	}
-
-	// Taper the end of the short ray to avoid a visible hard cut-off.
-	float distanceFade = 1.0f - smoothstep(0.65f, 1.0f, hitT);
-	return 1.0f - occlusion * terminatorFade * distanceFade;
-#endif
 }
 
-float GetContactShadow(float3 viewPosition, float3 shadingNormal, float3 L, float2 screenCoord, float linearDepth)
+/**
+ * Public interface for evaluating contact shadows in lighting passes.
+ *
+ * @param viewPosition Reconstructed pixel position in view space.
+ * @param shadingNormal Pixel surface normal vector.
+ * @param L Unit direction vector towards light source in view space.
+ * @param screenCoord Viewport coordinates of current pixel [0, 1].
+ * @param linearDepth Positive linear view-space depth.
+ * @return Contact shadow multiplier factor.
+ */
+float GetContactShadow(
+	float3 viewPosition,
+	float3 shadingNormal,
+	float3 L,
+	float2 screenCoord,
+	float linearDepth)
 {
-	if (linearDepth > 30.0f)
+	if (linearDepth > 40.0f)
 		return 1.0f;
 
-	// Scale the micro-shadow range near the camera, then cap it before distant
-	// occluders can turn screen-space depth discontinuities into long shadows.
-	float maxDistance = min(0.5f, max(0.025f, linearDepth * 0.015f));
+	// Distance-adaptive shadow length: tighter micro-shadows near camera
+	float maxDistance = min(0.6f, max(0.025f, linearDepth * 0.018f));
 	float jitter = InterleavedGradientNoise(screenCoord * ViewportSize);
+
 	return TraceScreenSpaceShadow(viewPosition, shadingNormal, L, maxDistance, jitter);
 }
+
+#endif // RAY_MMD_CONTACT_SHADOW_FXSUB
