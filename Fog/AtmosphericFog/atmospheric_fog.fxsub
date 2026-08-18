@@ -115,7 +115,7 @@ void AtmosphericFogMieBlurVS(
 
 float4 AtmosphericFogMieBlurPS(in float4 coord : TEXCOORD0, float4 illuminationPosition : TEXCOORD1) : COLOR0
 {
-	float jitter = PseudoRandom(coord.zw);
+	float jitter = InterleavedGradientNoise(coord.xy * ViewportSize, 0);
 
 	float3 sampleColor = 0.0;
 	float2 sampleDecay = float2(1.0, 0.96);
@@ -131,7 +131,7 @@ float4 AtmosphericFogMieBlurPS(in float4 coord : TEXCOORD0, float4 illuminationP
 
 	sampleColor /= FOG_WITH_GODRAY_SAMPLES;
 
-	return float4(sampleColor + sampleColor * jitter / 255.0, 0);
+	return float4(sampleColor, 0);
 }
 
 float4 AtmosphericScatteringPS(

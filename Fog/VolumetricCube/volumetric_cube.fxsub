@@ -164,7 +164,7 @@ float4 VolumetricCubePS(float4 texcoord : TEXCOORD0, float4 viewdir : TEXCOORD1)
 	float3 start = CameraPosition + V * max(0, intersections.x);
 	float3 end = CameraPosition + V * min(linearDepth, intersections.y);
 
-	return VolumetricFog(param, V, normalize(-SunDirection), start, end, GetJitterOffset(texcoord.xy * ViewportSize + time));
+	return VolumetricFog(param, V, normalize(-SunDirection), start, end, InterleavedGradientNoise(texcoord.xy * ViewportSize, (int)fmod(time * 60.0, 16.0)));
 }
 
 technique MainTechBS0<string MMDPass = "object_ss"
