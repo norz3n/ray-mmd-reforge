@@ -1,0 +1,17 @@
+/**
+ * Ray-MMD ReForge: Screen-Space Global Illumination (SSGI) Master Include
+ *
+ * Module: SSGI_Main.fxsub
+ * Independent Diffuse Global Illumination & Radiance Gather Pipeline.
+ * Integrates raymarching, bilateral denoising, and material resolve passes.
+ */
+
+#ifndef RAY_MMD_SSGI_MAIN_FXSUB
+#define RAY_MMD_SSGI_MAIN_FXSUB
+
+#include "shader/SSGI/SSGI_Common.fxsub"
+#include "shader/SSGI/SSGI_Trace.fxsub"
+#include "shader/SSGI/SSGI_Filter.fxsub"
+#include "shader/SSGI/SSGI_Resolve.fxsub"
+
+#endif // RAY_MMD_SSGI_MAIN_FXSUB

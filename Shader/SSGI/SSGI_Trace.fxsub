@@ -1,0 +1,163 @@
+/**
+ * Ray-MMD ReForge: Screen-Space Global Illumination (SSGI) Raymarch & Radiance Gather
+ *
+ * Module: SSGI_Trace.fxsub
+ * Independent Hierarchical Diffuse Raymarching & Radiance Integration Engine.
+ * Gathers hemisphere indirect irradiance with staggered jitter and progressive Hi-Z LOD stepping.
+ */
+
+#ifndef RAY_MMD_SSGI_TRACE_FXSUB
+#define RAY_MMD_SSGI_TRACE_FXSUB
+
+#include "shader/SSGI/SSGI_Common.fxsub"
+#include "shader/HiZ/HiZ_Main.fxsub"
+
+/**
+ * Screen-Space Global Illumination Radiance Integration Pixel Shader.
+ */
+float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) : COLOR
+{
+	float zOrigin = GetSSGILinearDepth(uvCoord.xy);
+	if (!(zOrigin > 0.0f && zOrigin < 1000.0f))
+		clip(-1);
+
+	float4 projInfo = GetProjConstant();
+	float3 nOrigin = GetSSGINormal(uvCoord.xy);
+	float3 pOrigin = GetViewPosition(projInfo, uvCoord.xy, zOrigin);
+
+	// Adaptive world radius scaling (mode 1: focused bounce, mode 2: large room-scale gather)
+#if GI_ENABLE >= 2
+	float maxWorldDistance = max(mSSGIScale * 75.0f, 5.0f);
+	float projScale = max(abs(projInfo.x), 1e-4f);
+	float screenRadius = clamp(maxWorldDistance / (zOrigin * projScale), 0.02f, 0.85f);
+#else
+	float maxWorldDistance = max(mSSGIScale * 35.0f, 2.0f);
+	float projScale = max(abs(projInfo.x), 1e-4f);
+	float screenRadius = clamp(maxWorldDistance / (zOrigin * projScale), 0.01f, 0.6f);
+#endif
+
+	float2 screenPixel = uvCoord.xy * ViewportSize;
+	float noiseAngle = InterleavedGradientNoise(screenPixel);
+	float noiseRadius = frac(noiseAngle * 5.588238f + (screenPixel.x + screenPixel.y * 5.588238f) * 0.61803398875f);
+
+	float startAngle = noiseAngle * PI_2;
+	float3 totalGi = 0.0f;
+	float minDistanceSq = max(mSSGIBias * mSSGIBias * 0.02f, 0.001f);
+
+	[loop]
+	for (int a = 0; a < SSGI_ANGLES; ++a)
+	{
+		float theta = (float(a) / float(SSGI_ANGLES)) * PI_2 + startAngle;
+		float2 direction = float2(cos(theta), sin(theta));
+		float rayJitter = frac(noiseRadius + float(a) * 0.61803398875f);
+
+		float3 rayColor = 0.0f;
+		float rayOcc = 0.0f;
+
+		[loop]
+		for (int s = 0; s < SSGI_STEPS; ++s)
+		{
+			// Quadratic progression for dense near-field and wide far-field sampling
+			float stepProgress = (float(s) + rayJitter) / float(SSGI_STEPS);
+			float stepDist = stepProgress * stepProgress;
+			float2 currentUv = uvCoord.xy + direction * (screenRadius * stepDist);
+
+			if (currentUv.x < 0.0f || currentUv.x > 1.0f || currentUv.y < 0.0f || currentUv.y > 1.0f)
+				break;
+
+			// Progressive LOD: use full-res for near steps, Hi-Z pyramid for far steps
+			int sampleLOD = (s > 1) ? min(s - 1, 3) : 0;
+			float zSample = (sampleLOD == 0) ? GetSSGILinearDepth(currentUv) : HiZ_SampleDepthAtMip(currentUv, sampleLOD);
+
+			if (zSample > 0.0f && zSample < 1000.0f)
+			{
+				float3 pSample = GetViewPosition(projInfo, currentUv, zSample);
+				float3 diff = pSample - pOrigin;
+				float distSq = dot(diff, diff);
+
+				// Reject self-sampling (bias check)
+				if (distSq > minDistanceSq)
+				{
+					float dist = sqrt(distSq);
+					float3 lightVector = diff / dist;
+
+					// Receiver cosine factor with soft diffuse wrap
+				#if GI_ENABLE >= 2
+					float NdotL = dot(nOrigin, lightVector);
+					if (NdotL > -0.2f)
+					{
+						int shadingModel = (int)floor(tex2Dlod(Gbuffer8Map, float4(currentUv, 0.0f, 0.0f)).a);
+						bool isEmissive = (shadingModel == SHADINGMODELID_EMISSIVE);
+
+						// Emitter cosine factor (sample must face the receiver, or be an active omnidirectional emissive light source)
+						float3 nSample = GetSSGINormal(currentUv);
+						float NsDotMinusL = dot(nSample, -lightVector);
+						if (NsDotMinusL > -0.5f || isEmissive)
+						{
+							float geomFactor = saturate(NdotL * 0.85f + 0.15f) * (isEmissive ? 1.0f : saturate(NsDotMinusL * 0.5f + 0.5f));
+							float distRatio = saturate(dist / maxWorldDistance);
+							float fade = 1.0f - distRatio * distRatio;
+							float falloffRate = isEmissive ? 0.03f : 0.08f;
+				#else
+					float NdotL = dot(nOrigin, lightVector);
+					if (NdotL > 0.0f)
+					{
+						int shadingModel = (int)floor(tex2Dlod(Gbuffer8Map, float4(currentUv, 0.0f, 0.0f)).a);
+						bool isEmissive = (shadingModel == SHADINGMODELID_EMISSIVE);
+
+						// Emitter cosine factor
+						float3 nSample = GetSSGINormal(currentUv);
+						float NsDotMinusL = dot(nSample, -lightVector);
+						if (NsDotMinusL > -0.15f || isEmissive)
+						{
+							float geomFactor = saturate(NdotL) * (isEmissive ? 1.0f : saturate(NsDotMinusL * 0.85f + 0.15f));
+							float distRatio = saturate(dist / maxWorldDistance);
+							float fade = 1.0f - distRatio * distRatio;
+							float falloffRate = isEmissive ? 0.08f : 0.35f;
+				#endif
+							float invDistFalloff = 1.0f / (1.0f + dist * falloffRate);
+							float atten = (fade * fade) * invDistFalloff;
+
+							// Thickness visibility weighting
+							float thickWeight = isEmissive ? 1.0f : ComputeThicknessWeight(pSample.z - pOrigin.z, pOrigin.z, dist);
+							float w = saturate(geomFactor * atten * thickWeight);
+
+							if (w > 1e-3f)
+							{
+								float3 sampleColor = tex2Dlod(ShadingMapSamp, float4(currentUv, 0.0f, 0.0f)).rgb;
+								sampleColor = clamp(sampleColor, 0.0f, 100.0f);
+
+								if (isEmissive)
+								{
+									sampleColor *= 4.0f;
+								}
+
+								// Front-to-back ray accumulation
+								float hitFactor = w * (1.0f - rayOcc);
+								rayColor += sampleColor * hitFactor;
+								rayOcc += hitFactor;
+
+								if (rayOcc > 0.95f)
+									break;
+							}
+						}
+					}
+				}
+			}
+		}
+
+		totalGi += rayColor;
+	}
+
+	float intensityMultiplier = lerp(lerp(1.0f, 3.0f, mSSGIIntensityPlus), 0.0f, mSSGIIntensityMinus);
+#if GI_ENABLE >= 2
+	float modeMultiplier = 2.0f; // Broad, rich room illumination with soft compression
+#else
+	float modeMultiplier = 1.0f; // Focused accent bounce
+#endif
+	float3 finalGi = (totalGi / float(SSGI_ANGLES)) * (PI * intensityMultiplier * modeMultiplier);
+
+	return float4(clamp(finalGi, 0.0f, 100.0f), 1.0f);
+}
+
+#endif // RAY_MMD_SSGI_TRACE_FXSUB

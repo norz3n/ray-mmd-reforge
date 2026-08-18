@@ -1,0 +1,76 @@
+/**
+ * Ray-MMD ReForge: Screen-Space Global Illumination (SSGI) Common Declarations
+ *
+ * Module: SSGI_Common.fxsub
+ * Independent Diffuse Global Illumination & Radiance Gather Pipeline.
+ * Provides quality constants, controller uniform bindings, and geometry decoding helpers.
+ */
+
+#ifndef RAY_MMD_SSGI_COMMON_FXSUB
+#define RAY_MMD_SSGI_COMMON_FXSUB
+
+#if GI_QUALITY == 1
+#	define SSGI_ANGLES 4
+#	define SSGI_STEPS 4
+#	define SSGI_RADIUS 4
+#elif GI_QUALITY == 2
+#	define SSGI_ANGLES 6
+#	define SSGI_STEPS 4
+#	define SSGI_RADIUS 6
+#elif GI_QUALITY == 3
+#	define SSGI_ANGLES 8
+#	define SSGI_STEPS 4
+#	define SSGI_RADIUS 6
+#elif GI_QUALITY == 4
+#	define SSGI_ANGLES 6
+#	define SSGI_STEPS 8
+#	define SSGI_RADIUS 8
+#elif GI_QUALITY == 5
+#	define SSGI_ANGLES 8
+#	define SSGI_STEPS 8
+#	define SSGI_RADIUS 8
+#elif GI_QUALITY == 6
+#	define SSGI_ANGLES 10
+#	define SSGI_STEPS 10
+#	define SSGI_RADIUS 10
+#elif GI_QUALITY == 7
+#	define SSGI_ANGLES 12
+#	define SSGI_STEPS 10
+#	define SSGI_RADIUS 12
+#else
+#	define SSGI_ANGLES 6
+#	define SSGI_STEPS 5
+#	define SSGI_RADIUS 6
+#endif
+
+// Controller item bindings
+float mSSGIIntensityPlus : CONTROLOBJECT < string name="ray_controller.pmx"; string item = "SSGI+"; >;
+float mSSGIIntensityMinus : CONTROLOBJECT < string name="ray_controller.pmx"; string item = "SSGI-"; >;
+
+/**
+ * Fetches linear view-space depth for SSGI processing.
+ */
+inline float GetSSGILinearDepth(float2 uv)
+{
+	return tex2Dlod(Gbuffer8Map, float4(uv, 0.0f, 0.0f)).r;
+}
+
+/**
+ * Decodes view-space surface normal for SSGI processing.
+ */
+inline float3 GetSSGINormal(float2 uv)
+{
+	return DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(uv, 0.0f, 0.0f)));
+}
+
+/**
+ * Computes smooth bilateral thickness visibility weight for diffuse occluders.
+ */
+inline float ComputeThicknessWeight(float zDiff, float viewZ, float distance)
+{
+	float dynamicThickness = max(0.6f, 1.2f + viewZ * 0.02f + distance * 0.12f);
+	float x = saturate(abs(zDiff) / dynamicThickness);
+	return 1.0f - (x * x * (3.0f - 2.0f * x));
+}
+
+#endif // RAY_MMD_SSGI_COMMON_FXSUB
