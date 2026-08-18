@@ -58,6 +58,35 @@ float3 ClipAABB(float3 history, float3 boxMin, float3 boxMax, float3 center)
 	return lerp(center, history, t);
 }
 
+// 5-tap Catmull-Rom bicubic texture filter for pin-sharp history reconstruction (Unreal Engine standard)
+float3 SampleHistoryCatmullRom5Tap(sampler2D historySamp, float2 uv, float2 texelSize)
+{
+	float2 samplePos = uv / texelSize;
+	float2 tc = floor(samplePos - 0.5f) + 0.5f;
+	float2 f = samplePos - tc;
+	float2 f2 = f * f;
+	float2 f3 = f2 * f;
+
+	float2 w0 = -0.5f * f3 + f2 - 0.5f * f;
+	float2 w1 =  1.5f * f3 - 2.5f * f2 + 1.0f;
+	float2 w2 = -1.5f * f3 + 2.0f * f2 + 0.5f * f;
+	float2 w3 =  0.5f * f3 - 0.5f * f2;
+
+	float2 w12 = w1 + w2;
+	float2 tc12 = (tc + w2 / w12) * texelSize;
+	float2 tc0  = (tc - 1.0f) * texelSize;
+	float2 tc3  = (tc + 2.0f) * texelSize;
+
+	float4 color = 0.0f;
+	color += float4(tex2Dlod(historySamp, float4(tc12.x, tc0.y,  0, 0)).rgb, 1.0f) * (w12.x * w0.y);
+	color += float4(tex2Dlod(historySamp, float4(tc0.x,  tc12.y, 0, 0)).rgb, 1.0f) * (w0.x  * w12.y);
+	color += float4(tex2Dlod(historySamp, float4(tc12.x, tc12.y, 0, 0)).rgb, 1.0f) * (w12.x * w12.y);
+	color += float4(tex2Dlod(historySamp, float4(tc3.x,  tc12.y, 0, 0)).rgb, 1.0f) * (w3.x  * w12.y);
+	color += float4(tex2Dlod(historySamp, float4(tc12.x, tc3.y,  0, 0)).rgb, 1.0f) * (w12.x * w3.y);
+
+	return max(color.rgb / max(color.a, 1e-4f), 0.0f);
+}
+
 float4 TAAPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1, uniform sampler2D source) : COLOR
 {
 	float2 uv = coord.xy;
@@ -74,7 +103,7 @@ float4 TAAPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1, uniform
 
 	float3 currColor = tex2Dlod(source, float4(uv, 0, 0)).rgb;
 
-	// PONYTAIL: Depth-aware spatial edge anti-aliasing fallback for model silhouettes.
+	// Depth-aware spatial edge anti-aliasing fallback for model silhouettes
 	float dLeft  = tex2Dlod(Gbuffer8Map, float4(uv - float2(ViewportOffset2.x, 0), 0, 0)).r;
 	float dRight = tex2Dlod(Gbuffer8Map, float4(uv + float2(ViewportOffset2.x, 0), 0, 0)).r;
 	float dUp    = tex2Dlod(Gbuffer8Map, float4(uv - float2(0, ViewportOffset2.y), 0, 0)).r;
@@ -125,15 +154,15 @@ float4 TAAPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1, uniform
 	float3 boxMax = min(mu + gamma * sigma, maxNeighbor);
 
 	bool isValidPrev = all(prevUV >= 0.0) && all(prevUV <= 1.0);
-	float3 historyColor = isValidPrev ? tex2Dlod(TAAHistoryMapSamp, float4(prevUV, 0, 0)).rgb : currColor;
+	float3 historyColor = isValidPrev ? SampleHistoryCatmullRom5Tap(TAAHistoryMapSamp, prevUV, ViewportOffset2) : currColor;
 	float3 historyYCoCg = RGB2YCoCg(historyColor);
 
 	historyYCoCg = ClipAABB(historyYCoCg, boxMin, boxMax, mu);
 
-	// Anti-flicker / anti-firefly luma weighting
+	// Karis luma weighting for HDR anti-firefly accumulation
 	float wCurrent = 1.0f / (1.0f + max(currYCoCg.x, 0.0f));
 	float wHistory = 1.0f / (1.0f + max(historyYCoCg.x, 0.0f));
-	float blendFactor = isValidPrev ? 0.88f : 0.0f;
+	float blendFactor = isValidPrev ? 0.90f : 0.0f;
 
 	float weightCurr = wCurrent * (1.0f - blendFactor);
 	float weightHist = wHistory * blendFactor;
