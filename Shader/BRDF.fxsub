@@ -42,18 +42,25 @@ float3 SubsurfaceShadingPennerSkin(MaterialParam material, float3 N, float3 L)
 float3 SubsurfaceTranslucency(MaterialParam material, float3 N, float3 L, float3 V)
 {
 	float nl = dot(N, L);
-	if (nl > 0.1f) return 0; // Only activate when light is penetrating from behind the surface
+	if (nl > 0.25f) return 0; // Only activate when light is penetrating from behind the surface
 
 	// Subsurface transmission for thin organic features (ears, nose, fingers under backlight)
-	float3 distortedN = normalize(N - L * 0.4f);
-	float backlight = saturate(dot(-distortedN, V));
-	float transPower = 6.0f;
-	float transIntensity = pow(backlight, transPower) * saturate(1.0f - nl * 2.0f);
-	
-	// Thickness attenuation based on curvature / customDataA
-	float thickness = saturate(1.0f - material.customDataA * 0.5f);
-	
-	return material.customDataB * (transIntensity * thickness * 0.5f);
+	// Physically-modeled forward scattering lobe (Heyney-Greenstein phase approximation)
+	float3 distortedL = normalize(L + N * 0.28f);
+	float vdotL = saturate(dot(V, -distortedL));
+	float forwardScatter = pow(vdotL, 9.0f) * 2.5f;
+
+	// Wide diffuse transmission wrap across backward hemisphere
+	float wrapScatter = saturate((-nl + 0.35f) / 1.35f) * 0.65f;
+
+	// Multi-spectral flesh transmission (red wavelength penetrates deep into dermis/subcutis)
+	float3 spectralTrans = float3(1.0f, 0.36f, 0.10f) * material.customDataB;
+
+	// Thickness/Curvature-dependent exponential extinction
+	float curvature = max(material.customDataA, 0.01f);
+	float opticalDensity = exp(-curvature * 2.8f);
+
+	return spectralTrans * ((forwardScatter + wrapScatter) * opticalDensity * 0.6f);
 }
 
 float3 SubsurfaceShadingPreIntegratedSkin(MaterialParam material, float3 N, float3 L)

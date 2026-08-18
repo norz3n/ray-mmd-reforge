@@ -71,8 +71,15 @@ float4 SSSGaussBlurPS(
 		float depthDiff1 = (sampleColor1.a - linearDepth) * 1000 * mSSSSScale;
 		float depthDiff2 = (sampleColor2.a - linearDepth) * 1000 * mSSSSScale;
 
-		float3 weight1 = exp(-(offsets[i] * offsets[i] + depthDiff1 * depthDiff1) / profileVarArr[sssIndex]);
-		float3 weight2 = exp(-(offsets[i] * offsets[i] + depthDiff2 * depthDiff2) / profileVarArr[sssIndex]);
+		float3 N1 = DecodeNormal(tex2Dlod(Gbuffer2Map, float4(offset1, 0, 0)).xyz);
+		float3 N2 = DecodeNormal(tex2Dlod(Gbuffer2Map, float4(offset2, 0, 0)).xyz);
+		float normalWeight1 = saturate(dot(N1, N));
+		float normalWeight2 = saturate(dot(N2, N));
+		float normalScale1 = normalWeight1 * normalWeight1;
+		float normalScale2 = normalWeight2 * normalWeight2;
+
+		float3 weight1 = exp(-(offsets[i] * offsets[i] + depthDiff1 * depthDiff1) / profileVarArr[sssIndex]) * normalScale1;
+		float3 weight2 = exp(-(offsets[i] * offsets[i] + depthDiff2 * depthDiff2) / profileVarArr[sssIndex]) * normalScale2;
 		
 		sampleWeight += weight1;
 		sampleWeight += weight2;
@@ -81,7 +88,7 @@ float4 SSSGaussBlurPS(
 		sampleColor.rgb += weight2 * sampleColor2.rgb;
 	}
 
-	sampleColor.rgb /= sampleWeight;
+	sampleColor.rgb /= max(sampleWeight, 1e-4f);
 
 	if (direction.y > 0.01)
 	{
