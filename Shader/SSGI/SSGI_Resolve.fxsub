@@ -66,7 +66,7 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 
 #if GI_ENABLE >= 2
 	bool isSkin = (mat.lightModel == SHADINGMODELID_SKIN || mat.lightModel == SHADINGMODELID_SUBSURFACE);
-	float3 multiBounce = isSkin ? 1.0f : (1.0f + (mat.albedo * 0.75f) / max(1.0f - mat.albedo * 0.5f, 0.2f));
+	float3 multiBounce = isSkin ? 1.15f : (1.0f + (mat.albedo * 1.25f) / max(1.0f - mat.albedo * 0.5f, 0.15f));
 	rawGi *= multiBounce;
 #endif
 

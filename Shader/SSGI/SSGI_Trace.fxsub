@@ -150,10 +150,11 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 		totalGi += rayColor;
 	}
 
-	float intensityMultiplier = lerp(lerp(1.0f, 3.0f, mSSGIIntensityPlus), 0.0f, mSSGIIntensityMinus);
 #if GI_ENABLE >= 2
-	float modeMultiplier = 2.0f; // Broad, rich room illumination with soft compression
+	float intensityMultiplier = lerp(lerp(1.0f, 5.0f, mSSGIIntensityPlus), 0.0f, mSSGIIntensityMinus);
+	float modeMultiplier = 3.5f; // Broad, rich room illumination with deep colored bounce
 #else
+	float intensityMultiplier = lerp(lerp(1.0f, 3.0f, mSSGIIntensityPlus), 0.0f, mSSGIIntensityMinus);
 	float modeMultiplier = 1.0f; // Focused accent bounce
 #endif
 	float3 finalGi = (totalGi / float(SSGI_ANGLES)) * (PI * intensityMultiplier * modeMultiplier);
