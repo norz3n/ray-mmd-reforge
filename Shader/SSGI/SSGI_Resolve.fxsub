@@ -40,7 +40,7 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 	if (mat.lightModel == SHADINGMODELID_SKIN || mat.lightModel == SHADINGMODELID_SUBSURFACE)
 	{
 		// Photometric soft-knee compression: lifts dark shadows while softly capping bright hotspots
-		rawGi = (rawGi / (1.0f + rawGi * 0.65f)) * (mat.albedo * 0.85f);
+		rawGi = (rawGi / (1.0f + rawGi * 0.28f)) * (mat.albedo * 0.90f);
 	}
 	else if (mat.lightModel == SHADINGMODELID_GLASS)
 	{
@@ -61,7 +61,7 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 	}
 	else
 	{
-		rawGi = (rawGi / (1.0f + rawGi * 0.35f)) * mat.albedo;
+		rawGi = (rawGi / (1.0f + rawGi * 0.18f)) * mat.albedo;
 	}
 
 #if GI_ENABLE >= 2
