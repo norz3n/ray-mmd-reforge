@@ -1,0 +1,39 @@
+/**
+ * Ray-MMD ReForge: Screen-Space Reflections (SSR) Roughness Filter
+ *
+ * Module: SSR_Filter.fxsub
+ * Clean Room Implementation of Multi-Scale Roughness Pyramid Filtering.
+ * Pre-filters reflection radiance across mip levels to simulate specular cone spreading.
+ */
+
+#ifndef RAY_MMD_SSR_FILTER_FXSUB
+#define RAY_MMD_SSR_FILTER_FXSUB
+
+#include "shader/SSR/SSR_Common.fxsub"
+
+/**
+ * 5-Tap Separable Gaussian Filter for specular lobe footprint simulation.
+ *
+ * @param coord Normalized texture coordinate.
+ * @param source Source texture sampler.
+ * @param offset Directional texel step offset.
+ * @return Filtered reflection radiance.
+ */
+float4 SSR_FilterBlurPS(in float2 coord : TEXCOORD0, uniform sampler source, uniform float2 offset) : COLOR
+{
+	static const float kWeightCenter = 0.2023600f;
+	static const float kWeightInner  = 0.3030530f;
+	static const float kWeightOuter  = 0.0957660f;
+	static const float kOffsetInner  = 1.4091991f;
+	static const float kOffsetOuter  = 3.2979345f;
+
+	float4 blurred = tex2Dlod(source, float4(coord, 0.0f, 0.0f)) * kWeightCenter;
+	blurred += tex2Dlod(source, float4(coord + offset * kOffsetInner, 0.0f, 0.0f)) * kWeightInner;
+	blurred += tex2Dlod(source, float4(coord - offset * kOffsetInner, 0.0f, 0.0f)) * kWeightInner;
+	blurred += tex2Dlod(source, float4(coord + offset * kOffsetOuter, 0.0f, 0.0f)) * kWeightOuter;
+	blurred += tex2Dlod(source, float4(coord - offset * kOffsetOuter, 0.0f, 0.0f)) * kWeightOuter;
+
+	return blurred;
+}
+
+#endif // RAY_MMD_SSR_FILTER_FXSUB

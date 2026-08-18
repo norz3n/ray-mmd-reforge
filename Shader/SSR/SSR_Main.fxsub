@@ -1,0 +1,16 @@
+/**
+ * Ray-MMD ReForge: Screen-Space Reflections (SSR) Subsystem Master Include
+ *
+ * Module: SSR_Main.fxsub
+ * Clean Room Modular Screen-Space Reflections Pipeline.
+ */
+
+#ifndef RAY_MMD_SSR_MAIN_FXSUB
+#define RAY_MMD_SSR_MAIN_FXSUB
+
+#include "shader/SSR/SSR_Common.fxsub"
+#include "shader/SSR/SSR_Trace.fxsub"
+#include "shader/SSR/SSR_Filter.fxsub"
+#include "shader/SSR/SSR_Resolve.fxsub"
+
+#endif // RAY_MMD_SSR_MAIN_FXSUB

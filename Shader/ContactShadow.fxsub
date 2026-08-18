@@ -108,7 +108,7 @@ float TraceScreenSpaceShadow(
 	float hitT = 1.0f;
 	float2 hitUV = 0.0f;
 	float3 hitPosition = 0.0f;
-	bool hit = HZTrace(
+	bool hit = HiZ_TraceRay(
 		CONTACT_SHADOW_HIZ_LOOP_COUNT,
 		rayOrigin,
 		lightDirection,

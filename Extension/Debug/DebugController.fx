@@ -61,9 +61,9 @@ sampler SSDOMapSamp = sampler_state {
 #endif
 
 #if SSR_QUALITY > 0
-shared texture SSRayTracingMap: RENDERCOLORTARGET;
+shared texture SSRLightX1Map: RENDERCOLORTARGET;
 sampler SSRayTracingSamp = sampler_state {
-	texture = <SSRayTracingMap>;
+	texture = <SSRLightX1Map>;
 	MinFilter = NONE; MagFilter = NONE; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };

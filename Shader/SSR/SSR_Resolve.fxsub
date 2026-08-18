@@ -1,0 +1,71 @@
+/**
+ * Ray-MMD ReForge: Screen-Space Reflections (SSR) Resolve & PBR Composite
+ *
+ * Module: SSR_Resolve.fxsub
+ * Clean Room Academic Implementation (Karis 2013 / Uludag 2014).
+ * Reconstructs pre-filtered radiance across continuous roughness LOD and applies Split-Sum PBR BRDF.
+ */
+
+#ifndef RAY_MMD_SSR_RESOLVE_FXSUB
+#define RAY_MMD_SSR_RESOLVE_FXSUB
+
+#include "shader/SSR/SSR_Common.fxsub"
+
+/**
+ * Resolves specular cone radiance across multi-scale pre-filtered hierarchy and applies PBR Fresnel.
+ */
+float4 SSR_ResolvePS(in float2 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) : COLOR
+{
+	float4 gbuffAlbedo   = tex2Dlod(Gbuffer5Map, float4(coord, 0.0f, 0.0f));
+	float4 gbuffNormal   = tex2Dlod(Gbuffer6Map, float4(coord, 0.0f, 0.0f));
+	float4 gbuffSpecular = tex2Dlod(Gbuffer7Map, float4(coord, 0.0f, 0.0f));
+	float4 gbuffDepth    = tex2Dlod(Gbuffer8Map, float4(coord, 0.0f, 0.0f));
+
+	MaterialParam surfaceMat;
+	DecodeGbuffer(gbuffAlbedo, gbuffNormal, gbuffSpecular, gbuffDepth, surfaceMat);
+
+	// Surface roughness calculation
+	float surfaceSmoothness = saturate(surfaceMat.smoothness + mSSRSmoothness * 0.5f);
+	float linearRoughness = 1.0f - surfaceSmoothness;
+
+	// Continuous roughness LOD level in pyramid [0, 3]
+	float pyramidLOD = clamp(linearRoughness * 3.0f, 0.0f, 3.0f);
+
+	float4 mip0 = tex2Dlod(SSRLightX1Samp, float4(coord, 0.0f, 0.0f));
+	float4 mip1 = tex2Dlod(SSRLightX2Samp, float4(coord, 0.0f, 0.0f));
+	float4 mip2 = tex2Dlod(SSRLightX3Samp, float4(coord, 0.0f, 0.0f));
+	float4 mip3 = tex2Dlod(SSRLightX4Samp, float4(coord, 0.0f, 0.0f));
+
+	float4 blendedReflection = 0.0f;
+
+	[flatten]
+	if (pyramidLOD < 1.0f)
+	{
+		blendedReflection = lerp(mip0, mip1, pyramidLOD);
+	}
+	else if (pyramidLOD < 2.0f)
+	{
+		blendedReflection = lerp(mip1, mip2, pyramidLOD - 1.0f);
+	}
+	else
+	{
+		blendedReflection = lerp(mip2, mip3, pyramidLOD - 2.0f);
+	}
+
+	float3 normalVS = surfaceMat.normal;
+	float3 viewVector = normalize(viewdir);
+	float3 specularF0 = surfaceMat.specular;
+
+	float NdotV = abs(dot(normalVS, viewVector));
+
+	// Split-sum environmental specular BRDF (Karis / Unreal Engine 4 PBR)
+	float3 pbrSpecularColor = EnvironmentSpecularUnreal4(NdotV, surfaceSmoothness, specularF0);
+
+	// User intensity modulation & Fresnel factor
+	float intensityScale = mSSRBrightness;
+	float fresnelWeight = lerp(luminance(pbrSpecularColor), 1.0f, saturate(mSSRFresnel));
+
+	return float4(blendedReflection.rgb * pbrSpecularColor * intensityScale, blendedReflection.a * fresnelWeight);
+}
+
+#endif // RAY_MMD_SSR_RESOLVE_FXSUB

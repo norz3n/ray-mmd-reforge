@@ -1,0 +1,56 @@
+/**
+ * Ray-MMD ReForge: Screen-Space Reflections (SSR) Common Declarations
+ *
+ * Module: SSR_Common.fxsub
+ * Clean Room Implementation of PBR Screen-Space Reflections Pipeline.
+ * Provides quality constants, multi-resolution roughness render targets, and samplers.
+ */
+
+#ifndef RAY_MMD_SSR_COMMON_FXSUB
+#define RAY_MMD_SSR_COMMON_FXSUB
+
+#if SSR_QUALITY == 1
+#	define SSR_MAX_RAY_STEPS 16
+#elif SSR_QUALITY == 2
+#	define SSR_MAX_RAY_STEPS 32
+#elif SSR_QUALITY >= 3
+#	define SSR_MAX_RAY_STEPS 64
+#else
+#	define SSR_MAX_RAY_STEPS 16
+#endif
+
+// Multi-resolution roughness pyramid render targets (Full, 1/2, 1/4, 1/8)
+shared texture SSRLightX1Map : RENDERCOLORTARGET<float2 ViewportRatio = {1.0, 1.0}; string Format = "A16B16G16R16F";>;
+texture SSRLightX2Map : RENDERCOLORTARGET<float2 ViewportRatio = {0.5, 0.5}; string Format = "A16B16G16R16F";>;
+texture SSRLightX3Map : RENDERCOLORTARGET<float2 ViewportRatio = {0.25, 0.25}; string Format = "A16B16G16R16F";>;
+texture SSRLightX4Map : RENDERCOLORTARGET<float2 ViewportRatio = {0.125, 0.125}; string Format = "A16B16G16R16F";>;
+
+texture SSRLightX1MapTemp : RENDERCOLORTARGET<float2 ViewportRatio = {1.0, 1.0}; string Format = "A16B16G16R16F";>;
+texture SSRLightX2MapTemp : RENDERCOLORTARGET<float2 ViewportRatio = {0.5, 0.5}; string Format = "A16B16G16R16F";>;
+texture SSRLightX3MapTemp : RENDERCOLORTARGET<float2 ViewportRatio = {0.25, 0.25}; string Format = "A16B16G16R16F";>;
+texture SSRLightX4MapTemp : RENDERCOLORTARGET<float2 ViewportRatio = {0.125, 0.125}; string Format = "A16B16G16R16F";>;
+
+sampler SSRLightX1Samp = sampler_state { texture = <SSRLightX1Map>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE; };
+sampler SSRLightX2Samp = sampler_state { texture = <SSRLightX2Map>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE; };
+sampler SSRLightX3Samp = sampler_state { texture = <SSRLightX3Map>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE; };
+sampler SSRLightX4Samp = sampler_state { texture = <SSRLightX4Map>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE; };
+
+sampler SSRLightX1SampTemp = sampler_state { texture = <SSRLightX1MapTemp>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE; };
+sampler SSRLightX2SampTemp = sampler_state { texture = <SSRLightX2MapTemp>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE; };
+sampler SSRLightX3SampTemp = sampler_state { texture = <SSRLightX3MapTemp>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE; };
+sampler SSRLightX4SampTemp = sampler_state { texture = <SSRLightX4MapTemp>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE; };
+
+// Roughness blur filter step offsets
+static const float2 SSRBlurKernelScale = mSSRBlur * float2(ViewportAspect, 1.0f);
+
+static const float2 SSRBlurStepX1 = float2(1.0f / SSRBlurKernelScale.x, 0.0f);
+static const float2 SSRBlurStepX2 = float2(2.0f / SSRBlurKernelScale.x, 0.0f);
+static const float2 SSRBlurStepX3 = float2(4.0f / SSRBlurKernelScale.x, 0.0f);
+static const float2 SSRBlurStepX4 = float2(8.0f / SSRBlurKernelScale.x, 0.0f);
+
+static const float2 SSRBlurStepY1 = float2(0.0f, 1.0f / SSRBlurKernelScale.y);
+static const float2 SSRBlurStepY2 = float2(0.0f, 2.0f / SSRBlurKernelScale.y);
+static const float2 SSRBlurStepY3 = float2(0.0f, 4.0f / SSRBlurKernelScale.y);
+static const float2 SSRBlurStepY4 = float2(0.0f, 8.0f / SSRBlurKernelScale.y);
+
+#endif // RAY_MMD_SSR_COMMON_FXSUB

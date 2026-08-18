@@ -1,0 +1,162 @@
+/**
+ * Ray-MMD ReForge: Hierarchical Z-Buffer (Hi-Z) Core Infrastructure
+ *
+ * Module: HiZ_Common.fxsub
+ * Clean Room Academic Implementation (McGuire 2014 / Uludag 2014).
+ * Provides depth pyramid texture definitions, atlas layout, and viewport configuration.
+ */
+
+#ifndef RAY_MMD_HIZ_COMMON_FXSUB
+#define RAY_MMD_HIZ_COMMON_FXSUB
+
+#define HIZ_MAX_MIP_LEVELS 10
+
+// Hierarchical downsampling dimensions
+static const float2 HiZMipDimensions[HIZ_MAX_MIP_LEVELS] = {
+	floor(ViewportSize / 2.0f),
+	floor(ViewportSize / 4.0f),
+	floor(ViewportSize / 8.0f),
+	floor(ViewportSize / 16.0f),
+	floor(ViewportSize / 32.0f),
+	floor(ViewportSize / 64.0f),
+	floor(ViewportSize / 128.0f),
+	floor(ViewportSize / 256.0f),
+	floor(ViewportSize / 512.0f),
+	floor(ViewportSize / 1024.0f)
+};
+
+static const float2 kHiZMip1Size  = HiZMipDimensions[0];
+static const float2 kHiZMip2Size  = HiZMipDimensions[1];
+static const float2 kHiZMip3Size  = HiZMipDimensions[2];
+static const float2 kHiZMip4Size  = HiZMipDimensions[3];
+static const float2 kHiZMip5Size  = HiZMipDimensions[4];
+static const float2 kHiZMip6Size  = HiZMipDimensions[5];
+static const float2 kHiZMip7Size  = HiZMipDimensions[6];
+static const float2 kHiZMip8Size  = HiZMipDimensions[7];
+static const float2 kHiZMip9Size  = HiZMipDimensions[8];
+static const float2 kHiZMip10Size = HiZMipDimensions[9];
+
+// Intermediate pyramid level render targets
+shared texture ZBufferMipmap1 : RENDERCOLORTARGET<
+	float2 ViewportRatio = {0.5f, 0.5f};
+	string Format = "R16F";
+>;
+sampler ZBufferMipmap1Samp = sampler_state {
+	texture = <ZBufferMipmap1>;
+	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+
+shared texture ZBufferMipmap2 : RENDERCOLORTARGET<
+	float2 ViewportRatio = {0.25f, 0.25f};
+	string Format = "R16F";
+>;
+sampler ZBufferMipmap2Samp = sampler_state {
+	texture = <ZBufferMipmap2>;
+	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+
+shared texture ZBufferMipmap3 : RENDERCOLORTARGET<
+	float2 ViewportRatio = {0.125f, 0.125f};
+	string Format = "R16F";
+>;
+sampler ZBufferMipmap3Samp = sampler_state {
+	texture = <ZBufferMipmap3>;
+	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+
+shared texture ZBufferMipmap4 : RENDERCOLORTARGET<
+	float2 ViewportRatio = {0.0625f, 0.0625f};
+	string Format = "R16F";
+>;
+sampler ZBufferMipmap4Samp = sampler_state {
+	texture = <ZBufferMipmap4>;
+	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+
+shared texture ZBufferMipmap5 : RENDERCOLORTARGET<
+	float2 ViewportRatio = {0.03125f, 0.03125f};
+	string Format = "R16F";
+>;
+sampler ZBufferMipmap5Samp = sampler_state {
+	texture = <ZBufferMipmap5>;
+	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+
+shared texture ZBufferMipmap6 : RENDERCOLORTARGET<
+	float2 ViewportRatio = {0.015625f, 0.015625f};
+	string Format = "R16F";
+>;
+sampler ZBufferMipmap6Samp = sampler_state {
+	texture = <ZBufferMipmap6>;
+	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+
+shared texture ZBufferMipmap7 : RENDERCOLORTARGET<
+	float2 ViewportRatio = {0.0078125f, 0.0078125f};
+	string Format = "R16F";
+>;
+sampler ZBufferMipmap7Samp = sampler_state {
+	texture = <ZBufferMipmap7>;
+	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+
+shared texture ZBufferMipmap8 : RENDERCOLORTARGET<
+	float2 ViewportRatio = {0.00390625f, 0.00390625f};
+	string Format = "R16F";
+>;
+sampler ZBufferMipmap8Samp = sampler_state {
+	texture = <ZBufferMipmap8>;
+	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+
+shared texture ZBufferMipmap9 : RENDERCOLORTARGET<
+	float2 ViewportRatio = {0.001953125f, 0.001953125f};
+	string Format = "R16F";
+>;
+sampler ZBufferMipmap9Samp = sampler_state {
+	texture = <ZBufferMipmap9>;
+	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+
+shared texture ZBufferMipmap10 : RENDERCOLORTARGET<
+	float2 ViewportRatio = {0.0009765625f, 0.0009765625f};
+	string Format = "R16F";
+>;
+sampler ZBufferMipmap10Samp = sampler_state {
+	texture = <ZBufferMipmap10>;
+	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+
+// Consolidated Hi-Z Atlas texture containing Mip levels 2 through 10
+shared texture ZBufferMipmap : RENDERCOLORTARGET<
+	float2 ViewportRatio = {1.0f, 1.0f};
+	string Format = "R16F";
+>;
+sampler ZBufferMipmapSamp = sampler_state {
+	texture = <ZBufferMipmap>;
+	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+
+// Atlas tile placement boundaries
+static const float4 kAtlasMip2Rect  = float4(0.0f, 0.0f, kHiZMip2Size / ViewportSize);
+static const float4 kAtlasMip3Rect  = float4(0.0f, kAtlasMip2Rect.y + kAtlasMip2Rect.w, kHiZMip3Size / ViewportSize);
+static const float4 kAtlasMip4Rect  = float4(0.0f, kAtlasMip3Rect.y + kAtlasMip3Rect.w, kHiZMip4Size / ViewportSize);
+static const float4 kAtlasMip5Rect  = float4(0.0f, kAtlasMip4Rect.y + kAtlasMip4Rect.w, kHiZMip5Size / ViewportSize);
+static const float4 kAtlasMip6Rect  = float4(0.0f, kAtlasMip5Rect.y + kAtlasMip5Rect.w, kHiZMip6Size / ViewportSize);
+static const float4 kAtlasMip7Rect  = float4(0.0f, kAtlasMip6Rect.y + kAtlasMip6Rect.w, kHiZMip7Size / ViewportSize);
+static const float4 kAtlasMip8Rect  = float4(0.0f, kAtlasMip7Rect.y + kAtlasMip7Rect.w, kHiZMip8Size / ViewportSize);
+static const float4 kAtlasMip9Rect  = float4(0.0f, kAtlasMip8Rect.y + kAtlasMip8Rect.w, kHiZMip9Size / ViewportSize);
+static const float4 kAtlasMip10Rect = float4(0.0f, kAtlasMip9Rect.y + kAtlasMip9Rect.w, kHiZMip10Size / ViewportSize);
+
+#endif // RAY_MMD_HIZ_COMMON_FXSUB

@@ -1,0 +1,219 @@
+/**
+ * Ray-MMD ReForge: Hierarchical Z-Buffer (Hi-Z) Ray Traversal Engine
+ *
+ * Module: HiZ_Traversal.fxsub
+ * Clean Room Implementation based on McGuire 2014 & Uludag 2014.
+ * Canonical 2.5D DDA screen-space raymarching with dual-interval occluder confirmation.
+ */
+
+#ifndef RAY_MMD_HIZ_TRAVERSAL_FXSUB
+#define RAY_MMD_HIZ_TRAVERSAL_FXSUB
+
+#include "shader/HiZ/HiZ_Common.fxsub"
+
+/**
+ * Samples conservative minimum scene linear depth from the Hi-Z pyramid at mip level k.
+ */
+float HiZ_SampleDepthAtMip(float2 uv, int level, float2 levelSize)
+{
+	if (level <= 0)
+	{
+		return tex2Dlod(Gbuffer8Map, float4(uv, 0.0f, 0.0f)).r;
+	}
+	else if (level == 1)
+	{
+		float2 cellCoord = (floor(uv * levelSize) + 0.5f) / kHiZMip1Size;
+		return tex2Dlod(ZBufferMipmap1Samp, float4(cellCoord, 0.0f, 0.0f)).r;
+	}
+
+	float2 atlasOffset = 0.0f;
+	[flatten]
+	if (level == 2) atlasOffset = kAtlasMip2Rect.xy;
+	else if (level == 3) atlasOffset = kAtlasMip3Rect.xy;
+	else if (level == 4) atlasOffset = kAtlasMip4Rect.xy;
+	else if (level == 5) atlasOffset = kAtlasMip5Rect.xy;
+	else if (level == 6) atlasOffset = kAtlasMip6Rect.xy;
+	else if (level == 7) atlasOffset = kAtlasMip7Rect.xy;
+	else if (level == 8) atlasOffset = kAtlasMip8Rect.xy;
+	else if (level == 9) atlasOffset = kAtlasMip9Rect.xy;
+	else atlasOffset = kAtlasMip10Rect.xy;
+
+	float2 sampleUV = (floor(uv * levelSize) + 0.5f) / ViewportSize + atlasOffset;
+	return tex2Dlod(ZBufferMipmapSamp, float4(sampleUV, 0.0f, 0.0f)).r;
+}
+
+/**
+ * Computes parametric ray distance t to the exit boundary of the current 2D cell.
+ * Derived from canonical 2D line-plane clipping (McGuire 2014).
+ */
+float HiZ_IntersectCellBoundary(
+	float3 rayOrigin,
+	float3 rayDelta,
+	float2 cellCoord,
+	float2 levelDim,
+	float2 stepDir,
+	float2 boundaryOffset)
+{
+	float2 targetPlane = (cellCoord + stepDir) / levelDim + boundaryOffset;
+	float2 distToPlane = targetPlane - rayOrigin.xy;
+
+	float tExit = 0.0f;
+	float absDx = abs(rayDelta.x);
+	float absDy = abs(rayDelta.y);
+
+	[flatten]
+	if (absDx > 1e-6f && absDy > 1e-6f)
+	{
+		tExit = min(distToPlane.x / rayDelta.x, distToPlane.y / rayDelta.y);
+	}
+	else if (absDx > 1e-6f)
+	{
+		tExit = distToPlane.x / rayDelta.x;
+	}
+	else if (absDy > 1e-6f)
+	{
+		tExit = distToPlane.y / rayDelta.y;
+	}
+
+	return tExit;
+}
+
+/**
+ * Canonical Screen-Space Hierarchical Z-Buffer Raymarcher.
+ *
+ * @param maxIterations Traversal loop bound.
+ * @param startPosVS Ray starting position in view space.
+ * @param rayDirVS Unit ray direction in view space.
+ * @param maxTraceDist Maximum ray travel distance in view units.
+ * @param traceConfig 3D vector: (x = normal bias offset, y = surface thickness, z = unused).
+ * @param hitProgress Output parametric progress t in [0, 1].
+ * @param hitUV Output screen-space texture coordinates of intersection.
+ * @param hitPosVS Output view-space coordinates of intersection.
+ * @return True if valid geometric intersection within thickness was found.
+ */
+bool HiZ_TraceRay(
+	int maxIterations,
+	float3 startPosVS,
+	float3 rayDirVS,
+	float maxTraceDist,
+	float3 traceConfig,
+	out float hitProgress,
+	out float2 hitUV,
+	out float3 hitPosVS)
+{
+	int currentMip = 0;
+	static const int kMaxMipLevel = 10;
+
+	// Project view-space ray endpoints into homogenous screen space [0, 1]
+	float4 startClip = mul(float4(startPosVS + rayDirVS * traceConfig.x, 1.0f), matProject);
+	float3 startSS = (startClip.xyz / startClip.w) * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
+
+	float4 endClip = mul(float4(startPosVS + rayDirVS * maxTraceDist, 1.0f), matProject);
+	float3 endSS = (endClip.xyz / endClip.w) * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
+
+	float3 rayDelta = endSS - startSS;
+	float rayT = 0.0f;
+
+	float2 stepDir = sign(rayDelta.xy);
+	float2 boundaryOffset = stepDir * (0.005f / ViewportSize);
+	stepDir = saturate(stepDir);
+
+	[loop]
+	for (int i = 0; i < maxIterations && currentMip >= 0 && rayT < 1.0f; ++i)
+	{
+		float3 currentSS = startSS + rayT * rayDelta;
+
+		// Exit if ray travels outside screen borders
+		if (any(floor(currentSS.xy) != 0))
+			break;
+
+		float2 mipDim = ViewportSize / exp2((float)currentMip);
+		int2 cellIndex = floor(currentSS.xy * mipDim);
+
+		// Reconstruct linear depth along ray from projective Z
+		float projDenom = currentSS.z - matProject[2][2];
+		projDenom = abs(projDenom) < 1e-6f ? sign(projDenom) * 1e-6f : projDenom;
+		float rayLinearZ = matProject[3][2] / projDenom;
+
+		// Fetch conservative minimum scene depth across current cell
+		float minSceneLinearZ = max(HiZ_SampleDepthAtMip(currentSS.xy, currentMip, mipDim), 1e-6f);
+		float minSceneHyperbolicZ = matProject[2][2] + matProject[3][2] / minSceneLinearZ;
+
+		float nextT = rayT;
+
+		if (rayDelta.z > 1e-6f)
+		{
+			// Ray marching towards deeper depth
+			float zDelta = minSceneHyperbolicZ - currentSS.z;
+			nextT = (zDelta > 0.0f) ? (nextT + zDelta / rayDelta.z) : nextT;
+
+			float3 candidateSS = startSS + nextT * rayDelta;
+			int2 candidateCell = floor(candidateSS.xy * mipDim);
+
+			if (cellIndex.x != candidateCell.x || cellIndex.y != candidateCell.y)
+			{
+				nextT = HiZ_IntersectCellBoundary(startSS, rayDelta, cellIndex, mipDim, stepDir, boundaryOffset);
+				currentMip = min(currentMip + 2, kMaxMipLevel);
+			}
+			else if (currentMip == 0 && abs(rayLinearZ - minSceneLinearZ) >= traceConfig.y)
+			{
+				nextT = HiZ_IntersectCellBoundary(startSS, rayDelta, cellIndex, mipDim, stepDir, boundaryOffset);
+				currentMip = 1;
+			}
+		}
+		else if (currentSS.z < minSceneHyperbolicZ)
+		{
+			// Ray in front of geometry
+			nextT = HiZ_IntersectCellBoundary(startSS, rayDelta, cellIndex, mipDim, stepDir, boundaryOffset);
+			currentMip = min(currentMip + 2, kMaxMipLevel);
+		}
+
+		rayT = nextT;
+		--currentMip;
+	}
+
+	float3 finalScreenPos = startSS + rayT * rayDelta;
+	hitProgress = rayT;
+	hitUV = finalScreenPos.xy;
+
+	// Reconstruct view-space intersection position
+	float3 finalNDC = (finalScreenPos - float3(0.5f, 0.5f, 0.0f)) * float3(2.0f, -2.0f, 1.0f);
+	float4 finalClip = float4(0.0f, 0.0f, 0.0f, matProject[3][2] / (finalNDC.z - matProject[2][2]));
+	finalClip.xyz = finalNDC * finalClip.w;
+	hitPosVS = mul(finalClip, matProjectInverse).xyz;
+
+	return (currentMip < 0);
+}
+
+/**
+ * HiZ_TraceRay convenience overload (without progress t).
+ */
+bool HiZ_TraceRay(
+	int maxIterations,
+	float3 startPosVS,
+	float3 rayDirVS,
+	float maxTraceDist,
+	float3 traceConfig,
+	out float2 hitUV,
+	out float3 hitPosVS)
+{
+	float hitT = 0.0f;
+	return HiZ_TraceRay(maxIterations, startPosVS, rayDirVS, maxTraceDist, traceConfig, hitT, hitUV, hitPosVS);
+}
+
+/**
+ * HiZ_TraceRay convenience overload (UV only).
+ */
+bool HiZ_TraceRay(
+	int maxIterations,
+	float3 startPosVS,
+	float3 rayDirVS,
+	float maxTraceDist,
+	float3 traceConfig,
+	out float2 hitUV)
+{
+	float3 hitPosVS = 0.0f;
+	return HiZ_TraceRay(maxIterations, startPosVS, rayDirVS, maxTraceDist, traceConfig, hitUV, hitPosVS);
+}
+
+#endif // RAY_MMD_HIZ_TRAVERSAL_FXSUB

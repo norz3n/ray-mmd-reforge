@@ -114,7 +114,7 @@ static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceB
 #include "shader/ShadingMaterials.fxsub"
 
 #if SSR_QUALITY || GI_ENABLE || (CONTACT_SHADOW_QUALITY && SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE)
-#	include "shader/HiZ_SSR.fxsub"
+#	include "shader/HiZ/HiZ_Main.fxsub"
 #endif
 
 #if SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE
@@ -144,7 +144,7 @@ static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceB
 #endif
 
 #if SSR_QUALITY
-#	include "shader/PostProcessSSR.fxsub"
+#	include "shader/SSR/SSR_Main.fxsub"
 #endif
 
 #if GI_ENABLE
@@ -238,17 +238,17 @@ technique DeferredLighting<
 #if SSR_QUALITY || GI_ENABLE || (CONTACT_SHADOW_QUALITY && SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE)
 	// The G-buffer is complete after ScriptExternal.  Build the hierarchy here
 	// so deferred sun shadows and later screen-space passes use this frame.
-	"RenderColorTarget=ZBufferMipmap1;            Pass=ZBufferMipmap1;"
-	"RenderColorTarget=ZBufferMipmap2;            Pass=ZBufferMipmap2;"
-	"RenderColorTarget=ZBufferMipmap3;            Pass=ZBufferMipmap3;"
-	"RenderColorTarget=ZBufferMipmap4;            Pass=ZBufferMipmap4;"
-	"RenderColorTarget=ZBufferMipmap5;            Pass=ZBufferMipmap5;"
-	"RenderColorTarget=ZBufferMipmap6;            Pass=ZBufferMipmap6;"
-	"RenderColorTarget=ZBufferMipmap7;            Pass=ZBufferMipmap7;"
-	"RenderColorTarget=ZBufferMipmap8;            Pass=ZBufferMipmap8;"
-	"RenderColorTarget=ZBufferMipmap9;            Pass=ZBufferMipmap9;"
-	"RenderColorTarget=ZBufferMipmap10;           Pass=ZBufferMipmap10;"
-	"RenderColorTarget=ZBufferMipmap;             Pass=ZBufferCombine;"
+	"RenderColorTarget=ZBufferMipmap1;            Pass=HiZ_Mipmap1;"
+	"RenderColorTarget=ZBufferMipmap2;            Pass=HiZ_Mipmap2;"
+	"RenderColorTarget=ZBufferMipmap3;            Pass=HiZ_Mipmap3;"
+	"RenderColorTarget=ZBufferMipmap4;            Pass=HiZ_Mipmap4;"
+	"RenderColorTarget=ZBufferMipmap5;            Pass=HiZ_Mipmap5;"
+	"RenderColorTarget=ZBufferMipmap6;            Pass=HiZ_Mipmap6;"
+	"RenderColorTarget=ZBufferMipmap7;            Pass=HiZ_Mipmap7;"
+	"RenderColorTarget=ZBufferMipmap8;            Pass=HiZ_Mipmap8;"
+	"RenderColorTarget=ZBufferMipmap9;            Pass=HiZ_Mipmap9;"
+	"RenderColorTarget=ZBufferMipmap10;           Pass=HiZ_Mipmap10;"
+	"RenderColorTarget=ZBufferMipmap;             Pass=HiZ_CombineAtlas;"
 #endif
 
 #if SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE
@@ -314,18 +314,18 @@ technique DeferredLighting<
 #if SSR_QUALITY
 	"RenderColorTarget=SSRLightX1Map;"
 	"Clear=Color;"
-	"Pass=SSRConeTracing;"
+	"Pass=SSR_Trace;"
 
-	"RenderColorTarget=SSRLightX1MapTemp; Pass=SSRGaussionBlurX1;"
-	"RenderColorTarget=SSRLightX1Map;	  Pass=SSRGaussionBlurY1;"
-	"RenderColorTarget=SSRLightX2MapTemp; Pass=SSRGaussionBlurX2;"
-	"RenderColorTarget=SSRLightX2Map;	  Pass=SSRGaussionBlurY2;"
-	"RenderColorTarget=SSRLightX3MapTemp; Pass=SSRGaussionBlurX3;"
-	"RenderColorTarget=SSRLightX3Map;	  Pass=SSRGaussionBlurY3;"
-	"RenderColorTarget=SSRLightX4MapTemp; Pass=SSRGaussionBlurX4;"
-	"RenderColorTarget=SSRLightX4Map;	  Pass=SSRGaussionBlurY4;"
+	"RenderColorTarget=SSRLightX1MapTemp; Pass=SSR_BlurX1;"
+	"RenderColorTarget=SSRLightX1Map;	  Pass=SSR_BlurY1;"
+	"RenderColorTarget=SSRLightX2MapTemp; Pass=SSR_BlurX2;"
+	"RenderColorTarget=SSRLightX2Map;	  Pass=SSR_BlurY2;"
+	"RenderColorTarget=SSRLightX3MapTemp; Pass=SSR_BlurX3;"
+	"RenderColorTarget=SSRLightX3Map;	  Pass=SSR_BlurY3;"
+	"RenderColorTarget=SSRLightX4MapTemp; Pass=SSR_BlurX4;"
+	"RenderColorTarget=SSRLightX4Map;	  Pass=SSR_BlurY4;"
 
-	"RenderColorTarget=ShadingMap;		  Pass=SSRFinalCombine;"
+	"RenderColorTarget=ShadingMap;		  Pass=SSR_Resolve;"
 #endif
 
 #if BOKEH_MODE == 1
@@ -611,134 +611,134 @@ technique DeferredLighting<
 	}
 #endif
 #if SSR_QUALITY || GI_ENABLE || (CONTACT_SHADOW_QUALITY && SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE)
-	pass ZBufferMipmap1<string Script= "Draw=Buffer;";>{
+	pass HiZ_Mipmap1<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
-		PixelShader  = compile ps_3_0 ZBufferMipmap_1_PS(Gbuffer8Map);
+		PixelShader  = compile ps_3_0 HiZ_BuildMip1_PS(Gbuffer8Map);
 	}
-	pass ZBufferMipmap2<string Script= "Draw=Buffer;";>{
+	pass HiZ_Mipmap2<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
-		PixelShader  = compile ps_3_0 ZBufferMipmap_N_PS(ZBufferMipmap1Samp, kHZBMip2ViewportSize, kHZBMip1ViewportSize);
+		PixelShader  = compile ps_3_0 HiZ_BuildMipN_PS(ZBufferMipmap1Samp, kHiZMip2Size, kHiZMip1Size);
 	}
-	pass ZBufferMipmap3<string Script= "Draw=Buffer;";>{
+	pass HiZ_Mipmap3<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
-		PixelShader  = compile ps_3_0 ZBufferMipmap_N_PS(ZBufferMipmap2Samp, kHZBMip3ViewportSize, kHZBMip2ViewportSize);
+		PixelShader  = compile ps_3_0 HiZ_BuildMipN_PS(ZBufferMipmap2Samp, kHiZMip3Size, kHiZMip2Size);
 	}
-	pass ZBufferMipmap4<string Script= "Draw=Buffer;";>{
+	pass HiZ_Mipmap4<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
-		PixelShader  = compile ps_3_0 ZBufferMipmap_N_PS(ZBufferMipmap3Samp, kHZBMip4ViewportSize, kHZBMip3ViewportSize);
+		PixelShader  = compile ps_3_0 HiZ_BuildMipN_PS(ZBufferMipmap3Samp, kHiZMip4Size, kHiZMip3Size);
 	}
-	pass ZBufferMipmap5<string Script= "Draw=Buffer;";>{
+	pass HiZ_Mipmap5<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
-		PixelShader  = compile ps_3_0 ZBufferMipmap_N_PS(ZBufferMipmap4Samp, kHZBMip5ViewportSize, kHZBMip4ViewportSize);
+		PixelShader  = compile ps_3_0 HiZ_BuildMipN_PS(ZBufferMipmap4Samp, kHiZMip5Size, kHiZMip4Size);
 	}
-	pass ZBufferMipmap6<string Script= "Draw=Buffer;";>{
+	pass HiZ_Mipmap6<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
-		PixelShader  = compile ps_3_0 ZBufferMipmap_N_PS(ZBufferMipmap5Samp, kHZBMip6ViewportSize, kHZBMip5ViewportSize);
+		PixelShader  = compile ps_3_0 HiZ_BuildMipN_PS(ZBufferMipmap5Samp, kHiZMip6Size, kHiZMip5Size);
 	}
-	pass ZBufferMipmap7<string Script= "Draw=Buffer;";>{
+	pass HiZ_Mipmap7<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
-		PixelShader  = compile ps_3_0 ZBufferMipmap_N_PS(ZBufferMipmap6Samp, kHZBMip7ViewportSize, kHZBMip6ViewportSize);
+		PixelShader  = compile ps_3_0 HiZ_BuildMipN_PS(ZBufferMipmap6Samp, kHiZMip7Size, kHiZMip6Size);
 	}
-	pass ZBufferMipmap8<string Script= "Draw=Buffer;";>{
+	pass HiZ_Mipmap8<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
-		PixelShader  = compile ps_3_0 ZBufferMipmap_N_PS(ZBufferMipmap7Samp, kHZBMip8ViewportSize, kHZBMip7ViewportSize);
+		PixelShader  = compile ps_3_0 HiZ_BuildMipN_PS(ZBufferMipmap7Samp, kHiZMip8Size, kHiZMip7Size);
 	}
-	pass ZBufferMipmap9<string Script= "Draw=Buffer;";>{
+	pass HiZ_Mipmap9<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
-		PixelShader  = compile ps_3_0 ZBufferMipmap_N_PS(ZBufferMipmap8Samp, kHZBMip9ViewportSize, kHZBMip8ViewportSize);
+		PixelShader  = compile ps_3_0 HiZ_BuildMipN_PS(ZBufferMipmap8Samp, kHiZMip9Size, kHiZMip8Size);
 	}
-	pass ZBufferMipmap10<string Script= "Draw=Buffer;";>{
+	pass HiZ_Mipmap10<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
-		PixelShader  = compile ps_3_0 ZBufferMipmap_N_PS(ZBufferMipmap9Samp, kHZBMip10ViewportSize, kHZBMip9ViewportSize);
+		PixelShader  = compile ps_3_0 HiZ_BuildMipN_PS(ZBufferMipmap9Samp, kHiZMip10Size, kHiZMip9Size);
 	}
-	pass ZBufferCombine<string Script= "Draw=Buffer;";>{
+	pass HiZ_CombineAtlas<string Script= "Draw=Buffer;";>{
  		AlphaBlendEnable = false; AlphaTestEnable = false;
  		ZEnable = false; ZWriteEnable = false;
  		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
- 		PixelShader  = compile ps_3_0 ZBufferMipmapCombinePS();
+ 		PixelShader  = compile ps_3_0 HiZ_CombineAtlas_PS();
  	}
 #endif
 #if SSR_QUALITY
-	pass SSRConeTracing<string Script= "Draw=Buffer;";>{
+	pass SSR_Trace<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSRConeTracingPS();
+		PixelShader  = compile ps_3_0 SSR_TracePS();
 	}
-	pass SSRGaussionBlurX1<string Script= "Draw=Buffer;";>{
+	pass SSR_BlurX1<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(ViewportOffset2);
-		PixelShader  = compile ps_3_0 SSRGaussionBlurPS(SSRLightX1Samp, SSROffsetX1);
+		PixelShader  = compile ps_3_0 SSR_FilterBlurPS(SSRLightX1Samp, SSRBlurStepX1);
 	}
-	pass SSRGaussionBlurY1<string Script= "Draw=Buffer;";>{
+	pass SSR_BlurY1<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(ViewportOffset2);
-		PixelShader  = compile ps_3_0 SSRGaussionBlurPS(SSRLightX1SampTemp, SSROffsetY1);
+		PixelShader  = compile ps_3_0 SSR_FilterBlurPS(SSRLightX1SampTemp, SSRBlurStepY1);
 	}
-	pass SSRGaussionBlurX2<string Script= "Draw=Buffer;";>{
+	pass SSR_BlurX2<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(ViewportOffset2);
-		PixelShader  = compile ps_3_0 SSRGaussionBlurPS(SSRLightX1Samp, SSROffsetX2);
+		PixelShader  = compile ps_3_0 SSR_FilterBlurPS(SSRLightX1Samp, SSRBlurStepX2);
 	}
-	pass SSRGaussionBlurY2<string Script= "Draw=Buffer;";>{
+	pass SSR_BlurY2<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(ViewportOffset2.x * 2);
-		PixelShader  = compile ps_3_0 SSRGaussionBlurPS(SSRLightX2SampTemp, SSROffsetY2);
+		PixelShader  = compile ps_3_0 SSR_FilterBlurPS(SSRLightX2SampTemp, SSRBlurStepY2);
 	}
-	pass SSRGaussionBlurX3<string Script= "Draw=Buffer;";>{
+	pass SSR_BlurX3<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(ViewportOffset2.x * 2);
-		PixelShader  = compile ps_3_0 SSRGaussionBlurPS(SSRLightX2Samp, SSROffsetX3);
+		PixelShader  = compile ps_3_0 SSR_FilterBlurPS(SSRLightX2Samp, SSRBlurStepX3);
 	}
-	pass SSRGaussionBlurY3<string Script= "Draw=Buffer;";>{
+	pass SSR_BlurY3<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(ViewportOffset2.x * 4);
-		PixelShader  = compile ps_3_0 SSRGaussionBlurPS(SSRLightX3SampTemp, SSROffsetY3);
+		PixelShader  = compile ps_3_0 SSR_FilterBlurPS(SSRLightX3SampTemp, SSRBlurStepY3);
 	}
-	pass SSRGaussionBlurX4<string Script= "Draw=Buffer;";>{
+	pass SSR_BlurX4<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(ViewportOffset2.x * 4);
-		PixelShader  = compile ps_3_0 SSRGaussionBlurPS(SSRLightX3Samp, SSROffsetX4);
+		PixelShader  = compile ps_3_0 SSR_FilterBlurPS(SSRLightX3Samp, SSRBlurStepX4);
 	}
-	pass SSRGaussionBlurY4<string Script= "Draw=Buffer;";>{
+	pass SSR_BlurY4<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(ViewportOffset2.x * 8);
-		PixelShader  = compile ps_3_0 SSRGaussionBlurPS(SSRLightX4SampTemp, SSROffsetY4);
+		PixelShader  = compile ps_3_0 SSR_FilterBlurPS(SSRLightX4SampTemp, SSRBlurStepY4);
 	}
-	pass SSRFinalCombine<string Script= "Draw=Buffer;";>{
+	pass SSR_Resolve<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = true; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		SrcBlend = ONE; DestBlend = INVSRCALPHA;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSRFinalCombinePS();
+		PixelShader  = compile ps_3_0 SSR_ResolvePS();
 	}
 #endif
 #if GI_ENABLE
