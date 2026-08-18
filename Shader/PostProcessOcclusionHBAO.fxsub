@@ -43,6 +43,15 @@ float linearizeDepth(float2 uv)
 	return tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).r;
 }
 
+float linearizeDepthLod(float2 uv, int lod)
+{
+#if defined(RAY_MMD_HIZ_TRAVERSAL_FXSUB)
+	return HiZ_SampleDepthAtMip(uv, lod);
+#else
+	return tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).r;
+#endif
+}
+
 float3 GetNormal(float2 uv)
 {
 	float4 MRT6 = tex2Dlod(Gbuffer6Map, float4(uv, 0, 0));
@@ -99,97 +108,44 @@ float4 HorizonOcclusion(
 	float4 sampleOcclusion = 0.0f;
 	float maxHorizonSin = 0.0f;
 
-	for (int j = 0; j < HBAO_SAMPLER_COUNT; j += 4)
+	[unroll]
+	for (int s = 0; s < HBAO_SAMPLER_COUNT; ++s)
 	{
-		float2 samplePoint[4];
-		samplePoint[0] = sampleDirection; sampleDirection += sampleStepDelta;
-		samplePoint[1] = sampleDirection; sampleDirection += sampleStepDelta;
-		samplePoint[2] = sampleDirection; sampleDirection += sampleStepDelta;
-		samplePoint[3] = sampleDirection; sampleDirection += sampleStepDelta;
+		float2 sampleOffset = mad(sampleDirection, sampleTexelSize, uv);
+		sampleDirection += sampleStepDelta;
 
-		float2 sampleOffset[4];
-		sampleOffset[0] = mad(samplePoint[0], sampleTexelSize, uv);
-		sampleOffset[1] = mad(samplePoint[1], sampleTexelSize, uv);
-		sampleOffset[2] = mad(samplePoint[2], sampleTexelSize, uv);
-		sampleOffset[3] = mad(samplePoint[3], sampleTexelSize, uv);
+		float depth;
+	#if defined(RAY_MMD_HIZ_TRAVERSAL_FXSUB)
+		if (s < 4)
+			depth = tex2Dlod(Gbuffer8Map, float4(sampleOffset + ViewportOffset, 0, 0)).r;
+		else if (s < 8)
+			depth = tex2Dlod(ZBufferMipmap1Samp, float4(sampleOffset + ViewportOffset, 0, 0)).r;
+		else
+			depth = tex2Dlod(ZBufferMipmap2Samp, float4(sampleOffset + ViewportOffset, 0, 0)).r;
+	#else
+		depth = tex2Dlod(Gbuffer8Map, float4(sampleOffset + ViewportOffset, 0, 0)).r;
+	#endif
 
-		float3 samplePosition[4];
-		samplePosition[0] = GetViewPosition(projConstant, sampleOffset[0], linearizeDepth(sampleOffset[0] + ViewportOffset));
-		samplePosition[1] = GetViewPosition(projConstant, sampleOffset[1], linearizeDepth(sampleOffset[1] + ViewportOffset));
-		samplePosition[2] = GetViewPosition(projConstant, sampleOffset[2], linearizeDepth(sampleOffset[2] + ViewportOffset));
-		samplePosition[3] = GetViewPosition(projConstant, sampleOffset[3], linearizeDepth(sampleOffset[3] + ViewportOffset));
+		float3 samplePosition = GetViewPosition(projConstant, sampleOffset, depth);
+		float3 sampleDir = samplePosition - viewPosition;
+		float sampleLength2 = dot(sampleDir, sampleDir);
+		float sampleLengthInv = rsqrt(sampleLength2);
+		float sampleLength = sampleLength2 * sampleLengthInv;
+		sampleDir *= sampleLengthInv;
 
-		float3 sampleDir[4];
-		sampleDir[0] = samplePosition[0] - viewPosition;
-		sampleDir[1] = samplePosition[1] - viewPosition;
-		sampleDir[2] = samplePosition[2] - viewPosition;
-		sampleDir[3] = samplePosition[3] - viewPosition;
+		float sampleAngle = dot(sampleDir, viewNormal);
+		float sampleFalloff = Falloff(sampleLength2, maxRadius);
+		float depthDelta = abs(samplePosition.z - viewPosition.z);
+		float depthWeight = AODepthContinuityWeight(depthDelta, viewPosition.z, sampleLength);
+		float rangeWeight = AORangePropagationWeight(sampleLength, maxRadius);
+		float nearBoost = AONearDistanceBoost(sampleLength, maxRadius);
 
-		float4 sampleLength2 = float4(
-			dot(sampleDir[0], sampleDir[0]),
-			dot(sampleDir[1], sampleDir[1]),
-			dot(sampleDir[2], sampleDir[2]),
-			dot(sampleDir[3], sampleDir[3]));
+		float horizonMask = (sampleAngle > maxHorizonSin) ? 1.0f : 0.0f;
+		maxHorizonSin = max(maxHorizonSin, sampleAngle);
 
-		float4 sampleLengthInv = rsqrt(sampleLength2);
-		float4 sampleLength = sampleLength2 * sampleLengthInv;
-
-		sampleDir[0] *= sampleLengthInv[0];
-		sampleDir[1] *= sampleLengthInv[1];
-		sampleDir[2] *= sampleLengthInv[2];
-		sampleDir[3] *= sampleLengthInv[3];
-
-		float4 sampleAngle = float4(
-			dot(sampleDir[0], viewNormal),
-			dot(sampleDir[1], viewNormal),
-			dot(sampleDir[2], viewNormal),
-			dot(sampleDir[3], viewNormal));
-
-		float4 sampleFalloff = float4(
-			Falloff(sampleLength2[0], maxRadius),
-			Falloff(sampleLength2[1], maxRadius),
-			Falloff(sampleLength2[2], maxRadius),
-			Falloff(sampleLength2[3], maxRadius)
-		);
-
-		float4 depthWeight = float4(
-			AODepthContinuityWeight(abs(samplePosition[0].z - viewPosition.z), viewPosition.z, sampleLength[0]),
-			AODepthContinuityWeight(abs(samplePosition[1].z - viewPosition.z), viewPosition.z, sampleLength[1]),
-			AODepthContinuityWeight(abs(samplePosition[2].z - viewPosition.z), viewPosition.z, sampleLength[2]),
-			AODepthContinuityWeight(abs(samplePosition[3].z - viewPosition.z), viewPosition.z, sampleLength[3])
-		);
-
-		float4 rangeWeight = float4(
-			AORangePropagationWeight(sampleLength[0], maxRadius),
-			AORangePropagationWeight(sampleLength[1], maxRadius),
-			AORangePropagationWeight(sampleLength[2], maxRadius),
-			AORangePropagationWeight(sampleLength[3], maxRadius)
-		);
-
-		float4 nearBoost = float4(
-			AONearDistanceBoost(sampleLength[0], maxRadius),
-			AONearDistanceBoost(sampleLength[1], maxRadius),
-			AONearDistanceBoost(sampleLength[2], maxRadius),
-			AONearDistanceBoost(sampleLength[3], maxRadius)
-		);
-
-		// Hybrid Horizon Elevation clipping: only consider samples that form a higher angle than current horizon
-		float4 horizonMask = float4(
-			sampleAngle.x > maxHorizonSin ? 1.0 : 0.0,
-			sampleAngle.y > maxHorizonSin ? 1.0 : 0.0,
-			sampleAngle.z > maxHorizonSin ? 1.0 : 0.0,
-			sampleAngle.w > maxHorizonSin ? 1.0 : 0.0
-		);
-
-		maxHorizonSin = max(maxHorizonSin, max(max(sampleAngle.x, sampleAngle.y), max(sampleAngle.z, sampleAngle.w)));
-
-		float4 sh = saturate(sampleAngle - bias) * saturate(sampleFalloff) * depthWeight * rangeWeight * nearBoost * horizonMask;
-
-		sampleOcclusion.w += sum(sh);
-		sampleOcclusion.xyz += sh.x * sampleDir[0];
-		sampleOcclusion.xyz += sh.y * sampleDir[1];
-		sampleOcclusion.xyz += sh.z * sampleDir[2];
-		sampleOcclusion.xyz += sh.w * sampleDir[3];
+		float sh = saturate(sampleAngle - bias) * saturate(sampleFalloff) * depthWeight * rangeWeight * nearBoost * horizonMask;
+		sampleOcclusion.w += sh;
+		sampleOcclusion.xyz += sh * sampleDir;
 	}
 
 	return sampleOcclusion;

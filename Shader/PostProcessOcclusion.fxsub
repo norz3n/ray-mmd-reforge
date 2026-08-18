@@ -27,6 +27,20 @@ float linearizeDepth(float2 uv)
 	return tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).r;
 }
 
+float linearizeDepthLod(float2 uv, int lod)
+{
+#if defined(RAY_MMD_HIZ_TRAVERSAL_FXSUB)
+	if (lod <= 0)
+		return tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).r;
+	else if (lod == 1)
+		return tex2Dlod(ZBufferMipmap1Samp, float4(uv, 0, 0)).r;
+	else
+		return tex2Dlod(ZBufferMipmap2Samp, float4(uv, 0, 0)).r;
+#else
+	return tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).r;
+#endif
+}
+
 float3 GetNormal(float2 uv)
 {
 	float4 MRT6 = tex2Dlod(Gbuffer6Map, float4(uv, 0, 0));
@@ -108,6 +122,8 @@ float4 ScreenSpaceDirOccLowPS(
 	SSDO_UNROLL
 	for (int j = 0; j < SSDO_LOW_SAMPLER_COUNT; j+=4)
 	{
+		int mip = min(j / 4, 3);
+
 		float2 sampleOffset[4];
 		sampleOffset[0] = coord.xy + sampleRotate[j + 0];
 		sampleOffset[1] = coord.xy + sampleRotate[j + 1];
@@ -115,10 +131,10 @@ float4 ScreenSpaceDirOccLowPS(
 		sampleOffset[3] = coord.xy + sampleRotate[j + 3];
 
 		float4 sampleDepths;
-		sampleDepths[0] = linearizeDepth(sampleOffset[0]);
-		sampleDepths[1] = linearizeDepth(sampleOffset[1]);
-		sampleDepths[2] = linearizeDepth(sampleOffset[2]);
-		sampleDepths[3] = linearizeDepth(sampleOffset[3]);
+		sampleDepths[0] = linearizeDepthLod(sampleOffset[0], mip);
+		sampleDepths[1] = linearizeDepthLod(sampleOffset[1], mip);
+		sampleDepths[2] = linearizeDepthLod(sampleOffset[2], mip);
+		sampleDepths[3] = linearizeDepthLod(sampleOffset[3], mip);
 
 		float3 samplePosition[4];
 		samplePosition[0] = float3(sampleOffset[0] * SSDOParams1.xy + SSDOParams1.zw, 1) * sampleDepths[0];
@@ -199,6 +215,8 @@ float4 ScreenSpaceDirOccMediumPS(
 	SSDO_UNROLL
 	for (int j = 0; j < SSDO_SAMPLER_COUNT; j+=4)
 	{
+		int mip = min(j / 4, 3);
+
 		float2 sampleOffset[4];
 		sampleOffset[0] = coord.xy + sampleRotate[j + 0];
 		sampleOffset[1] = coord.xy + sampleRotate[j + 1];
@@ -206,10 +224,10 @@ float4 ScreenSpaceDirOccMediumPS(
 		sampleOffset[3] = coord.xy + sampleRotate[j + 3];
 
 		float4 sampleDepths;
-		sampleDepths[0] = linearizeDepth(sampleOffset[0]);
-		sampleDepths[1] = linearizeDepth(sampleOffset[1]);
-		sampleDepths[2] = linearizeDepth(sampleOffset[2]);
-		sampleDepths[3] = linearizeDepth(sampleOffset[3]);
+		sampleDepths[0] = linearizeDepthLod(sampleOffset[0], mip);
+		sampleDepths[1] = linearizeDepthLod(sampleOffset[1], mip);
+		sampleDepths[2] = linearizeDepthLod(sampleOffset[2], mip);
+		sampleDepths[3] = linearizeDepthLod(sampleOffset[3], mip);
 
 		float3 samplePosition[4];
 		samplePosition[0] = float3(sampleOffset[0] * SSDOParams1.xy + SSDOParams1.zw, 1) * sampleDepths[0];
