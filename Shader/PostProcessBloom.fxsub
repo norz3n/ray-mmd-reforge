@@ -129,9 +129,42 @@ float4 HDRDownsample4XPS(
 	return color * 0.25;
 }
 
-float4 HDRDownsamplePS(in float2 coord : TEXCOORD0, uniform sampler source) : COLOR
+float4 HDRDownsamplePS(in float2 coord : TEXCOORD0, uniform sampler source, uniform float2 step) : COLOR
 {
-	return tex2Dlod(source, float4(coord, 0, 0));
+	float2 d = step;
+
+	// Center 4 samples (bilinear box around center)
+	float3 j = tex2Dlod(source, float4(coord - d * 0.5f, 0, 0)).rgb;
+	float3 k = tex2Dlod(source, float4(coord + float2(d.x, -d.y) * 0.5f, 0, 0)).rgb;
+	float3 l = tex2Dlod(source, float4(coord + float2(-d.x, d.y) * 0.5f, 0, 0)).rgb;
+	float3 m = tex2Dlod(source, float4(coord + d * 0.5f, 0, 0)).rgb;
+
+	// Outer 8 corner & edge samples
+	float3 a = tex2Dlod(source, float4(coord - d, 0, 0)).rgb;
+	float3 b = tex2Dlod(source, float4(coord + float2(0.0f, -d.y), 0, 0)).rgb;
+	float3 c = tex2Dlod(source, float4(coord + float2(d.x, -d.y), 0, 0)).rgb;
+	float3 e = tex2Dlod(source, float4(coord + float2(-d.x, 0.0f), 0, 0)).rgb;
+	float3 f = tex2Dlod(source, float4(coord + float2(d.x, 0.0f), 0, 0)).rgb;
+	float3 g = tex2Dlod(source, float4(coord + float2(-d.x, d.y), 0, 0)).rgb;
+	float3 h = tex2Dlod(source, float4(coord + float2(0.0f, d.y), 0, 0)).rgb;
+	float3 i = tex2Dlod(source, float4(coord + d, 0, 0)).rgb;
+
+	// 5 overlapping 2x2 bilinear groups
+	float3 group0 = (j + k + l + m) * 0.25f;
+	float3 group1 = (a + b + e + j) * 0.25f;
+	float3 group2 = (b + c + k + f) * 0.25f;
+	float3 group3 = (e + l + g + h) * 0.25f;
+	float3 group4 = (m + f + h + i) * 0.25f;
+
+	// Karis firefly suppression weights based on partial luma
+	float w0 = 0.5f / (1.0f + luminance(group0));
+	float w1 = 0.125f / (1.0f + luminance(group1));
+	float w2 = 0.125f / (1.0f + luminance(group2));
+	float w3 = 0.125f / (1.0f + luminance(group3));
+	float w4 = 0.125f / (1.0f + luminance(group4));
+
+	float3 result = (group0 * w0 + group1 * w1 + group2 * w2 + group3 * w3 + group4 * w4) / max(w0 + w1 + w2 + w3 + w4, 1e-5f);
+	return float4(result, 0.0f);
 }
 
 void GlareDetectionVS(

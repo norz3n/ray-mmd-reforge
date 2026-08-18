@@ -926,7 +926,7 @@ technique DeferredLighting<
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 HDRDownsampleVS(BloomOffset1);
-		PixelShader  = compile ps_3_0 HDRDownsamplePS(BloomSamp1st);
+		PixelShader  = compile ps_3_0 HDRDownsamplePS(BloomSamp1st, BloomOffset1);
 	}
 	pass BloomBlurX2<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
@@ -944,7 +944,7 @@ technique DeferredLighting<
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 HDRDownsampleVS(BloomOffset2);
-		PixelShader  = compile ps_3_0 HDRDownsamplePS(BloomSamp2nd);
+		PixelShader  = compile ps_3_0 HDRDownsamplePS(BloomSamp2nd, BloomOffset2);
 	}
 	pass BloomBlurX3<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
@@ -962,7 +962,7 @@ technique DeferredLighting<
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 HDRDownsampleVS(BloomOffset3);
-		PixelShader  = compile ps_3_0 HDRDownsamplePS(BloomSamp3rd);
+		PixelShader  = compile ps_3_0 HDRDownsamplePS(BloomSamp3rd, BloomOffset3);
 	}
 	pass BloomBlurX4<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
@@ -980,7 +980,7 @@ technique DeferredLighting<
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 HDRDownsampleVS(BloomOffset4);
-		PixelShader  = compile ps_3_0 HDRDownsamplePS(BloomSamp4th);
+		PixelShader  = compile ps_3_0 HDRDownsamplePS(BloomSamp4th, BloomOffset4);
 	}
 	pass BloomBlurX5<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
