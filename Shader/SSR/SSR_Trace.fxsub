@@ -48,9 +48,9 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	float3 positionVS = viewdir * (surfaceMat.linearDepth / viewdir.z);
 	float3 reflectRayVS = normalize(reflect(-viewVector, surfaceMat.normal));
 
-	// Ray must travel into camera hemisphere
+	// Smooth angle confidence for rays pointing towards vs away from camera
 	float facingAngle = dot(reflectRayVS, -viewVector);
-	clip(facingAngle - 1e-5f);
+	float angleFade = smoothstep(-0.15f, 0.25f, facingAngle);
 
 	float NdotV = saturate(dot(viewVector, surfaceMat.normal));
 
@@ -73,7 +73,7 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	float distanceFalloff = 1.0f - saturate(traceHit.hitProgress * traceHit.hitProgress);
 
 	// Surface normal facing confidence combined with thickness penetration quality
-	float confidence = edgeVignette * distanceFalloff * saturate(facingAngle) * traceHit.confidence;
+	float confidence = edgeVignette * distanceFalloff * angleFade * traceHit.confidence;
 
 	// SSR visibility mask (user exclusions / controller toggle)
 	float ssrMask = tex2Dlod(SSRMapSamp, float4(coord.xy, 0.0f, 0.0f)).a;

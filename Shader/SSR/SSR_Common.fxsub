@@ -41,7 +41,7 @@ sampler SSRLightX3SampTemp = sampler_state { texture = <SSRLightX3MapTemp>; MinF
 sampler SSRLightX4SampTemp = sampler_state { texture = <SSRLightX4MapTemp>; MinFilter = LINEAR; MagFilter = LINEAR; AddressU = CLAMP; AddressV = CLAMP; MipFilter = NONE; };
 
 // Roughness blur filter step offsets
-static const float2 SSRBlurKernelScale = mSSRBlur * float2(ViewportAspect, 1.0f);
+static const float2 SSRBlurKernelScale = max(mSSRBlur, 1e-4f) * float2(ViewportAspect, 1.0f);
 
 static const float2 SSRBlurStepX1 = float2(1.0f / SSRBlurKernelScale.x, 0.0f);
 static const float2 SSRBlurStepX2 = float2(2.0f / SSRBlurKernelScale.x, 0.0f);

@@ -107,11 +107,32 @@ HiZTraceResult HiZ_TraceRayDetailed(
 	result.hitMip = 0;
 	result.confidence = 0.0f;
 
-	// Project view-space ray endpoints into normalized screen space [0, 1]
-	float4 startClip = mul(float4(startPosVS + rayDirVS * normalBias, 1.0f), matProject);
-	float3 startSS = (startClip.xyz / startClip.w) * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
+	// Clamp ray travel distance to prevent ray from crossing behind camera near plane (Z <= zNear)
+	static const float kNearPlaneZ = 0.05f;
+	if (startPosVS.z < kNearPlaneZ)
+		return result;
 
-	float4 endClip = mul(float4(startPosVS + rayDirVS * maxTraceDist, 1.0f), matProject);
+	float validMaxDist = maxTraceDist;
+	if (rayDirVS.z < -1e-5f)
+	{
+		float distToNear = (startPosVS.z - kNearPlaneZ) / -rayDirVS.z;
+		validMaxDist = min(validMaxDist, max(0.0f, distToNear));
+	}
+
+	if (validMaxDist <= normalBias)
+		return result;
+
+	float3 startPointVS = startPosVS + rayDirVS * normalBias;
+	float3 endPointVS = startPosVS + rayDirVS * validMaxDist;
+
+	// Project view-space ray endpoints into normalized screen space [0, 1]
+	float4 startClip = mul(float4(startPointVS, 1.0f), matProject);
+	float4 endClip = mul(float4(endPointVS, 1.0f), matProject);
+
+	if (startClip.w <= 1e-4f || endClip.w <= 1e-4f)
+		return result;
+
+	float3 startSS = (startClip.xyz / startClip.w) * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
 	float3 endSS = (endClip.xyz / endClip.w) * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
 
 	float3 rayDelta = endSS - startSS;
@@ -136,7 +157,11 @@ HiZTraceResult HiZ_TraceRayDetailed(
 
 		// Calculate parameter t at which ray exits the 2D cell
 		float tExit = HiZ_ComputeCellExitT(startSS, rayDelta, cellCoord, mipDim, stepSign);
-		float tNext = tExit + 1e-4f;
+		
+		// Adaptive step to cross boundary into adjacent cell
+		float2 invMipDim = 1.0f / mipDim;
+		float cellEps = 0.5f * min(invMipDim.x / max(abs(rayDelta.x), 1e-5f), invMipDim.y / max(abs(rayDelta.y), 1e-5f));
+		float tNext = tExit + max(cellEps, 1e-5f);
 
 		// Fetch conservative minimum linear depth across current cell
 		float minSceneLinearZ = max(HiZ_SampleDepthAtMip(currentSS.xy, currentMip), 1e-5f);
@@ -271,7 +296,9 @@ HiZTraceResult HiZ_TraceRayDetailed(
 	{
 		float3 hitSS = startSS + result.hitProgress * rayDelta;
 		float3 hitNDC = (hitSS - float3(0.5f, 0.5f, 0.0f)) * float3(2.0f, -2.0f, 1.0f);
-		float4 hitClip = float4(0.0f, 0.0f, 0.0f, matProject[3][2] / (hitNDC.z - matProject[2][2]));
+		float denom = hitNDC.z - matProject[2][2];
+		denom = abs(denom) < 1e-7f ? sign(denom) * 1e-7f : denom;
+		float4 hitClip = float4(0.0f, 0.0f, 0.0f, matProject[3][2] / denom);
 		hitClip.xyz = hitNDC * hitClip.w;
 		result.hitPosVS = mul(hitClip, matProjectInverse).xyz;
 	}
