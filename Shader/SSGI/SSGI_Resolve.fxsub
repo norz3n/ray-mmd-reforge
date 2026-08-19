@@ -45,8 +45,8 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 	[branch]
 	if (isSkin)
 	{
-		// High-headroom soft-shoulder compression: allows strong indirect glow while smoothly rounding extreme spikes
-		rawGi = (rawGi / (1.0f + rawGi * 0.04f)) * (mat.albedo * 1.15f);
+		// Dermal absorption & soft photometric compression: realistic light transport without self-illumination
+		rawGi = (rawGi / (1.0f + rawGi * 0.14f)) * (mat.albedo * 0.80f);
 	}
 	else if (mat.lightModel == SHADINGMODELID_GLASS)
 	{
@@ -71,7 +71,7 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 	}
 
 #if GI_ENABLE >= 2
-	float3 multiBounce = isSkin ? 1.45f : (1.0f + (mat.albedo * 1.85f) / max(1.0f - mat.albedo * 0.6f, 0.1f));
+	float3 multiBounce = isSkin ? 0.95f : (1.0f + (mat.albedo * 1.85f) / max(1.0f - mat.albedo * 0.6f, 0.1f));
 	rawGi *= multiBounce;
 #endif
 
