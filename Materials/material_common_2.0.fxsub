@@ -1551,6 +1551,62 @@ float GetLightMode(MaterialParam material)
 #endif
 }
 
+#ifndef WIND_ENABLE
+#	define WIND_ENABLE 0
+#endif
+
+#ifndef WIND_TYPE
+#	define WIND_TYPE 0
+#endif
+
+#if WIND_ENABLE
+float3 ComputeVegetationWindOffset(float3 localPos, float3 normal, float2 uv)
+{
+	float3 worldPos = mul(float4(localPos, 1.0f), matWorld).xyz;
+	float3 windDir = normalize(windDirection);
+	float t = time * windSpeed;
+
+	// Spatial phase shift along wind travel
+	float spatialPhase = dot(worldPos.xz, windDir.xz) * windFrequency;
+
+#if WIND_TYPE == 1
+	// Type 1: Grass / Ground vegetation (Anchored at base Y, quadratic deflection towards top)
+	float heightMask = saturate(localPos.y * 0.25f + 0.1f);
+	float mainGust = sin(t + spatialPhase) * cos(t * 0.73f + spatialPhase * 0.5f);
+	float microGust = sin(t * 2.8f + dot(worldPos, float3(1.7, 0.5, 2.1))) * windTurbulence;
+	float bend = (mainGust + microGust) * (heightMask * heightMask) * windStrength;
+	return windDir * bend;
+
+#elif WIND_TYPE == 2
+	// Type 2: Hanging Vines & Ivy (Pendulum swing, anchored at top)
+	float lengthMask = saturate(1.0f - uv.y);
+	float pendulum = sin(t * 1.1f + spatialPhase) + sin(t * 2.3f + worldPos.y * 0.8f) * 0.35f;
+	float flutter = sin(t * 4.5f + (uv.x + uv.y) * 16.0f) * (windTurbulence * 0.25f);
+	float displacement = (pendulum + flutter) * lengthMask * windStrength;
+	return (windDir * 0.85f + float3(0.0f, -abs(pendulum) * 0.15f, 0.0f)) * displacement;
+
+#elif WIND_TYPE == 3
+	// Type 3: Palm & Broad Fronds (Undulating flex + edge flap)
+	float flexMask = saturate(uv.x + uv.y * 0.5f);
+	float wave = sin(t * 1.4f + spatialPhase + worldPos.y * 0.5f);
+	float edgeFlap = cos(t * 3.8f + (uv.x * 24.0f)) * windTurbulence;
+	float displacement = (wave + edgeFlap) * flexMask * windStrength;
+	return (windDir + normal * (edgeFlap * 0.5f)) * displacement;
+
+#else
+	// Type 0: Tree Foliage, Bushes, Canopy Leaves (Multi-octave sway + UV leaf tremble)
+	float branchWave = sin(t + spatialPhase) + 0.5f * sin(t * 2.1f + worldPos.y * 0.35f);
+	float leafFlutter = sin(t * 4.2f + (uv.x * 37.0f + uv.y * 53.0f)) * windTurbulence;
+	float displacement = (branchWave * 0.75f + leafFlutter) * windStrength;
+	
+	// Add cross-wind swirl for organic motion
+	float3 crossWind = cross(windDir, float3(0.0f, 1.0f, 0.0f));
+	float swirl = cos(t * 1.7f + spatialPhase) * (windTurbulence * 0.35f);
+	return (windDir * displacement) + (crossWind * (swirl * windStrength));
+#endif
+}
+#endif
+
 void MaterialVS(
 	in float4 Position : POSITION, 
 	in float3 Normal : NORMAL, 
@@ -1566,13 +1622,18 @@ void MaterialVS(
 	out float4 oWorldPos  : TEXCOORD3,
 	out float4 oPosition  : POSITION)
 {
+	float4 pos = Position;
+#if WIND_ENABLE
+	float3 windOffset = ComputeVegetationWindOffset(pos.xyz, Normal, Texcoord1);
+	pos.xyz += mul(float4(windOffset, 0.0f), matWorldInverse).xyz;
+#endif
 	oNormal = Normal;
 	oTexcoord1 = Texcoord1;
 #if OCCLUSION_MAP_TYPE == 2 || OCCLUSION_MAP_TYPE == 3
 	oTexcoord2 = Texcoord2;
 #endif
-	oPosition = mul(Position, matWorldViewProject);
-	oWorldPos = float4(Position.xyz, oPosition.w);
+	oPosition = mul(pos, matWorldViewProject);
+	oWorldPos = float4(pos.xyz, oPosition.w);
 }
 
 GbufferParam MaterialPS(
