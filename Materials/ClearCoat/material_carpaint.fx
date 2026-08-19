@@ -120,6 +120,9 @@ const float customAMapLoopNum = 1.0;
 #define CUSTOM_B_MAP_APPLY_SCALE 0
 #define CUSTOM_B_MAP_FILE "custom.png"
 
+// Thin-film interference & pearl sheen:
+// customB.x = Iridescence strength (0.0 = standard clearcoat, 1.0 = full iridescent pearl)
+// customB.y = Optical film thickness (0.1 to 1.0 -> 80nm to 800nm, default 0.48 for 380nm rainbow shift)
 const float3 customB = 0.0;
 const float2 customBMapLoopNum = 1.0;
 

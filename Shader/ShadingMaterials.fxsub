@@ -46,11 +46,15 @@ void ShadingImageBasedLighting(sampler source, MaterialParam material, float4 sc
 	DecodeYcbcr(source, coord, screenPosition, ViewportOffset2, diffuse, specular);
 
 #if SSDO_QUALITY
-	float ssao = tex2Dlod(SSDOMapSamp, float4(coord, 0, 0)).w;
-	ssao = (material.lightModel == SHADINGMODELID_GLASS) ? 1.0 : ssao;
+	float4 ssdoData = tex2Dlod(SSDOMapSamp, float4(coord, 0, 0));
+	float ssao = (material.lightModel == SHADINGMODELID_GLASS) ? 1.0f : ssdoData.w;
 	ssao = min(ssao, material.visibility);
 	diffuse *= ssao;
-	specular *= ComputeSpecularOcclusion(abs(dot(material.normal, V)) + 1e-5, ssao, material.smoothness);
+
+	float3 bentNormal = normalize(ssdoData.xyz * 2.0f - 1.0f);
+	float3 R = EnvironmentReflect(material.normal, V);
+	float roughness = max(SmoothnessToRoughness(material.smoothness), 0.001f);
+	specular *= ComputeDirectionalSpecularOcclusion(R, bentNormal, ssao, roughness);
 #else
 	diffuse *= material.visibility;
 	specular *= ComputeSpecularOcclusion(abs(dot(material.normal, V)) + 1e-5, material.visibility, material.smoothness);

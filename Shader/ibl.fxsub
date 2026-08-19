@@ -61,6 +61,19 @@ float ComputeSpecularOcclusion(float nv, float ao, float smoothness)
 	return saturate(pow(nv + ao, smoothness) - 1 + ao);
 }
 
+float ComputeDirectionalSpecularOcclusion(float3 R, float3 bentNormal, float ao, float roughness)
+{
+	// Directional Cone-Tracing Specular Occlusion (Lagarde / Frostbite 2014)
+	// Tests reflection ray against unoccluded visibility cone oriented along the bent normal
+	float coneAngleCos = sqrt(saturate(1.0f - ao));
+	float RdotBentN = dot(R, bentNormal);
+	float specOcclusion = saturate((RdotBentN - coneAngleCos) / max(1.0f - coneAngleCos, 1e-4f));
+
+	// Fade directional occlusion based on surface roughness (diffuse surfaces are less directionally selective)
+	float scalarOcclusion = saturate(pow(abs(dot(bentNormal, R)) + ao, 1.0f - roughness) - 1.0f + ao);
+	return lerp(specOcclusion, scalarOcclusion, saturate(roughness * 1.5f));
+}
+
 float4 EncodeYcbcr(float4 screenPosition, float3 color1, float3 color2)
 {
 	bool pattern = (fmod(screenPosition.x, 2.0) == fmod(screenPosition.y, 2.0));
