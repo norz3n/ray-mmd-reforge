@@ -99,7 +99,7 @@ const float parallaxMapLoopNum = 1.0;
 
 const float3 emissive = 1.0;
 const float3 emissiveBlink = 1.0;
-const float  emissiveIntensity = 0.15;
+const float  emissiveIntensity = 0.85;
 const float2 emissiveMapLoopNum = 1.0;
 
 // 6: ClearCoat layer for physical Cornea dome highlight on top of Iris
