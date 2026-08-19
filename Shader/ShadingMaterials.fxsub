@@ -16,7 +16,8 @@ void ShadingMaterial(MaterialParam material, float3 V, float3 L, float2 coord, o
 #if SSDO_QUALITY
 	float3 bentNormal = tex2Dlod(SSDOMapSamp, float4(coord, 0, 0)).xyz * 2 - 1;
 	float ssdo = pow(1 - saturate(dot(bentNormal, L)), mSSDOScale);
-	shadow *= ssdo;
+	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
+	shadow *= isSkin ? lerp(1.0f, ssdo, 0.40f) : ssdo;
 #endif
 
 	float3 lightColor = SunColor * mSunIntensity * any(material.visibility);
@@ -31,7 +32,8 @@ void ShadingMaterial(MaterialParam material, float3 V, float3 L, float2 coord, o
 #endif
 	float3 subsurface = SubsurfaceShading(material, material.normal, L, V, coord);
 
-	diffuse = (energy[0] + subsurface * shadow) * lightColor;
+	bool isSkinMat = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
+	diffuse = (energy[0] + subsurface * (isSkinMat ? lerp(1.0f, shadow, 0.25f) : shadow)) * lightColor;
 	specular = energy[1] * lightColor;
 
 #if SUN_SHADOW_QUALITY
@@ -49,15 +51,20 @@ void ShadingImageBasedLighting(sampler source, MaterialParam material, float4 sc
 	float4 ssdoData = tex2Dlod(SSDOMapSamp, float4(coord, 0, 0));
 	float ssao = (material.lightModel == SHADINGMODELID_GLASS) ? 1.0f : ssdoData.w;
 	ssao = min(ssao, material.visibility);
-	diffuse *= ssao;
+	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
+	float skinAO = lerp(1.0f, ssao, 0.45f);
+	diffuse *= isSkin ? skinAO : ssao;
 
 	float3 bentNormal = normalize(ssdoData.xyz * 2.0f - 1.0f);
 	float3 R = EnvironmentReflect(material.normal, V);
 	float roughness = max(SmoothnessToRoughness(material.smoothness), 0.001f);
-	specular *= ComputeDirectionalSpecularOcclusion(R, bentNormal, ssao, roughness);
+	float specOcc = ComputeDirectionalSpecularOcclusion(R, bentNormal, isSkin ? skinAO : ssao, roughness);
+	specular *= isSkin ? lerp(1.0f, specOcc, 0.6f) : specOcc;
 #else
-	diffuse *= material.visibility;
-	specular *= ComputeSpecularOcclusion(abs(dot(material.normal, V)) + 1e-5, material.visibility, material.smoothness);
+	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
+	float vis = isSkin ? lerp(1.0f, material.visibility, 0.5f) : material.visibility;
+	diffuse *= vis;
+	specular *= ComputeSpecularOcclusion(abs(dot(material.normal, V)) + 1e-5, vis, material.smoothness);
 #endif
 
 	float shadow = 1;

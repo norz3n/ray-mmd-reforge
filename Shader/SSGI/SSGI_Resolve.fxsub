@@ -33,14 +33,20 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 	float occlusion = mat.visibility;
 #endif
 
+	bool isSkin = (mat.lightModel == SHADINGMODELID_SKIN || mat.lightModel == SHADINGMODELID_SUBSURFACE);
+	if (isSkin)
+	{
+		occlusion = lerp(1.0f, occlusion, 0.40f);
+	}
+
 	float3 camDir = normalize(viewDir);
 	float NdV = saturate(dot(mat.normal, camDir));
 
 	[branch]
-	if (mat.lightModel == SHADINGMODELID_SKIN || mat.lightModel == SHADINGMODELID_SUBSURFACE)
+	if (isSkin)
 	{
 		// High-headroom soft-shoulder compression: allows strong indirect glow while smoothly rounding extreme spikes
-		rawGi = (rawGi / (1.0f + rawGi * 0.08f)) * (mat.albedo * 0.95f);
+		rawGi = (rawGi / (1.0f + rawGi * 0.04f)) * (mat.albedo * 1.15f);
 	}
 	else if (mat.lightModel == SHADINGMODELID_GLASS)
 	{
@@ -65,8 +71,7 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 	}
 
 #if GI_ENABLE >= 2
-	bool isSkin = (mat.lightModel == SHADINGMODELID_SKIN || mat.lightModel == SHADINGMODELID_SUBSURFACE);
-	float3 multiBounce = isSkin ? 1.25f : (1.0f + (mat.albedo * 1.85f) / max(1.0f - mat.albedo * 0.6f, 0.1f));
+	float3 multiBounce = isSkin ? 1.45f : (1.0f + (mat.albedo * 1.85f) / max(1.0f - mat.albedo * 0.6f, 0.1f));
 	rawGi *= multiBounce;
 #endif
 

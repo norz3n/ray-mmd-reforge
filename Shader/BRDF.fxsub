@@ -376,6 +376,9 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 	roughness = FilterGeometricRoughness(roughness, N);
 	float occlusion = ComputeAmbientMicroOcclusion(nl, material.visibility) * shadow;
 
+	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
+	float diffuseOcclusion = isSkin ? lerp(1.0f, occlusion, 0.45f) : occlusion;
+
 #if TOON_ENABLE
 	float3 diffuse = 0;
 
@@ -385,16 +388,16 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 	else if (material.lightModel == SHADINGMODELID_TONEBASED)
 		diffuse = ToonBasedShading(nl, vh, nv, material.customDataB, material.specular, material.visibility * shadow, roughness, material.customDataA);
 	else
-		diffuse = BurleyBRDF(nl, nv, vh, roughness) * nl * occlusion;
+		diffuse = BurleyBRDF(nl, nv, vh, roughness) * nl * diffuseOcclusion;
 #else
-	float3 diffuse = BurleyBRDF(nl, nv, vh, roughness) * nl * occlusion;
+	float3 diffuse = BurleyBRDF(nl, nv, vh, roughness) * nl * diffuseOcclusion;
 #endif
 
 	float3 specular = 0;
 	float albedoScaling = 1.0f;
 
 	[branch]
-	if (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE)
+	if (isSkin)
 		specular = DualLobeSkinSpecular(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);
 	else if (material.lightModel == SHADINGMODELID_CLOTH)
 		specular = ClothShading(material, nh, nl, vh, nv, roughness, normalizeFactor, albedoScaling);
@@ -407,7 +410,7 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 	else
 		specular = SpecularBRDF_GGX(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);
 
-	return float2x3(diffuse * albedoScaling, specular * nl * occlusion);
+	return float2x3(diffuse * albedoScaling, specular * nl * (isSkin ? lerp(1.0f, occlusion, 0.60f) : occlusion));
 }
 
 float4 SurfaceEnergy(MaterialParam material, float3 N, float3 Ld, float3 Ls, float3 V, float normalizeFactor = 1.0)
@@ -427,12 +430,14 @@ float4 SurfaceEnergy(MaterialParam material, float3 N, float3 Ld, float3 Ls, flo
 	roughness = FilterGeometricRoughness(roughness, N);
 	float diffuse = DiffuseBRDF(N, Ld, V, roughness);
 	float shadow = ComputeAmbientMicroOcclusion(nl2, material.visibility);
+	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
+	float skinShadow = isSkin ? lerp(1.0f, shadow, 0.45f) : shadow;
 
 	float3 specular = 0;
 	float albedoScaling = 1.0f;
 
 	[branch]
-	if (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE)
+	if (isSkin)
 		specular = DualLobeSkinSpecular(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);
 	else if (material.lightModel == SHADINGMODELID_CLOTH)
 		specular = ClothShading(material, nh, nl, vh, nv, roughness, normalizeFactor, albedoScaling);
@@ -445,5 +450,5 @@ float4 SurfaceEnergy(MaterialParam material, float3 N, float3 Ld, float3 Ls, flo
 	else
 		specular = SpecularBRDF_GGX(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);
 
-	return float4(diffuse * albedoScaling, specular) * nl2 * shadow;
+	return float4(diffuse * albedoScaling, specular) * nl2 * skinShadow;
 }
