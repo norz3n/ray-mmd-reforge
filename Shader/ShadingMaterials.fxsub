@@ -15,9 +15,9 @@ void ShadingMaterial(MaterialParam material, float3 V, float3 L, float2 coord, o
 
 #if SSDO_QUALITY
 	float3 bentNormal = tex2Dlod(SSDOMapSamp, float4(coord, 0, 0)).xyz * 2 - 1;
-	float ssdo = pow(1 - saturate(dot(bentNormal, L)), mSSDOScale);
+	float ssdo = pow(saturate(1.0f - dot(bentNormal, L) * 0.85f), max(mSSDOScale, 0.1f));
 	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
-	shadow *= isSkin ? lerp(1.0f, ssdo, 0.40f) : ssdo;
+	shadow *= isSkin ? lerp(1.0f, ssdo, 0.40f) : lerp(1.0f, ssdo, 0.85f);
 #endif
 
 	float3 lightColor = SunColor * mSunIntensity * any(material.visibility);
@@ -59,7 +59,10 @@ void ShadingImageBasedLighting(sampler source, MaterialParam material, float4 sc
 	float3 bentNormal = normalize(ssdoData.xyz * 2.0f - 1.0f);
 	float3 R = EnvironmentReflect(material.normal, V);
 	float roughness = max(SmoothnessToRoughness(material.smoothness), 0.001f);
-	float specOcc = ComputeDirectionalSpecularOcclusion(R, bentNormal, isSkin ? skinAO : ssao, roughness);
+	float NdotV = abs(dot(material.normal, V)) + 1e-5f;
+	float baseSpecOcc = ComputeSpecularOcclusion(NdotV, isSkin ? skinAO : ssao, material.smoothness);
+	float dirSpecOcc = ComputeDirectionalSpecularOcclusion(R, bentNormal, isSkin ? skinAO : ssao, roughness);
+	float specOcc = lerp(baseSpecOcc, max(baseSpecOcc * 0.5f, dirSpecOcc), saturate(roughness * 2.5f));
 	specular *= isSkin ? lerp(1.0f, specOcc, 0.6f) : specOcc;
 #else
 	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);

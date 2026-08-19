@@ -29,16 +29,7 @@ float linearizeDepth(float2 uv)
 
 float linearizeDepthLod(float2 uv, int lod)
 {
-#if defined(RAY_MMD_HIZ_TRAVERSAL_FXSUB)
-	if (lod <= 0)
-		return tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).r;
-	else if (lod == 1)
-		return tex2Dlod(ZBufferMipmap1Samp, float4(uv, 0, 0)).r;
-	else
-		return tex2Dlod(ZBufferMipmap2Samp, float4(uv, 0, 0)).r;
-#else
 	return tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).r;
-#endif
 }
 
 float3 GetNormal(float2 uv)
@@ -171,7 +162,13 @@ float4 ScreenSpaceDirOccLowPS(
 		float emitterRadius = (sampleRadius.x * viewPosition.z) * SSDOParams1.x;
 		float emitterArea = (emitterScale * emitterRadius * emitterRadius) * PI;
 
+		float4 depthDelta = abs(float4(samplePosition[0].z, samplePosition[1].z, samplePosition[2].z, samplePosition[3].z) - viewPosition.z);
+		float maxRange = max(0.5f, emitterRadius * 2.0f);
+		float4 depthWeight = saturate(1.0f - depthDelta / maxRange);
+		depthWeight *= depthWeight;
+
 		float4 sh = emitterArea * saturate(sampleAngle - SSDOBias) / (sampleLength2 + emitterArea);
+		sh *= depthWeight;
 
 		sampleOcclustion.w += sum(sh);
 		sampleOcclustion.xyz += sh.x * sampleDirection[0];
@@ -264,7 +261,13 @@ float4 ScreenSpaceDirOccMediumPS(
 		float emitterRadius = (sampleRadius.x * viewPosition.z) * SSDOParams1.x;
 		float emitterArea = (emitterScale * emitterRadius * emitterRadius) * PI * 0.25;
 
+		float4 depthDelta = abs(float4(samplePosition[0].z, samplePosition[1].z, samplePosition[2].z, samplePosition[3].z) - viewPosition.z);
+		float maxRange = max(0.5f, emitterRadius * 2.0f);
+		float4 depthWeight = saturate(1.0f - depthDelta / maxRange);
+		depthWeight *= depthWeight;
+
 		float4 sh = emitterArea * saturate(sampleAngle - SSDOBias) / (sampleLength2 + emitterArea);
+		sh *= depthWeight;
 
 		sampleOcclustion.w += sum(sh);
 		sampleOcclustion.xyz += sh.x * sampleDirection[0];

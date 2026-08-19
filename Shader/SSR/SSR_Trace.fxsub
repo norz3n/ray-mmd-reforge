@@ -59,8 +59,13 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 
 	// Slope-scaled normal bias for self-intersection mitigation
 	float normalBias = mSSROffset * (1.0f - NdotV * 0.5f);
+	float3 rayOriginVS = positionVS + surfaceMat.normal * normalBias;
+	
+	// Apply interleaved gradient noise jitter to break up banding
+	float jitter = InterleavedGradientNoise(coord.xy * ViewportSize, 0);
+	rayOriginVS += reflectRayVS * (jitter * 0.05f);
 
-	HiZTraceResult traceHit = HiZ_TraceRayDetailed(SSR_MAX_RAY_STEPS, positionVS, reflectRayVS, traceDistance, normalBias, mSSRThickness);
+	HiZTraceResult traceHit = HiZ_TraceRayDetailed(SSR_MAX_RAY_STEPS, rayOriginVS, reflectRayVS, traceDistance, normalBias, mSSRThickness);
 	if (!traceHit.isHit)
 		clip(-1);
 
@@ -79,7 +84,7 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	float ssrMask = tex2Dlod(SSRMapSamp, float4(coord.xy, 0.0f, 0.0f)).a;
 	confidence *= ssrMask;
 
-	float4 hitRadiance = tex2Dlod(ShadingMapPointSamp, float4(traceHit.hitUV, 0.0f, 0.0f));
+	float4 hitRadiance = tex2Dlod(ShadingMapSamp, float4(traceHit.hitUV, 0.0f, 0.0f));
 	return float4(hitRadiance.rgb, 1.0f) * confidence;
 }
 

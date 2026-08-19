@@ -108,7 +108,7 @@ HiZTraceResult HiZ_TraceRayDetailed(
 	result.confidence = 0.0f;
 
 	// Project view-space ray endpoints into normalized screen space [0, 1]
-	float4 startClip = mul(float4(startPosVS + rayDirVS * normalBias, 1.0f), matProject);
+	float4 startClip = mul(float4(startPosVS, 1.0f), matProject);
 	float3 startSS = (startClip.xyz / startClip.w) * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
 
 	float4 endClip = mul(float4(startPosVS + rayDirVS * maxTraceDist, 1.0f), matProject);
@@ -119,7 +119,11 @@ HiZTraceResult HiZ_TraceRayDetailed(
 
 	int currentMip = 0;
 	static const int kMaxMipLevel = 9;
-	float currentT = 0.0f;
+
+	float2 mipDim0 = kAllMipDimensions[0];
+	float2 cellCoord0 = floor(startSS.xy * mipDim0);
+	float tExit0 = HiZ_ComputeCellExitT(startSS, rayDelta, cellCoord0, mipDim0, stepSign);
+	float currentT = min(tExit0 + 1e-4f, 1.0f);
 
 	[loop]
 	for (int iter = 0; iter < maxIterations && currentMip >= 0 && currentT < 1.0f; ++iter)
@@ -139,7 +143,19 @@ HiZTraceResult HiZ_TraceRayDetailed(
 		float tNext = tExit + 1e-4f;
 
 		// Fetch conservative minimum linear depth across current cell
-		float minSceneLinearZ = max(HiZ_SampleDepthAtMip(currentSS.xy, currentMip), 1e-5f);
+		float minSceneLinearZ = HiZ_SampleDepthAtMip(currentSS.xy, currentMip);
+
+		// Sky/background depth rejection: no valid geometry to intersect
+		if (minSceneLinearZ < 0.01f)
+		{
+			currentT = tNext;
+			currentMip = min(currentMip + 1, kMaxMipLevel);
+			continue;
+		}
+
+		// Depth-scaled negative tolerance to reduce false self-intersections at close range
+		float negTolerance = -0.05f * saturate(minSceneLinearZ * 0.1f);
+
 		float minSceneHyperbolicZ = matProject[2][2] + matProject[3][2] / minSceneLinearZ;
 
 		// Parameter t at which ray crosses the minimum depth plane of the cell
@@ -168,7 +184,7 @@ HiZTraceResult HiZ_TraceRayDetailed(
 						float rayLinearZ = matProject[3][2] / projDenom;
 
 						float depthDiff = rayLinearZ - minSceneLinearZ;
-						if (depthDiff >= -0.05f && depthDiff <= surfaceThickness)
+						if (depthDiff >= negTolerance && depthDiff <= surfaceThickness)
 						{
 							result.isHit = true;
 							result.hitProgress = currentT;
@@ -206,7 +222,7 @@ HiZTraceResult HiZ_TraceRayDetailed(
 					float rayLinearZ = matProject[3][2] / projDenom;
 
 					float depthDiff = rayLinearZ - minSceneLinearZ;
-					if (depthDiff >= -0.05f && depthDiff <= surfaceThickness)
+					if (depthDiff >= negTolerance && depthDiff <= surfaceThickness)
 					{
 						result.isHit = true;
 						result.hitProgress = currentT;
@@ -245,7 +261,7 @@ HiZTraceResult HiZ_TraceRayDetailed(
 					float rayLinearZ = matProject[3][2] / projDenom;
 
 					float depthDiff = rayLinearZ - minSceneLinearZ;
-					if (depthDiff >= -0.05f && depthDiff <= surfaceThickness)
+					if (depthDiff >= negTolerance && depthDiff <= surfaceThickness)
 					{
 						result.isHit = true;
 						result.hitProgress = currentT;

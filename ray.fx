@@ -235,7 +235,7 @@ technique DeferredLighting<
 	"Clear=Depth;"
 	"ScriptExternal=Color;"
 
-#if SSR_QUALITY || GI_ENABLE || (CONTACT_SHADOW_QUALITY && SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE) || SSDO_QUALITY
+#if SSR_QUALITY || GI_ENABLE || (CONTACT_SHADOW_QUALITY && SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE)
 	// The G-buffer is complete after ScriptExternal.  Build the hierarchy here
 	// so deferred sun shadows and later screen-space passes use this frame.
 	"RenderColorTarget=ZBufferMipmap1;            Pass=HiZ_Mipmap1;"

@@ -45,11 +45,7 @@ float linearizeDepth(float2 uv)
 
 float linearizeDepthLod(float2 uv, int lod)
 {
-#if defined(RAY_MMD_HIZ_TRAVERSAL_FXSUB)
-	return HiZ_SampleDepthAtMip(uv, lod);
-#else
 	return tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).r;
-#endif
 }
 
 float3 GetNormal(float2 uv)
@@ -114,17 +110,7 @@ float4 HorizonOcclusion(
 		float2 sampleOffset = mad(sampleDirection, sampleTexelSize, uv);
 		sampleDirection += sampleStepDelta;
 
-		float depth;
-	#if defined(RAY_MMD_HIZ_TRAVERSAL_FXSUB)
-		if (s < 4)
-			depth = tex2Dlod(Gbuffer8Map, float4(sampleOffset + ViewportOffset, 0, 0)).r;
-		else if (s < 8)
-			depth = tex2Dlod(ZBufferMipmap1Samp, float4(sampleOffset + ViewportOffset, 0, 0)).r;
-		else
-			depth = tex2Dlod(ZBufferMipmap2Samp, float4(sampleOffset + ViewportOffset, 0, 0)).r;
-	#else
-		depth = tex2Dlod(Gbuffer8Map, float4(sampleOffset + ViewportOffset, 0, 0)).r;
-	#endif
+		float depth = tex2Dlod(Gbuffer8Map, float4(sampleOffset + ViewportOffset, 0, 0)).r;
 
 		float3 samplePosition = GetViewPosition(projConstant, sampleOffset, depth);
 		float3 sampleDir = samplePosition - viewPosition;
