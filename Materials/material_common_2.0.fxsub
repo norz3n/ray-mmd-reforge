@@ -6,6 +6,7 @@
 float4x4 matView : VIEW;
 float4x4 matWorld : WORLD;
 float4x4 matWorldView : WORLDVIEW;
+float4x4 matViewProject : VIEWPROJECTION;
 float4x4 matWorldViewProject : WORLDVIEWPROJECTION;
 
 float4 MaterialDiffuse : DIFFUSE<string Object = "Geometry";>;
@@ -1622,18 +1623,22 @@ void MaterialVS(
 	out float4 oWorldPos  : TEXCOORD3,
 	out float4 oPosition  : POSITION)
 {
-	float4 pos = Position;
-#if WIND_ENABLE
-	float3 windOffset = ComputeVegetationWindOffset(pos.xyz, Normal, Texcoord1);
-	pos.xyz += mul(float4(windOffset, 0.0f), matWorldInverse).xyz;
-#endif
 	oNormal = Normal;
 	oTexcoord1 = Texcoord1;
 #if OCCLUSION_MAP_TYPE == 2 || OCCLUSION_MAP_TYPE == 3
 	oTexcoord2 = Texcoord2;
 #endif
-	oPosition = mul(pos, matWorldViewProject);
-	oWorldPos = float4(pos.xyz, oPosition.w);
+
+#if WIND_ENABLE
+	float3 worldPos = mul(Position, matWorld).xyz;
+	float3 windOffset = ComputeVegetationWindOffset(Position.xyz, Normal, Texcoord1);
+	worldPos += windOffset;
+	oPosition = mul(float4(worldPos, 1.0f), matViewProject);
+	oWorldPos = float4(worldPos, oPosition.w);
+#else
+	oPosition = mul(Position, matWorldViewProject);
+	oWorldPos = float4(Position.xyz, oPosition.w);
+#endif
 }
 
 GbufferParam MaterialPS(
