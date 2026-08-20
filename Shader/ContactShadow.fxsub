@@ -83,7 +83,7 @@ float TraceScreenSpaceShadow(
 
 	// Perform hierarchical screen-space raymarch towards light
 	HiZTraceResult traceHit = HiZ_TraceRayDetailed(
-		CONTACT_SHADOW_HIZ_LOOP_COUNT,
+		CONTACT_SHADOW_HIZ_LOOP_COUNT, 0,
 		rayOrigin,
 		lightDirection,
 		maxDistance,

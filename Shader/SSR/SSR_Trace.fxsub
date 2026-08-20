@@ -3,7 +3,7 @@
  *
  * Module: SSR_Trace.fxsub
  * Independent SSR ray tracing pass (Karis 2013 / Uludag 2014).
- * Traces specular reflection rays across the conservative Hi-Z depth pyramid with analytical windowing.
+ * Traces specular reflection rays across the conservative Hi-Z depth pyramid.
  */
 
 #ifndef RAY_MMD_SSR_TRACE_FXSUB
@@ -12,10 +12,6 @@
 #include "shader/SSR/SSR_Common.fxsub"
 #include "shader/HiZ/HiZ_Main.fxsub"
 
-/**
- * Computes analytical cubic Hermite screen-edge windowing function.
- * Smoothly attenuates rays near viewport boundaries to eliminate edge clipping artifacts.
- */
 inline float SSR_ComputeScreenWindow(float2 uv, float edgeMargin)
 {
 	float2 edgeDist = min(uv, 1.0f - uv);
@@ -23,9 +19,6 @@ inline float SSR_ComputeScreenWindow(float2 uv, float edgeMargin)
 	return windowFactor.x * windowFactor.y;
 }
 
-/**
- * Screen-Space Reflection Raymarching & Radiance Intersection Pixel Shader.
- */
 float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) : COLOR
 {
 	float4 gbuffDepth = tex2Dlod(Gbuffer8Map, float4(coord.xy, 0.0f, 0.0f));
@@ -40,47 +33,34 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	MaterialParam surfaceMat;
 	DecodeGbuffer(gbuffAlbedo, gbuffNormal, gbuffSpecular, gbuffDepth, surfaceMat);
 
-	// Test surface specular reflectivity
 	float3 specularAlbedo = surfaceMat.albedo + surfaceMat.specular;
 	clip(sum(specularAlbedo) - 1e-5f);
 
 	float3 viewVector = normalize(viewdir);
 	float3 positionVS = viewdir * (surfaceMat.linearDepth / viewdir.z);
 	float3 reflectRayVS = normalize(reflect(-viewVector, surfaceMat.normal));
-
-	// Ray must travel into camera hemisphere
 	float facingAngle = dot(reflectRayVS, -viewVector);
 	clip(facingAngle - 1e-5f);
 
 	float NdotV = saturate(dot(viewVector, surfaceMat.normal));
-
-	// Physical max distance scaling based on depth and grazing incidence
 	float traceDistance = mSSRRangeMax * mSSRRangeScale * (1.0f - NdotV * 0.5f);
-
-	// Slope-scaled normal bias for self-intersection mitigation
 	float normalBias = mSSROffset * (1.0f - NdotV * 0.5f);
 	float3 rayOriginVS = positionVS + surfaceMat.normal * normalBias;
-	
-	// Apply interleaved gradient noise jitter to break up banding
 	float jitter = InterleavedGradientNoise(coord.xy * ViewportSize, 0);
 	rayOriginVS += reflectRayVS * (jitter * 0.05f);
 
-	HiZTraceResult traceHit = HiZ_TraceRayDetailed(SSR_MAX_RAY_STEPS, rayOriginVS, reflectRayVS, traceDistance, normalBias, mSSRThickness);
+	HiZTraceResult traceHit = HiZ_TraceRayDetailed(SSR_MAX_RAY_STEPS, 2, rayOriginVS, reflectRayVS, traceDistance, normalBias, mSSRThickness);
 	if (!traceHit.isHit)
 		clip(-1);
 
-	// Analytical dual-window edge attenuation (source coordinate and destination hit UV)
 	float sourceWindow = SSR_ComputeScreenWindow(coord.xy, max(0.02f, 1.0f - mSSRFadeStart));
 	float hitTargetWindow = SSR_ComputeScreenWindow(traceHit.hitUV, 0.08f);
 	float edgeVignette = sourceWindow * hitTargetWindow;
-
-	// Distance falloff along ray
 	float distanceFalloff = 1.0f - saturate(traceHit.hitProgress * traceHit.hitProgress);
+	float3 hitNormal = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(traceHit.hitUV, 0.0f, 0.0f)));
+	float hitFacing = smoothstep(-0.35f, 0.05f, dot(hitNormal, -reflectRayVS));
+	float confidence = edgeVignette * distanceFalloff * saturate(facingAngle) * traceHit.confidence * hitFacing;
 
-	// Surface normal facing confidence combined with thickness penetration quality
-	float confidence = edgeVignette * distanceFalloff * saturate(facingAngle) * traceHit.confidence;
-
-	// SSR visibility mask (user exclusions / controller toggle)
 	float ssrMask = tex2Dlod(SSRMapSamp, float4(coord.xy, 0.0f, 0.0f)).a;
 	confidence *= ssrMask;
 

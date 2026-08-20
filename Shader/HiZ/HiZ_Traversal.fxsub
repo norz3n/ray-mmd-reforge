@@ -92,6 +92,7 @@ float HiZ_ComputeCellExitT(
  */
 HiZTraceResult HiZ_TraceRayDetailed(
 	int maxIterations,
+	int startMip,
 	float3 startPosVS,
 	float3 rayDirVS,
 	float maxTraceDist,
@@ -117,12 +118,12 @@ HiZTraceResult HiZ_TraceRayDetailed(
 	float3 rayDelta = endSS - startSS;
 	float2 stepSign = sign(rayDelta.xy);
 
-	int currentMip = 0;
 	static const int kMaxMipLevel = 9;
+	int currentMip = clamp(startMip, 0, kMaxMipLevel);
 
-	float2 mipDim0 = kAllMipDimensions[0];
-	float2 cellCoord0 = floor(startSS.xy * mipDim0);
-	float tExit0 = HiZ_ComputeCellExitT(startSS, rayDelta, cellCoord0, mipDim0, stepSign);
+	float2 startMipDim = kAllMipDimensions[currentMip];
+	float2 cellCoord0 = floor(startSS.xy * startMipDim);
+	float tExit0 = HiZ_ComputeCellExitT(startSS, rayDelta, cellCoord0, startMipDim, stepSign);
 	float currentT = min(tExit0 + 1e-4f, 1.0f);
 
 	[loop]
@@ -145,8 +146,9 @@ HiZTraceResult HiZ_TraceRayDetailed(
 		// Fetch conservative minimum linear depth across current cell
 		float minSceneLinearZ = HiZ_SampleDepthAtMip(currentSS.xy, currentMip);
 
-		// Sky/background depth rejection: no valid geometry to intersect
-		if (minSceneLinearZ < 0.01f)
+		// Sky/background depth rejection: no valid geometry to intersect.
+		// Mip >= 1 encodes empty/sky regions with kSkyDepthSentinel (1e5f).
+		if (minSceneLinearZ < 0.01f || minSceneLinearZ >= 90000.0f)
 		{
 			currentT = tNext;
 			currentMip = min(currentMip + 1, kMaxMipLevel);
@@ -191,7 +193,8 @@ HiZTraceResult HiZ_TraceRayDetailed(
 							result.hitUV = (startSS + currentT * rayDelta).xy;
 							result.depthError = max(depthDiff, 0.0f);
 							result.hitMip = 0;
-							result.confidence = saturate(1.0f - (max(depthDiff, 0.0f) / max(surfaceThickness, 1e-4f)));
+							float penetration = max(depthDiff, 0.0f) / max(surfaceThickness, 1e-4f);
+							result.confidence = pow2(saturate(1.0f - penetration));
 							break;
 						}
 
@@ -229,7 +232,8 @@ HiZTraceResult HiZ_TraceRayDetailed(
 						result.hitUV = currentSS.xy;
 						result.depthError = max(depthDiff, 0.0f);
 						result.hitMip = 0;
-						result.confidence = saturate(1.0f - (max(depthDiff, 0.0f) / max(surfaceThickness, 1e-4f)));
+						float penetration = max(depthDiff, 0.0f) / max(surfaceThickness, 1e-4f);
+						result.confidence = pow2(saturate(1.0f - penetration));
 						break;
 					}
 
@@ -268,7 +272,8 @@ HiZTraceResult HiZ_TraceRayDetailed(
 						result.hitUV = currentSS.xy;
 						result.depthError = max(depthDiff, 0.0f);
 						result.hitMip = 0;
-						result.confidence = saturate(1.0f - (max(depthDiff, 0.0f) / max(surfaceThickness, 1e-4f)));
+						float penetration = max(depthDiff, 0.0f) / max(surfaceThickness, 1e-4f);
+						result.confidence = pow2(saturate(1.0f - penetration));
 						break;
 					}
 
@@ -318,7 +323,7 @@ bool HiZ_TraceRay(
 	out float2 hitUV,
 	out float3 hitPosVS)
 {
-	HiZTraceResult res = HiZ_TraceRayDetailed(maxIterations, startPosVS, rayDirVS, maxTraceDist, traceConfig.x, traceConfig.y);
+	HiZTraceResult res = HiZ_TraceRayDetailed(maxIterations, 0, startPosVS, rayDirVS, maxTraceDist, traceConfig.x, traceConfig.y);
 	hitProgress = res.hitProgress;
 	hitUV = res.hitUV;
 	hitPosVS = res.hitPosVS;

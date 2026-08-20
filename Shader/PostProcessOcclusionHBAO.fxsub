@@ -126,10 +126,15 @@ float4 HorizonOcclusion(
 		float rangeWeight = AORangePropagationWeight(sampleLength, maxRadius);
 		float nearBoost = AONearDistanceBoost(sampleLength, maxRadius);
 
-		float horizonMask = (sampleAngle > maxHorizonSin) ? 1.0f : 0.0f;
-		maxHorizonSin = max(maxHorizonSin, sampleAngle);
+		// Reject background/sky samples (depth == 0): their sampleDir points toward
+		// the camera and can spuriously raise maxHorizonSin, suppressing occlusion
+		// from valid nearby geometry on object silhouette edges.
+		float depthValid = step(1e-4f, depth);
 
-		float sh = saturate(sampleAngle - bias) * saturate(sampleFalloff) * depthWeight * rangeWeight * nearBoost * horizonMask;
+		float horizonMask = (sampleAngle > maxHorizonSin) ? 1.0f : 0.0f;
+		maxHorizonSin = max(maxHorizonSin, sampleAngle * depthValid);
+
+		float sh = saturate(sampleAngle - bias) * saturate(sampleFalloff) * depthWeight * rangeWeight * nearBoost * horizonMask * depthValid;
 		sampleOcclusion.w += sh;
 		sampleOcclusion.xyz += sh * sampleDir;
 	}
@@ -232,6 +237,11 @@ float4 ScreenSpaceDirOccBlurPS(
 
 		weight.x *= saturate(dot(GetNormal(offset1), normal));
 		weight.y *= saturate(dot(GetNormal(offset2), normal));
+
+		// Reject background/sky pixels (depth == 0) — they have SSDO.w = 1.0
+		// and bleed into object edges, causing a bright halo visible in SSR.
+		weight.x *= (depth.x > 1e-4f) ? 1.0f : 0.0f;
+		weight.y *= (depth.y > 1e-4f) ? 1.0f : 0.0f;
 
 		total_c += tex2Dlod(source, float4(offset1, 0, 0)) * weight.x;
 		total_c += tex2Dlod(source, float4(offset2, 0, 0)) * weight.y;
