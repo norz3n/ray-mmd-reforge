@@ -11,6 +11,8 @@
 
 #include "shader/HiZ/HiZ_Common.fxsub"
 
+static const int kMaxMipLevel = 9;
+
 /**
  * Result structure containing rich geometric and confidence metrics for screen-space ray hits.
  */
@@ -50,6 +52,62 @@ float HiZ_SampleDepthAtMip(float2 uv, int level)
 	float2 atlasOffset = kAtlasOffsets[level];
 	float2 sampleUV = (floor(uv * levelSize) + 0.5f) / ViewportSize + atlasOffset;
 	return tex2Dlod(ZBufferMipmapSamp, float4(sampleUV, 0.0f, 0.0f)).r;
+}
+
+/**
+ * Reconstructs linear view-space depth from a screen-space NDC z coordinate.
+ */
+inline float HiZ_RayLinearZ(float ndcZ)
+{
+	float projDenom = ndcZ - matProject[2][2];
+	projDenom = abs(projDenom) < 1e-7f ? sign(projDenom) * 1e-7f : projDenom;
+	return matProject[3][2] / projDenom;
+}
+
+/**
+ * Confirms a hit at mip 0 or advances the ray past the current cell.
+ *
+ * @param rayLinearZ Linear view-space depth of the ray at the test point.
+ * @param minSceneLinearZ Conservative minimum scene depth of the current cell.
+ * @param tNext Parametric t just past the current cell boundary.
+ * @param hitSS Screen-space position of the candidate hit.
+ * @return True when a hit was confirmed (traversal must break).
+ */
+bool HiZ_ConfirmOrAdvance(
+	float rayLinearZ,
+	float minSceneLinearZ,
+	float negTolerance,
+	float surfaceThickness,
+	float tCurrent,
+	float tNext,
+	float3 hitSS,
+	inout float currentT,
+	inout int currentMip,
+	inout HiZTraceResult result)
+{
+	if (currentMip == 0)
+	{
+		float depthDiff = rayLinearZ - minSceneLinearZ;
+		if (depthDiff >= negTolerance && depthDiff <= surfaceThickness)
+		{
+			result.isHit = true;
+			result.hitProgress = tCurrent;
+			result.hitUV = hitSS.xy;
+			result.depthError = max(depthDiff, 0.0f);
+			result.hitMip = 0;
+			float penetration = max(depthDiff, 0.0f) / max(surfaceThickness, 1e-4f);
+			result.confidence = pow2(saturate(1.0f - penetration));
+			return true;
+		}
+
+		currentT = tNext;
+		currentMip = min(currentMip + 1, kMaxMipLevel);
+	}
+	else
+	{
+		--currentMip;
+	}
+	return false;
 }
 
 /**
@@ -128,7 +186,6 @@ HiZTraceResult HiZ_TraceRayDetailed(
 	float3 rayDelta = endSS - startSS;
 	float2 stepSign = sign(rayDelta.xy);
 
-	static const int kMaxMipLevel = 9;
 	int currentMip = clamp(startMip, 0, kMaxMipLevel);
 
 	float2 startMipDim = kAllMipDimensions[currentMip];
@@ -188,35 +245,10 @@ HiZTraceResult HiZ_TraceRayDetailed(
 					// Ray intersects depth plane INSIDE current cell
 					currentT = max(tDepth, currentT + 1e-5f);
 
-					if (currentMip == 0)
-					{
-						// Reconstruct ray linear depth
-						float projDenom = (startSS.z + currentT * rayDelta.z) - matProject[2][2];
-						projDenom = abs(projDenom) < 1e-7f ? sign(projDenom) * 1e-7f : projDenom;
-						float rayLinearZ = matProject[3][2] / projDenom;
-
-						float depthDiff = rayLinearZ - minSceneLinearZ;
-						if (depthDiff >= negTolerance && depthDiff <= surfaceThickness)
-						{
-							result.isHit = true;
-							result.hitProgress = currentT;
-							result.hitUV = (startSS + currentT * rayDelta).xy;
-							result.depthError = max(depthDiff, 0.0f);
-							result.hitMip = 0;
-							float penetration = max(depthDiff, 0.0f) / max(surfaceThickness, 1e-4f);
-							result.confidence = pow2(saturate(1.0f - penetration));
-							break;
-						}
-
-						// Ray penetrated behind thick occluder -> advance through cell
-						currentT = tNext;
-						currentMip = min(currentMip + 1, kMaxMipLevel);
-					}
-					else
-					{
-						// Refine hierarchy
-						--currentMip;
-					}
+					if (HiZ_ConfirmOrAdvance(HiZ_RayLinearZ(startSS.z + currentT * rayDelta.z), minSceneLinearZ,
+						negTolerance, surfaceThickness, currentT, tNext, startSS + currentT * rayDelta,
+						currentT, currentMip, result))
+						break;
 				}
 				else
 				{
@@ -228,32 +260,10 @@ HiZTraceResult HiZ_TraceRayDetailed(
 			else
 			{
 				// Ray is already at or behind depth plane at cell entrance
-				if (currentMip == 0)
-				{
-					float projDenom = currentSS.z - matProject[2][2];
-					projDenom = abs(projDenom) < 1e-7f ? sign(projDenom) * 1e-7f : projDenom;
-					float rayLinearZ = matProject[3][2] / projDenom;
-
-					float depthDiff = rayLinearZ - minSceneLinearZ;
-					if (depthDiff >= negTolerance && depthDiff <= surfaceThickness)
-					{
-						result.isHit = true;
-						result.hitProgress = currentT;
-						result.hitUV = currentSS.xy;
-						result.depthError = max(depthDiff, 0.0f);
-						result.hitMip = 0;
-						float penetration = max(depthDiff, 0.0f) / max(surfaceThickness, 1e-4f);
-						result.confidence = pow2(saturate(1.0f - penetration));
-						break;
-					}
-
-					currentT = tNext;
-					currentMip = min(currentMip + 1, kMaxMipLevel);
-				}
-				else
-				{
-					--currentMip;
-				}
+				if (HiZ_ConfirmOrAdvance(HiZ_RayLinearZ(currentSS.z), minSceneLinearZ,
+					negTolerance, surfaceThickness, currentT, tNext, currentSS,
+					currentT, currentMip, result))
+					break;
 			}
 		}
 		else
@@ -268,32 +278,10 @@ HiZTraceResult HiZ_TraceRayDetailed(
 			else
 			{
 				// Ray intersects or is behind geometry
-				if (currentMip == 0)
-				{
-					float projDenom = currentSS.z - matProject[2][2];
-					projDenom = abs(projDenom) < 1e-7f ? sign(projDenom) * 1e-7f : projDenom;
-					float rayLinearZ = matProject[3][2] / projDenom;
-
-					float depthDiff = rayLinearZ - minSceneLinearZ;
-					if (depthDiff >= negTolerance && depthDiff <= surfaceThickness)
-					{
-						result.isHit = true;
-						result.hitProgress = currentT;
-						result.hitUV = currentSS.xy;
-						result.depthError = max(depthDiff, 0.0f);
-						result.hitMip = 0;
-						float penetration = max(depthDiff, 0.0f) / max(surfaceThickness, 1e-4f);
-						result.confidence = pow2(saturate(1.0f - penetration));
-						break;
-					}
-
-					currentT = tNext;
-					currentMip = min(currentMip + 1, kMaxMipLevel);
-				}
-				else
-				{
-					--currentMip;
-				}
+				if (HiZ_ConfirmOrAdvance(HiZ_RayLinearZ(currentSS.z), minSceneLinearZ,
+					negTolerance, surfaceThickness, currentT, tNext, currentSS,
+					currentT, currentMip, result))
+					break;
 			}
 		}
 	}
