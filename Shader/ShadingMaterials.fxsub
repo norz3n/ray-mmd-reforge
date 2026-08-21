@@ -22,7 +22,7 @@ void ShadingMaterial(MaterialParam material, float3 V, float3 L, float2 coord, o
 	float3 bentNormal = tex2Dlod(SSDOMapSamp, float4(coord, 0, 0)).xyz * 2 - 1;
 	float ssdo = pow(saturate(1.0f - dot(bentNormal, L) * 0.85f), max(mSSDOScale, 0.1f));
 	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
-	shadow *= isSkin ? lerp(1.0f, ssdo, 0.40f) : lerp(1.0f, ssdo, 0.85f);
+	shadow *= isSkin ? lerp(1.0f, ssdo, SKIN_AO_STRENGTH) : lerp(1.0f, ssdo, 0.85f);
 #endif
 
 	float3 lightColor = SunColor * mSunIntensity * any(material.visibility);
@@ -38,7 +38,17 @@ void ShadingMaterial(MaterialParam material, float3 V, float3 L, float2 coord, o
 	float3 subsurface = SubsurfaceShading(material, material.normal, L, V, coord);
 
 	bool isSkinMat = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
-	diffuse = (energy[0] + subsurface * (isSkinMat ? lerp(1.0f, shadow, 0.25f) : shadow)) * lightColor;
+	diffuse = (energy[0] + subsurface * (isSkinMat ? lerp(1.0f, shadow, SKIN_AO_STRENGTH) : shadow)) * lightColor;
+
+	// Energy-budget cap: Lambert + additive SSS (wrap/translucency) may not exceed the incident
+	// sun irradiance — dermal reflectance is applied once later, so any excess here would make
+	// skin outshine white surfaces and turn it into a GI emitter brighter than its albedo allows
+	if (isSkinMat)
+	{
+		float3 budget = max(lightColor * SKIN_SSS_ENERGY_BUDGET, 1e-5f);
+		diffuse *= budget / max(diffuse, budget);
+	}
+
 	specular = energy[1] * lightColor;
 
 #if SUN_SHADOW_QUALITY
@@ -58,7 +68,7 @@ void ShadingImageBasedLighting(sampler source, MaterialParam material, float4 sc
 	float ssao = isEmissiveOrGlass ? 1.0f : ssdoData.w;
 	ssao = min(ssao, material.visibility);
 	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
-	float skinAO = lerp(1.0f, ssao, 0.45f);
+	float skinAO = lerp(1.0f, ssao, SKIN_AO_STRENGTH);
 	diffuse *= isSkin ? skinAO : (isEmissiveOrGlass ? 1.0f : ssao);
 
 	float3 bentNormal = normalize(ssdoData.xyz * 2.0f - 1.0f);
@@ -68,7 +78,7 @@ void ShadingImageBasedLighting(sampler source, MaterialParam material, float4 sc
 	float baseSpecOcc = ComputeSpecularOcclusion(NdotV, isSkin ? skinAO : ssao, material.smoothness);
 	float dirSpecOcc = ComputeDirectionalSpecularOcclusion(R, bentNormal, isSkin ? skinAO : ssao, roughness);
 	float specOcc = lerp(baseSpecOcc, max(baseSpecOcc * 0.5f, dirSpecOcc), saturate(roughness * 2.5f));
-	specular *= isSkin ? lerp(1.0f, specOcc, 0.6f) : specOcc;
+	specular *= isSkin ? lerp(1.0f, specOcc, SKIN_AO_STRENGTH) : specOcc;
 #else
 	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
 	float vis = isSkin ? lerp(1.0f, material.visibility, 0.5f) : material.visibility;
@@ -146,7 +156,15 @@ void ShadingOpacityPS(
 float4 ShadingOpacityAlbedoPS(in float2 coord: TEXCOORD0) : COLOR
 {
 	float4 MRT1 = tex2Dlod(Gbuffer1Map, float4(coord, 0, 0));
-	return float4(DecodeGBufferAlbedo(MRT1), 0);
+	float3 albedo = DecodeGBufferAlbedo(MRT1);
+
+	// The SSSS composite multiplies all lighting by this albedo (DESTCOLOR * SRC blend),
+	// so skin must be dermal-clamped here too or the clamp in DecodeGbuffer is bypassed
+	int lightModel = DecodeLightModel(tex2Dlod(Gbuffer8Map, float4(coord, 0, 0)));
+	if (lightModel == SHADINGMODELID_SKIN || lightModel == SHADINGMODELID_SUBSURFACE)
+		albedo = ClampDermalAlbedo(albedo);
+
+	return float4(albedo, 0);
 }
 
 float4 ShadingOpacitySpecularPS(in float2 coord: TEXCOORD0) : COLOR

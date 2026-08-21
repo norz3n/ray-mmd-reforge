@@ -33,7 +33,9 @@ sampler SpecularMapSamp = sampler_state {
 
 float3 ImageBasedLightSubsurface(MaterialParam material, float3 N, float3 prefilteredDiffuse)
 {
-	float3 dependentSplit = 0.5 + (1 - material.visibility) * 5;
+	// Light-bleed boost for occluded skin: physically bounded (AO must only darken, never
+	// amplify light by 5.5x in cavities). Base 0.5 keeps stock open-surface response.
+	float3 dependentSplit = 0.5 + (1 - material.visibility) * 0.8;
 	float3 scattering = prefilteredDiffuse + DecodeRGBT(tex2Dlod(DiffuseMapSamp, float4(ComputeSphereCoord(-N), 0, 0)), IBL_RGBT_RANGE);
 	scattering *= material.customDataB * material.customDataA * dependentSplit;
 	return scattering * mEnvIntensitySSS;
@@ -58,11 +60,19 @@ void ShadingMaterial(MaterialParam material, float3 worldView, out float3 diffus
 	diffuse = prefilteredDiffuse * mEnvIntensityDiff;
 	specular = prefilteredSpeculr * fresnel * mEnvIntensitySpec;
 
-	if (material.lightModel == SHADINGMODELID_SKIN || 
-		material.lightModel == SHADINGMODELID_SUBSURFACE ||
-		material.lightModel == SHADINGMODELID_GLASS)
+	bool isSSSMat = (material.lightModel == SHADINGMODELID_SKIN ||
+		material.lightModel == SHADINGMODELID_SUBSURFACE);
+	if (isSSSMat || material.lightModel == SHADINGMODELID_GLASS)
 	{
 		diffuse += ImageBasedLightSubsurface(material, N, prefilteredDiffuse);
+
+		// Energy-budget cap: ambient + back-light SSS may not exceed the front irradiance —
+		// otherwise ambient-lit skin outshines white surfaces and feeds an inflated GI emitter
+		if (isSSSMat)
+		{
+			float3 budget = max(prefilteredDiffuse * mEnvIntensityDiff * SKIN_SSS_ENERGY_BUDGET, 1e-5f);
+			diffuse *= budget / max(diffuse, budget);
+		}
 	}
 }
 

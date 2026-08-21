@@ -45,7 +45,7 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 	bool isSkin = (mat.lightModel == SHADINGMODELID_SKIN || mat.lightModel == SHADINGMODELID_SUBSURFACE);
 	if (isSkin)
 	{
-		occlusion = lerp(1.0f, occlusion, 0.40f);
+		occlusion = lerp(1.0f, occlusion, SKIN_AO_STRENGTH);
 	}
 
 	float3 camDir = normalize(viewDir);
@@ -54,8 +54,11 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 	[branch]
 	if (isSkin)
 	{
-		// Dermal absorption & soft photometric compression: realistic light transport without self-illumination
-		rawGi = (rawGi / (1.0f + rawGi * 0.14f)) * (mat.albedo * 0.80f);
+		// Dermal absorption: albedo is already clamped to physical reflectance in DecodeGbuffer;
+		// keep only the stronger photometric compression specific to skin
+		rawGi = (rawGi / (1.0f + rawGi * 0.14f)) * mat.albedo;
+		// Brightness compensation: recover the photometric loss, capped at +10%
+		rawGi *= 1.0f + SKIN_GI_COMPENSATION * saturate(dot(rawGi, float3(0.299f, 0.587f, 0.114f)));
 	}
 	else if (mat.lightModel == SHADINGMODELID_GLASS)
 	{

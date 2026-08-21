@@ -96,6 +96,7 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 					{
 						int shadingModel = (int)floor(tex2Dlod(Gbuffer8Map, float4(currentUv, 0.0f, 0.0f)).a);
 						bool isEmissive = (shadingModel == SHADINGMODELID_EMISSIVE);
+						bool isSkinEmitter = (shadingModel == SHADINGMODELID_SKIN || shadingModel == SHADINGMODELID_SUBSURFACE);
 
 						// Emitter cosine factor (strictly Lambertian cosine emission prevents corner light accumulation)
 						float3 nSample = GetSSGINormal(currentUv);
@@ -124,11 +125,20 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 							if (w > 1e-3f)
 							{
 								float3 sampleColor = tex2Dlod(ShadingMapSamp, float4(currentUv, 0.0f, 0.0f)).rgb;
+								// ShadingMap already contains emitter albedo (applied once in the SSSS
+								// DESTCOLOR*SRC composite) - multiplying by an emitter-albedo ratio here
+								// would double-count (Lo * rho_e). No extra weighting needed.
 								sampleColor = clamp(sampleColor, 0.0f, 100.0f);
 
 								if (isEmissive)
 								{
 									sampleColor *= lerp(4.0f, 16.0f, mDbgSSGIEmissiveBoost);
+								}
+								else if (isSkinEmitter)
+								{
+									// Skin radiance overshoots in screen-space gathers (bright wide lobes);
+									// suppress its bounce contribution
+									sampleColor *= SKIN_GI_EMISSION_SCALE;
 								}
 
 								// Front-to-back ray accumulation

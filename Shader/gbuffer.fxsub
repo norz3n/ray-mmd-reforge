@@ -10,6 +10,21 @@
 #define SHADINGMODELID_TONEBASED  9
 #define SHADINGMODELID_MASK       10
 
+// How much SSAO/HBAO affects skin (0 = ignored, 1 = same as other materials).
+#define SKIN_AO_STRENGTH          0.75f
+// Dermal reflectance range for GI (light skin ~30-45%, dark ~10-20%; melanin/hemoglobin absorption).
+#define SKIN_GI_REFLECTANCE_DARK  0.15f
+#define SKIN_GI_REFLECTANCE_LIGHT 0.42f
+// Total skin diffuse response (Lambert + wrap + translucency + IBL back-light) may not exceed
+// the incident irradiance: dermal reflectance already accounts for ALL subsurface scattering,
+// so additive SSS terms must redistribute energy, never create it (UE5-style conservation).
+#define SKIN_SSS_ENERGY_BUDGET    1.0f
+// SSGI brightness compensation: max +10% on reception, scaled by luminance (dim skin gets ~0,
+// bright skin gets the full cap)
+#define SKIN_GI_COMPENSATION      0.10f
+// SSGI skin bounce suppression: skin throws off too much glow, damp its emitter contribution
+#define SKIN_GI_EMISSION_SCALE    0.12f
+
 #define MAX_FRACTIONAL_8_BIT       (255.0f / 256.0f)
 #define TWO_BITS_EXTRACTION_FACTOR (3.0f + MAX_FRACTIONAL_8_BIT)
 
@@ -77,6 +92,14 @@ float3 DecodeYcbcr(float3 YCbCr)
 	return pow2(float3(R, G, B));
 }
 
+// Dermal reflectance: authored MMD skin textures are near-white, but real skin reflects
+// only 10-45% of visible light (melanin/hemoglobin absorption).
+float3 ClampDermalAlbedo(float3 albedo)
+{
+	float luma = dot(albedo, float3(0.299f, 0.587f, 0.114f));
+	return albedo * lerp(SKIN_GI_REFLECTANCE_DARK, SKIN_GI_REFLECTANCE_LIGHT, saturate((luma - 0.15f) / 0.55f)) / max(luma, 1e-4f);
+}
+
 void DecodeGbuffer(float4 buffer1, float4 buffer2, float4 buffer3, float4 buffer4, out MaterialParam material)
 {
 	material.albedo = buffer1.xyz;
@@ -104,6 +127,12 @@ void DecodeGbuffer(float4 buffer1, float4 buffer2, float4 buffer3, float4 buffer
 		if (material.lightModel == SHADINGMODELID_EMISSIVE)
 			material.customDataA = buffer4.y;
 	}
+
+	// Dermal reflectance: authored MMD skin textures are near-white, but real skin reflects
+	// only 10-45% of visible light (melanin/hemoglobin absorption). Clamping albedo once here
+	// makes every downstream consumer (direct, IBL, SSS, GI emit/receive) physical.
+	if (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE)
+		material.albedo = ClampDermalAlbedo(material.albedo);
 }
 
 float3 DecodeGBufferAlbedo(float4 buffer1)
