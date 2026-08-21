@@ -113,7 +113,7 @@ static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceB
 #include "shader/ColorGrading.fxsub"
 #include "shader/ShadingMaterials.fxsub"
 
-#if SSR_QUALITY || GI_ENABLE || (CONTACT_SHADOW_QUALITY && SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE) || SSDO_QUALITY
+#if SSR_QUALITY || GI_ENABLE || GLASS_REFRACTION || (CONTACT_SHADOW_QUALITY && SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE) || SSDO_QUALITY
 #	include "shader/HiZ/HiZ_Main.fxsub"
 #endif
 
@@ -235,7 +235,7 @@ technique DeferredLighting<
 	"Clear=Depth;"
 	"ScriptExternal=Color;"
 
-#if SSR_QUALITY || GI_ENABLE || (CONTACT_SHADOW_QUALITY && SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE)
+#if SSR_QUALITY || GI_ENABLE || GLASS_REFRACTION || (CONTACT_SHADOW_QUALITY && SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE)
 	// The G-buffer is complete after ScriptExternal.  Build the hierarchy here
 	// so deferred sun shadows and later screen-space passes use this frame.
 	"RenderColorTarget=ZBufferMipmap1;            Pass=HiZ_Mipmap1;"
@@ -466,7 +466,8 @@ technique DeferredLighting<
 #endif
 
 #if AA_QUALITY == 6
-	"RenderColorTarget=TAAHistoryMap; Pass=TAAPass;"
+	"RenderColorTarget0=TAAHistoryMap; RenderColorTarget1=TAADepthMap; Pass=TAAPass;"
+	"RenderColorTarget1=;"
 	"RenderColorTarget=TAAMatrixMap; Pass=TAAMatrixUpdatePass;"
 #if POST_SHARPEN_ENABLE
 	"RenderColorTarget=ShadingMapTemp; Pass=TAAFinal;"
@@ -610,7 +611,7 @@ technique DeferredLighting<
 		PixelShader  = compile ps_3_0 ScreenSpaceBilateralFilterPS(ShadingMapTempSamp, mDiffusionOffsetY);
 	}
 #endif
-#if SSR_QUALITY || GI_ENABLE || (CONTACT_SHADOW_QUALITY && SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE) || SSDO_QUALITY
+#if SSR_QUALITY || GI_ENABLE || GLASS_REFRACTION || (CONTACT_SHADOW_QUALITY && SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE) || SSDO_QUALITY
 	pass HiZ_Mipmap1<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;

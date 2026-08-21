@@ -9,6 +9,19 @@ sampler TAAHistoryMapSamp = sampler_state {
 	AddressU = CLAMP; AddressV = CLAMP;
 };
 
+// Linear view-space depth of the previous frame, used to reject stale history on
+// moving objects and disocclusions (MME provides no velocity buffer / prev transforms)
+texture TAADepthMap : RENDERCOLORTARGET <
+	float2 ViewPortRatio = {1.0, 1.0};
+	bool AntiAlias = false;
+	string Format = "R16F";
+>;
+sampler TAADepthMapSamp = sampler_state {
+	texture = <TAADepthMap>;
+	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+
 texture TAAMatrixMap : RENDERCOLORTARGET <
 	int2 Dimensions = {4, 1};
 	bool AntiAlias = false;
@@ -87,7 +100,8 @@ float3 SampleHistoryCatmullRom5Tap(sampler2D historySamp, float2 uv, float2 texe
 	return max(color.rgb / max(color.a, 1e-4f), 0.0f);
 }
 
-float4 TAAPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1, uniform sampler2D source) : COLOR
+void TAAPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1, uniform sampler2D source,
+	out float4 oColor : COLOR0, out float4 oDepth : COLOR1)
 {
 	float2 uv = coord.xy;
 
@@ -100,6 +114,13 @@ float4 TAAPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1, uniform
 	float4x4 matViewProjectPrev = GetPrevViewProject();
 	float4 prevClipPos = mul(float4(worldPosition, 1.0), matViewProjectPrev);
 	float2 prevUV = (prevClipPos.xy / max(prevClipPos.w, 1e-5)) * float2(0.5, -0.5) + 0.5;
+
+	// Depth-validated history: reject stale history when the statically reprojected point does not
+	// match what was actually visible at prevUV last frame (moving models, disocclusions)
+	bool isValidPrev = all(prevUV >= 0.0) && all(prevUV <= 1.0);
+	float expectedPrevZ = -prevClipPos.w;
+	float storedPrevZ = tex2Dlod(TAADepthMapSamp, float4(prevUV, 0, 0)).r;
+	bool depthValid = isValidPrev && (abs(storedPrevZ - expectedPrevZ) / max(expectedPrevZ, 1e-3) < 0.03);
 
 	float3 currColor = tex2Dlod(source, float4(uv, 0, 0)).rgb;
 
@@ -153,8 +174,7 @@ float4 TAAPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1, uniform
 	float3 boxMin = max(mu - gamma * sigma, minNeighbor);
 	float3 boxMax = min(mu + gamma * sigma, maxNeighbor);
 
-	bool isValidPrev = all(prevUV >= 0.0) && all(prevUV <= 1.0);
-	float3 historyColor = isValidPrev ? SampleHistoryCatmullRom5Tap(TAAHistoryMapSamp, prevUV, ViewportOffset2) : currColor;
+	float3 historyColor = (depthValid) ? SampleHistoryCatmullRom5Tap(TAAHistoryMapSamp, prevUV, ViewportOffset2) : currColor;
 	float3 historyYCoCg = RGB2YCoCg(historyColor);
 
 	historyYCoCg = ClipAABB(historyYCoCg, boxMin, boxMax, mu);
@@ -162,14 +182,15 @@ float4 TAAPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1, uniform
 	// Karis luma weighting for HDR anti-firefly accumulation
 	float wCurrent = 1.0f / (1.0f + max(currYCoCg.x, 0.0f));
 	float wHistory = 1.0f / (1.0f + max(historyYCoCg.x, 0.0f));
-	float blendFactor = isValidPrev ? 0.90f : 0.0f;
+	float blendFactor = depthValid ? 0.90f : 0.0f;
 
 	float weightCurr = wCurrent * (1.0f - blendFactor);
 	float weightHist = wHistory * blendFactor;
 	float3 finalYCoCg = (currYCoCg * weightCurr + historyYCoCg * weightHist) / max(weightCurr + weightHist, 1e-5f);
 	float3 finalColor = YCoCg2RGB(finalYCoCg);
 
-	return float4(finalColor, 1.0);
+	oColor = float4(finalColor, 1.0);
+	oDepth = float4(linearDepth, 0.0, 0.0, 0.0);
 }
 
 float4 TAAMatrixUpdatePS(in float2 coord : TEXCOORD0) : COLOR

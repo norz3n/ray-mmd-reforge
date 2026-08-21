@@ -1,3 +1,8 @@
+#if GLASS_REFRACTION
+// Hi-Z pyramid for traced glass refraction (include-guarded; shared with SSR/GI/contact shadows)
+#include "shader/HiZ/HiZ_Main.fxsub"
+#endif
+
 #if SUN_LIGHT_ENABLE
 float3 ComputeSunIntensity(float zenithAngleCos, float EE = 10)
 {
@@ -204,6 +209,26 @@ float4 ShadingTransparentPS(
 		bgB = any(bgB) ? bgB : srgb2linear(tex2Dlod(ScnSamp, float4(coord + iorB, 0, 0)).rgb);
 
 		prefilteredRefract = float3(bgR.r, bgG.g, bgB.b);
+
+#if GLASS_REFRACTION
+		// Hi-Z traced refraction: march the refracted ray to the true background surface point.
+		// Falls back to the flat screen-offset result above when the ray leaves screen or finds no geometry.
+		float3 posVS = viewdir * (material.linearDepth / viewdir.z);
+		float3 refractDir = refract(-V, material.normal, 0.69f);
+		if (dot(refractDir, refractDir) > 1e-4f)
+		{
+			float3 refrOrigin = posVS + refractDir * (mSSROffset * 2.0f);
+			float2 hitUV;
+			float3 hitPosVS;
+			if (HiZ_TraceRay(16, refrOrigin, refractDir, max(material.linearDepth * 2.0f, 10.0f),
+				float3(mSSROffset, mSSRThickness, 0.0f), hitUV, hitPosVS))
+			{
+				float3 tracedBg = tex2Dlod(ShadingMapTempPointSamp, float4(hitUV, 0, 0)).rgb;
+				if (any(tracedBg))
+					prefilteredRefract = tracedBg;
+			}
+		}
+#endif
 
 		float3 dielectricColor = max(0.02, material.albedo);
 		float3 trans = lerp(material.specular, 1.0, (1 - saturate(dot(normalize((L + V) / 2), -L))));
