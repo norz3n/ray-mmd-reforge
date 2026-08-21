@@ -39,7 +39,7 @@ float4 SSGIBlurPS(
 	cCenter = clamp(cCenter, 0.0f, 100.0f);
 
 #if GI_ENABLE >= 2
-	float2 blurDir = (stepSize < 2.0f ? float2(ViewportOffset2.x, 0.0f) : float2(0.0f, ViewportOffset2.y)) * 1.35f;
+	float2 blurDir = (stepSize < 2.0f ? float2(ViewportOffset2.x, 0.0f) : float2(0.0f, ViewportOffset2.y)) * 2.2f;
 #else
 	float2 blurDir = stepSize < 2.0f ? float2(ViewportOffset2.x, 0.0f) : float2(0.0f, ViewportOffset2.y);
 #endif
@@ -75,7 +75,7 @@ float4 SSGIBlurPS(
 		float normalWeightA = BilateralNormalWeight(nA, nCenter);
 		float normalWeightB = BilateralNormalWeight(nB, nCenter);
 
-		float spatialWeight = BilateralSpatialWeight((float)i, 0.025f);
+		float spatialWeight = BilateralSpatialWeight((float)i, 0.018f);
 
 		float wA = spatialWeight * depthWeightA * (normalWeightA * normalWeightA);
 		float wB = spatialWeight * depthWeightB * (normalWeightB * normalWeightB);

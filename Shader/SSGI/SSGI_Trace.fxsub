@@ -44,7 +44,9 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 #else
 	int frameCounter = 0;
 #endif
-	float noiseAngle = InterleavedGradientNoise(screenPixel, frameCounter);
+	// White-noise hash instead of IGN: IGN's fixed diagonal gradient pattern survives the
+	// bilateral blur as visible diagonal banding when there is no temporal accumulation
+	float noiseAngle = frac(sin(dot(screenPixel + float(frameCounter) * 5.588238f, float2(127.1f, 311.7f))) * 43758.5453f);
 	float noiseRadius = frac(noiseAngle * 5.588238f + (screenPixel.x + screenPixel.y * 5.588238f) * 0.61803398875f);
 
 	float startAngle = noiseAngle * PI_2;
@@ -153,7 +155,10 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 			[unroll]
 			for (int t = 0; t < 2; ++t)
 			{
-				float tapT = (t == 0) ? 0.55f : 0.90f;
+				// Per-pixel jittered tap distances: a fixed tapT makes the reconstructed sky
+				// direction a smooth screen-angle field (visible bands); jitter turns it into grain
+				float tapT = (t == 0) ? lerp(0.40f, 0.70f, rayJitter)
+				                      : lerp(0.72f, 0.95f, frac(rayJitter * 1.61803398875f));
 				float2 skyUv = uvCoord.xy + direction * (screenRadius * tapT);
 				if (skyUv.x >= 0.0f && skyUv.x <= 1.0f && skyUv.y >= 0.0f && skyUv.y <= 1.0f)
 				{
@@ -165,7 +170,10 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 						float NdotSky = saturate(dot(nOrigin, skyDir));
 						if (NdotSky > 0.0f)
 						{
-							float3 skyColor = tex2Dlod(ShadingMapSamp, float4(skyUv, 0.0f, 0.0f)).rgb;
+							// ShadingMap is empty where no geometry was shaded — fall back to the
+							// MMD background (same pattern as the traced glass refraction)
+								float3 skyColor = tex2Dlod(ShadingMapSamp, float4(skyUv, 0.0f, 0.0f)).rgb;
+								skyColor = any(skyColor) ? skyColor : srgb2linear(tex2Dlod(ScnSamp, float4(skyUv, 0.0f, 0.0f)).rgb);
 							float skyWeight = NdotSky * lerp(0.15f, 0.45f, mDbgSSGISkyLight) * (1.0f - rayOcc) / 2.0f;
 							rayColor += clamp(skyColor, 0.0f, 10.0f) * skyWeight;
 						}
