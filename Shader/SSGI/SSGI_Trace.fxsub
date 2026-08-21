@@ -86,40 +86,31 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 					float dist = sqrt(distSq);
 					float3 lightVector = diff / dist;
 
-					// Receiver cosine factor with soft diffuse wrap
-				#if GI_ENABLE >= 2
+					// Receiver cosine factor (strictly positive hemisphere prevents coplanar floor self-illumination rings)
 					float NdotL = dot(nOrigin, lightVector);
-					if (NdotL > -0.35f)
+					if (NdotL > 0.03f)
 					{
 						int shadingModel = (int)floor(tex2Dlod(Gbuffer8Map, float4(currentUv, 0.0f, 0.0f)).a);
 						bool isEmissive = (shadingModel == SHADINGMODELID_EMISSIVE);
 
-						// Emitter cosine factor (sample must face the receiver, or be an active omnidirectional emissive light source)
+						// Emitter cosine factor (sample must face receiver, or be an active emissive light source)
 						float3 nSample = GetSSGINormal(currentUv);
 						float NsDotMinusL = dot(nSample, -lightVector);
-						if (NsDotMinusL > -0.6f || isEmissive)
+					#if GI_ENABLE >= 2
+						if (NsDotMinusL > -0.35f || isEmissive)
 						{
-							float geomFactor = saturate(NdotL * 0.70f + 0.30f) * (isEmissive ? 1.0f : saturate(NsDotMinusL * 0.65f + 0.35f));
+							float geomFactor = saturate(NdotL) * (isEmissive ? 1.0f : saturate(NsDotMinusL * 0.70f + 0.30f));
 							float distRatio = saturate(dist / maxWorldDistance);
 							float fade = 1.0f - distRatio * distRatio;
 							float falloffRate = isEmissive ? 0.015f : 0.035f;
-				#else
-					float NdotL = dot(nOrigin, lightVector);
-					if (NdotL > 0.0f)
-					{
-						int shadingModel = (int)floor(tex2Dlod(Gbuffer8Map, float4(currentUv, 0.0f, 0.0f)).a);
-						bool isEmissive = (shadingModel == SHADINGMODELID_EMISSIVE);
-
-						// Emitter cosine factor
-						float3 nSample = GetSSGINormal(currentUv);
-						float NsDotMinusL = dot(nSample, -lightVector);
+					#else
 						if (NsDotMinusL > -0.15f || isEmissive)
 						{
 							float geomFactor = saturate(NdotL) * (isEmissive ? 1.0f : saturate(NsDotMinusL * 0.85f + 0.15f));
 							float distRatio = saturate(dist / maxWorldDistance);
 							float fade = 1.0f - distRatio * distRatio;
 							float falloffRate = isEmissive ? 0.08f : 0.35f;
-				#endif
+					#endif
 							float invDistFalloff = 1.0f / (1.0f + dist * falloffRate);
 							float atten = (fade * fade) * invDistFalloff;
 
@@ -150,19 +141,25 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 					}
 				}
 			}
-			else if (zSample <= 1e-4f)
+		}
+
+		// Sky/background radiance fallback: if the ray escaped into open sky in this direction
+		if (rayOcc < 0.85f)
+		{
+			float2 skyUv = uvCoord.xy + direction * (screenRadius * 0.90f);
+			if (skyUv.x >= 0.0f && skyUv.x <= 1.0f && skyUv.y >= 0.0f && skyUv.y <= 1.0f)
 			{
-				// Sky/background radiance fallback: gather ambient indirect light from outdoor skybox
-				float3 skyLightVector = normalize(float3(direction.x, -direction.y, 0.45f));
-				float NdotSky = dot(nOrigin, skyLightVector);
-				if (NdotSky > -0.2f)
+				float skyDepth = GetSSGILinearDepth(skyUv);
+				if (skyDepth <= 1e-4f)
 				{
-					float3 skyColor = tex2Dlod(ShadingMapSamp, float4(currentUv, 0.0f, 0.0f)).rgb;
-					float skyWeight = saturate(NdotSky * 0.6f + 0.4f) * 0.25f * (1.0f - rayOcc);
-					rayColor += clamp(skyColor, 0.0f, 15.0f) * skyWeight;
-					rayOcc += skyWeight;
-					if (rayOcc > 0.95f)
-						break;
+					float3 skyLightDir = normalize(float3(direction.x, -direction.y, 0.5f));
+					float NdotSky = saturate(dot(nOrigin, skyLightDir));
+					if (NdotSky > 0.0f)
+					{
+						float3 skyColor = tex2Dlod(ShadingMapSamp, float4(skyUv, 0.0f, 0.0f)).rgb;
+						float skyWeight = NdotSky * 0.15f * (1.0f - rayOcc);
+						rayColor += clamp(skyColor, 0.0f, 10.0f) * skyWeight;
+					}
 				}
 			}
 		}
