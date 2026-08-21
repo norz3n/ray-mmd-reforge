@@ -94,7 +94,9 @@ float TraceScreenSpaceShadow(
 	{
 		// Distance falloff along the contact ray
 		float distanceFade = 1.0f - smoothstep(0.65f, 1.0f, traceHit.hitProgress);
-		float occlusion = traceHit.confidence * terminatorFade * distanceFade;
+		// Contact penumbra: contact shadows are sharpest at origin and soften gradually with ray progress
+		float penumbraSoftness = lerp(1.0f, 0.55f, saturate(traceHit.hitProgress / max(maxDistance, 1e-4f)));
+		float occlusion = traceHit.confidence * terminatorFade * distanceFade * penumbraSoftness;
 		return 1.0f - occlusion;
 	}
 

@@ -108,12 +108,22 @@ HiZTraceResult HiZ_TraceRayDetailed(
 	result.hitMip = 0;
 	result.confidence = 0.0f;
 
+	// Clip ray against near camera plane in view-space to eliminate homogeneous division artifacts (W <= 0)
+	float effectiveTraceDist = maxTraceDist;
+	static const float kRayNearPlaneZ = 0.05f;
+	if (rayDirVS.z < -1e-6f)
+	{
+		float maxDistToNear = (kRayNearPlaneZ - startPosVS.z) / rayDirVS.z;
+		if (maxDistToNear > 0.0f)
+			effectiveTraceDist = min(effectiveTraceDist, maxDistToNear);
+	}
+
 	// Project view-space ray endpoints into normalized screen space [0, 1]
 	float4 startClip = mul(float4(startPosVS, 1.0f), matProject);
-	float3 startSS = (startClip.xyz / startClip.w) * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
+	float3 startSS = (startClip.xyz / max(startClip.w, 1e-4f)) * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
 
-	float4 endClip = mul(float4(startPosVS + rayDirVS * maxTraceDist, 1.0f), matProject);
-	float3 endSS = (endClip.xyz / endClip.w) * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
+	float4 endClip = mul(float4(startPosVS + rayDirVS * effectiveTraceDist, 1.0f), matProject);
+	float3 endSS = (endClip.xyz / max(endClip.w, 1e-4f)) * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
 
 	float3 rayDelta = endSS - startSS;
 	float2 stepSign = sign(rayDelta.xy);

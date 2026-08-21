@@ -27,13 +27,49 @@ float4 SSR_FilterBlurPS(in float2 coord : TEXCOORD0, uniform sampler source, uni
 	static const float kOffsetInner  = 1.4091991f;
 	static const float kOffsetOuter  = 3.2979345f;
 
-	float4 blurred = tex2Dlod(source, float4(coord, 0.0f, 0.0f)) * kWeightCenter;
-	blurred += tex2Dlod(source, float4(coord + offset * kOffsetInner, 0.0f, 0.0f)) * kWeightInner;
-	blurred += tex2Dlod(source, float4(coord - offset * kOffsetInner, 0.0f, 0.0f)) * kWeightInner;
-	blurred += tex2Dlod(source, float4(coord + offset * kOffsetOuter, 0.0f, 0.0f)) * kWeightOuter;
-	blurred += tex2Dlod(source, float4(coord - offset * kOffsetOuter, 0.0f, 0.0f)) * kWeightOuter;
+	float zCenter = tex2Dlod(Gbuffer8Map, float4(coord, 0.0f, 0.0f)).r;
+	if (zCenter <= 1e-4f)
+		return tex2Dlod(source, float4(coord, 0.0f, 0.0f));
 
-	return blurred;
+	float3 nCenter = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(coord, 0.0f, 0.0f)));
+	float zTolerance = max(zCenter * 0.08f, 0.25f);
+
+	float4 colorCenter = tex2Dlod(source, float4(coord, 0.0f, 0.0f));
+	float totalWeight = kWeightCenter;
+	float4 blurred = colorCenter * kWeightCenter;
+
+	float2 uvInnerPos = coord + offset * kOffsetInner;
+	float2 uvInnerNeg = coord - offset * kOffsetInner;
+	float2 uvOuterPos = coord + offset * kOffsetOuter;
+	float2 uvOuterNeg = coord - offset * kOffsetOuter;
+
+	// Geometry-aware inner taps
+	float zInnerPos = tex2Dlod(Gbuffer8Map, float4(uvInnerPos, 0.0f, 0.0f)).r;
+	float3 nInnerPos = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(uvInnerPos, 0.0f, 0.0f)));
+	float wInnerPos = kWeightInner * saturate(1.0f - abs(zInnerPos - zCenter) / zTolerance) * saturate(dot(nInnerPos, nCenter));
+	blurred += tex2Dlod(source, float4(uvInnerPos, 0.0f, 0.0f)) * wInnerPos;
+	totalWeight += wInnerPos;
+
+	float zInnerNeg = tex2Dlod(Gbuffer8Map, float4(uvInnerNeg, 0.0f, 0.0f)).r;
+	float3 nInnerNeg = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(uvInnerNeg, 0.0f, 0.0f)));
+	float wInnerNeg = kWeightInner * saturate(1.0f - abs(zInnerNeg - zCenter) / zTolerance) * saturate(dot(nInnerNeg, nCenter));
+	blurred += tex2Dlod(source, float4(uvInnerNeg, 0.0f, 0.0f)) * wInnerNeg;
+	totalWeight += wInnerNeg;
+
+	// Geometry-aware outer taps
+	float zOuterPos = tex2Dlod(Gbuffer8Map, float4(uvOuterPos, 0.0f, 0.0f)).r;
+	float3 nOuterPos = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(uvOuterPos, 0.0f, 0.0f)));
+	float wOuterPos = kWeightOuter * saturate(1.0f - abs(zOuterPos - zCenter) / zTolerance) * saturate(dot(nOuterPos, nCenter));
+	blurred += tex2Dlod(source, float4(uvOuterPos, 0.0f, 0.0f)) * wOuterPos;
+	totalWeight += wOuterPos;
+
+	float zOuterNeg = tex2Dlod(Gbuffer8Map, float4(uvOuterNeg, 0.0f, 0.0f)).r;
+	float3 nOuterNeg = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(uvOuterNeg, 0.0f, 0.0f)));
+	float wOuterNeg = kWeightOuter * saturate(1.0f - abs(zOuterNeg - zCenter) / zTolerance) * saturate(dot(nOuterNeg, nCenter));
+	blurred += tex2Dlod(source, float4(uvOuterNeg, 0.0f, 0.0f)) * wOuterNeg;
+	totalWeight += wOuterNeg;
+
+	return blurred / max(totalWeight, 1e-4f);
 }
 
 #endif // RAY_MMD_SSR_FILTER_FXSUB

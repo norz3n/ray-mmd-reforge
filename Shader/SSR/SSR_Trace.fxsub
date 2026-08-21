@@ -46,10 +46,16 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	float traceDistance = mSSRRangeMax * mSSRRangeScale * (1.0f - NdotV * 0.5f);
 	float normalBias = mSSROffset * (1.0f - NdotV * 0.5f);
 	float3 rayOriginVS = positionVS + surfaceMat.normal * normalBias;
-	float jitter = InterleavedGradientNoise(coord.xy * ViewportSize, 0);
+
+	// Roughness-adaptive start LOD: sharp mirrors start at full-res (LOD 0/1) for crisp contact geometry
+	float surfaceSmoothness = saturate(surfaceMat.smoothness + mSSRSmoothness * 0.5f);
+	int startMip = (surfaceSmoothness > 0.85f) ? 0 : ((surfaceSmoothness > 0.55f) ? 1 : 2);
+
+	int frameCounter = (int)fmod(time * 60.0f, 16.0f);
+	float jitter = InterleavedGradientNoise(coord.xy * ViewportSize, frameCounter);
 	rayOriginVS += reflectRayVS * (jitter * 0.05f);
 
-	HiZTraceResult traceHit = HiZ_TraceRayDetailed(SSR_MAX_RAY_STEPS, 2, rayOriginVS, reflectRayVS, traceDistance, normalBias, mSSRThickness);
+	HiZTraceResult traceHit = HiZ_TraceRayDetailed(SSR_MAX_RAY_STEPS, startMip, rayOriginVS, reflectRayVS, traceDistance, normalBias, mSSRThickness);
 	if (!traceHit.isHit)
 		clip(-1);
 
