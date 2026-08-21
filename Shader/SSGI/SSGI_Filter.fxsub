@@ -10,6 +10,7 @@
 #define RAY_MMD_SSGI_FILTER_FXSUB
 
 #include "shader/SSGI/SSGI_Common.fxsub"
+#include "shader/BilateralCommon.fxsub"
 
 /**
  * Separable Geometry-Aware Joint Bilateral Denoising Pixel Shader.
@@ -65,16 +66,16 @@ float4 SSGIBlurPS(
 		float planeDistA = abs(dot(nCenter, pA - pCenter));
 		float planeDistB = abs(dot(nCenter, pB - pCenter));
 
-		float depthWeightA = saturate(1.0f - planeDistA / planeThreshold);
-		float depthWeightB = saturate(1.0f - planeDistB / planeThreshold);
+		float depthWeightA = BilateralPlaneWeight(planeDistA, planeThreshold);
+		float depthWeightB = BilateralPlaneWeight(planeDistB, planeThreshold);
 
 		float3 nA = GetSSGINormal(uvA);
 		float3 nB = GetSSGINormal(uvB);
 
-		float normalWeightA = saturate(dot(nA, nCenter));
-		float normalWeightB = saturate(dot(nB, nCenter));
+		float normalWeightA = BilateralNormalWeight(nA, nCenter);
+		float normalWeightB = BilateralNormalWeight(nB, nCenter);
 
-		float spatialWeight = exp(-i * i * 0.025f);
+		float spatialWeight = BilateralSpatialWeight((float)i, 0.025f);
 
 		float wA = spatialWeight * depthWeightA * (normalWeightA * normalWeightA);
 		float wB = spatialWeight * depthWeightB * (normalWeightB * normalWeightB);

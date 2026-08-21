@@ -198,7 +198,9 @@ float3 DualLobeSkinSpecular(float nh, float nl, float vh, float nv, float roughn
 
 float3 SpecularBRDF_GGXAniso(float3 N, float3 H, float nh, float nl, float vh, float nv, float3 specular, float3 albedo, float roughness, float anisotropic, float3 shift, float NormalizationFactor)
 {
-	float3 T = normalize(cross(N, float3(0,1,0)) + N * shift.r);
+	// World-up tangent frame; fall back to X axis near hair whorl/crown where cross(N, up) degenerates
+	float3 up = (abs(N.y) > 0.99f) ? float3(1, 0, 0) : float3(0, 1, 0);
+	float3 T = normalize(cross(N, up) + N * shift.r);
 	float3 B = normalize(cross(N, T));
 
 	float aspect = rsqrt(1.0f - anisotropic * 0.9f);

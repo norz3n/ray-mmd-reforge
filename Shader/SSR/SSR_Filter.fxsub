@@ -10,6 +10,7 @@
 #define RAY_MMD_SSR_FILTER_FXSUB
 
 #include "shader/SSR/SSR_Common.fxsub"
+#include "shader/BilateralCommon.fxsub"
 
 /**
  * 5-Tap Separable Gaussian Filter for specular lobe footprint simulation.
@@ -38,36 +39,23 @@ float4 SSR_FilterBlurPS(in float2 coord : TEXCOORD0, uniform sampler source, uni
 	float totalWeight = kWeightCenter;
 	float4 blurred = colorCenter * kWeightCenter;
 
-	float2 uvInnerPos = coord + offset * kOffsetInner;
-	float2 uvInnerNeg = coord - offset * kOffsetInner;
-	float2 uvOuterPos = coord + offset * kOffsetOuter;
-	float2 uvOuterNeg = coord - offset * kOffsetOuter;
+	// Geometry-aware 5-tap accumulation (inner pair, then outer pair)
+	[unroll]
+	for (int tap = 0; tap < 4; ++tap)
+	{
+		float tapOffset = (tap < 2) ? kOffsetInner : kOffsetOuter;
+		float tapWeight = (tap < 2) ? kWeightInner : kWeightOuter;
+		float2 sign2 = (tap == 0 || tap == 2) ? float2(1.0f, 1.0f) : float2(-1.0f, -1.0f);
 
-	// Geometry-aware inner taps
-	float zInnerPos = tex2Dlod(Gbuffer8Map, float4(uvInnerPos, 0.0f, 0.0f)).r;
-	float3 nInnerPos = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(uvInnerPos, 0.0f, 0.0f)));
-	float wInnerPos = kWeightInner * saturate(1.0f - abs(zInnerPos - zCenter) / zTolerance) * saturate(dot(nInnerPos, nCenter));
-	blurred += tex2Dlod(source, float4(uvInnerPos, 0.0f, 0.0f)) * wInnerPos;
-	totalWeight += wInnerPos;
+		float2 uvTap = coord + offset * tapOffset * sign2;
 
-	float zInnerNeg = tex2Dlod(Gbuffer8Map, float4(uvInnerNeg, 0.0f, 0.0f)).r;
-	float3 nInnerNeg = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(uvInnerNeg, 0.0f, 0.0f)));
-	float wInnerNeg = kWeightInner * saturate(1.0f - abs(zInnerNeg - zCenter) / zTolerance) * saturate(dot(nInnerNeg, nCenter));
-	blurred += tex2Dlod(source, float4(uvInnerNeg, 0.0f, 0.0f)) * wInnerNeg;
-	totalWeight += wInnerNeg;
+		float zTap = tex2Dlod(Gbuffer8Map, float4(uvTap, 0.0f, 0.0f)).r;
+		float3 nTap = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(uvTap, 0.0f, 0.0f)));
 
-	// Geometry-aware outer taps
-	float zOuterPos = tex2Dlod(Gbuffer8Map, float4(uvOuterPos, 0.0f, 0.0f)).r;
-	float3 nOuterPos = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(uvOuterPos, 0.0f, 0.0f)));
-	float wOuterPos = kWeightOuter * saturate(1.0f - abs(zOuterPos - zCenter) / zTolerance) * saturate(dot(nOuterPos, nCenter));
-	blurred += tex2Dlod(source, float4(uvOuterPos, 0.0f, 0.0f)) * wOuterPos;
-	totalWeight += wOuterPos;
-
-	float zOuterNeg = tex2Dlod(Gbuffer8Map, float4(uvOuterNeg, 0.0f, 0.0f)).r;
-	float3 nOuterNeg = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(uvOuterNeg, 0.0f, 0.0f)));
-	float wOuterNeg = kWeightOuter * saturate(1.0f - abs(zOuterNeg - zCenter) / zTolerance) * saturate(dot(nOuterNeg, nCenter));
-	blurred += tex2Dlod(source, float4(uvOuterNeg, 0.0f, 0.0f)) * wOuterNeg;
-	totalWeight += wOuterNeg;
+		float wTap = tapWeight * BilateralDepthWeight(zTap, zCenter, zTolerance) * BilateralNormalWeight(nTap, nCenter);
+		blurred += tex2Dlod(source, float4(uvTap, 0.0f, 0.0f)) * wTap;
+		totalWeight += wTap;
+	}
 
 	return blurred / max(totalWeight, 1e-4f);
 }

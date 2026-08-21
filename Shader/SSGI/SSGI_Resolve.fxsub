@@ -27,6 +27,9 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 	float3 rawGi = tex2Dlod(SSGIMapSamp, float4(uvCoord, 0.0f, 0.0f)).rgb;
 	rawGi = clamp(rawGi, 0.0f, 100.0f);
 
+	// Pre-albedo gathered irradiance, reused below as a local radiance field for indirect specular
+	float3 gatherIrradiance = rawGi;
+
 #if SSDO_QUALITY > 0
 	float rawAO = tex2Dlod(SSDOMapSamp, float4(uvCoord, 0.0f, 0.0f)).w;
 	float occlusion = min((mat.lightModel == SHADINGMODELID_GLASS) ? 1.0f : rawAO, mat.visibility);
@@ -81,8 +84,24 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 	rawGi *= multiBounce;
 #endif
 
+#if SSGI_SPECULAR_GI
+	// Rough specular indirect: Fresnel(F0)-weighted slice of the gathered irradiance.
+	// Fades out on mirror-smooth surfaces (SSR covers those) and is skipped for skin/glass/emissive models.
+	float3 specGi = 0.0f;
+	if (!isSkin && mat.lightModel != SHADINGMODELID_GLASS && mat.lightModel != SHADINGMODELID_EMISSIVE)
+	{
+		float3 F = mat.specular + (1.0f - mat.specular) * pow(1.0f - NdV, 5.0f);
+		float roughWeight = saturate(1.0f - mat.smoothness * 1.25f);
+		specGi = gatherIrradiance * F * (roughWeight * 0.5f);
+	}
+#endif
+
 	float receiverVis = tex2Dlod(SSGIVisibilityMapSamp, float4(uvCoord, 0.0f, 0.0f)).a;
+#if SSGI_SPECULAR_GI
+	return float4(clamp((rawGi + specGi) * mSSGIIntensity * occlusion * receiverVis, 0.0f, 100.0f), 0.0f);
+#else
 	return float4(clamp(rawGi * mSSGIIntensity * occlusion * receiverVis, 0.0f, 100.0f), 0.0f);
+#endif
 }
 
 #endif // RAY_MMD_SSGI_RESOLVE_FXSUB

@@ -1,0 +1,43 @@
+/**
+ * Ray-MMD ReForge: Shared Geometry-Aware Bilateral Weighting Helpers
+ *
+ * Module: BilateralCommon.fxsub
+ * Common edge-stopping functions used by the SSGI and SSR spatial denoising filters.
+ */
+
+#ifndef RAY_MMD_BILATERAL_COMMON_FXSUB
+#define RAY_MMD_BILATERAL_COMMON_FXSUB
+
+/**
+ * Plane-distance edge stop: weight of a neighbour sample lying off the center tangent plane.
+ */
+inline float BilateralPlaneWeight(float planeDist, float planeThreshold)
+{
+	return saturate(1.0f - planeDist / planeThreshold);
+}
+
+/**
+ * Raw depth-difference edge stop (cheaper variant used by the SSR roughness filter).
+ */
+inline float BilateralDepthWeight(float zSample, float zCenter, float zTolerance)
+{
+	return saturate(1.0f - abs(zSample - zCenter) / zTolerance);
+}
+
+/**
+ * Normal similarity edge stop.
+ */
+inline float BilateralNormalWeight(float3 nSample, float3 nCenter)
+{
+	return saturate(dot(nSample, nCenter));
+}
+
+/**
+ * Gaussian spatial falloff for tap index i; sigma is the precomputed exp() coefficient.
+ */
+inline float BilateralSpatialWeight(float i, float sigma)
+{
+	return exp(-i * i * sigma);
+}
+
+#endif // RAY_MMD_BILATERAL_COMMON_FXSUB

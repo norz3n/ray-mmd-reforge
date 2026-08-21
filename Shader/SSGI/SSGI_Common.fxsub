@@ -47,6 +47,11 @@
 float mSSGIIntensityPlus : CONTROLOBJECT < string name="ray_controller.pmx"; string item = "SSGI+"; >;
 float mSSGIIntensityMinus : CONTROLOBJECT < string name="ray_controller.pmx"; string item = "SSGI-"; >;
 
+// DebugController tuning knobs (all default to stock behavior at morph weight 0)
+float mDbgSSGIEmissiveBoost : CONTROLOBJECT < string name="DebugController.pmx"; string item = "SSGIEmissiveBoost"; >;
+float mDbgSSGIModeGain      : CONTROLOBJECT < string name="DebugController.pmx"; string item = "SSGIModeGain"; >;
+float mDbgSSGISkyLight      : CONTROLOBJECT < string name="DebugController.pmx"; string item = "SSGISkyLight"; >;
+
 /**
  * Fetches linear view-space depth for SSGI processing.
  */

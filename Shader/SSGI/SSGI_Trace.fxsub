@@ -26,6 +26,7 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 	float3 pOrigin = GetViewPosition(projInfo, uvCoord.xy, zOrigin);
 
 	// Adaptive world radius scaling (mode 1: focused bounce, mode 2: large room-scale gather)
+	// Cone angle widens/narrows the gather cone; stock default (mSSGIConeAngleDefault = 0.5) keeps the radius unchanged
 #if GI_ENABLE >= 2
 	float maxWorldDistance = max(mSSGIScale * 75.0f, 5.0f);
 	float projScale = max(abs(projInfo.x), 1e-4f);
@@ -35,6 +36,7 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 	float projScale = max(abs(projInfo.x), 1e-4f);
 	float screenRadius = clamp(maxWorldDistance / (zOrigin * projScale), 0.01f, 0.6f);
 #endif
+	screenRadius *= clamp(mSSGIConeAngle * 2.0f, 0.25f, 4.0f);
 
 	float2 screenPixel = uvCoord.xy * ViewportSize;
 #if AA_QUALITY == 6
@@ -124,7 +126,7 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 
 								if (isEmissive)
 								{
-									sampleColor *= 4.0f;
+									sampleColor *= lerp(4.0f, 16.0f, mDbgSSGIEmissiveBoost);
 								}
 
 								// Front-to-back ray accumulation
@@ -142,22 +144,31 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 		}
 
 #if GI_ENABLE >= 2
-		// Sky/background radiance fallback: if the ray escaped into open sky in this direction (Indirect mode only)
+		// Sky/background radiance fallback: if the ray escaped into open sky in this direction (Indirect mode only).
+		// Uses the true reconstructed view-space direction to each sky tap instead of a synthetic screen-angle
+		// field (which produced wave banding), and splits the contribution over two taps so residual
+		// structure dissolves into grain that the bilateral blur removes.
 		if (rayOcc < 0.85f)
 		{
-			float2 skyUv = uvCoord.xy + direction * (screenRadius * 0.90f);
-			if (skyUv.x >= 0.0f && skyUv.x <= 1.0f && skyUv.y >= 0.0f && skyUv.y <= 1.0f)
+			[unroll]
+			for (int t = 0; t < 2; ++t)
 			{
-				float skyDepth = GetSSGILinearDepth(skyUv);
-				if (skyDepth <= 1e-4f)
+				float tapT = (t == 0) ? 0.55f : 0.90f;
+				float2 skyUv = uvCoord.xy + direction * (screenRadius * tapT);
+				if (skyUv.x >= 0.0f && skyUv.x <= 1.0f && skyUv.y >= 0.0f && skyUv.y <= 1.0f)
 				{
-					float3 skyLightDir = normalize(float3(direction.x, -direction.y, 0.5f));
-					float NdotSky = saturate(dot(nOrigin, skyLightDir));
-					if (NdotSky > 0.0f)
+					float skyDepth = GetSSGILinearDepth(skyUv);
+					if (skyDepth <= 1e-4f)
 					{
-						float3 skyColor = tex2Dlod(ShadingMapSamp, float4(skyUv, 0.0f, 0.0f)).rgb;
-						float skyWeight = NdotSky * 0.15f * (1.0f - rayOcc);
-						rayColor += clamp(skyColor, 0.0f, 10.0f) * skyWeight;
+						float3 pSky = GetViewPosition(projInfo, skyUv, maxWorldDistance);
+						float3 skyDir = normalize(pSky - pOrigin);
+						float NdotSky = saturate(dot(nOrigin, skyDir));
+						if (NdotSky > 0.0f)
+						{
+							float3 skyColor = tex2Dlod(ShadingMapSamp, float4(skyUv, 0.0f, 0.0f)).rgb;
+							float skyWeight = NdotSky * lerp(0.15f, 0.45f, mDbgSSGISkyLight) * (1.0f - rayOcc) / 2.0f;
+							rayColor += clamp(skyColor, 0.0f, 10.0f) * skyWeight;
+						}
 					}
 				}
 			}
@@ -169,10 +180,10 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 
 #if GI_ENABLE >= 2
 	float intensityMultiplier = lerp(lerp(1.0f, 15.0f, mSSGIIntensityPlus), 0.0f, mSSGIIntensityMinus);
-	float modeMultiplier = 8.0f; // Broad, rich room illumination with deep colored bounce
+	float modeMultiplier = 8.0f * lerp(1.0f, 2.5f, mDbgSSGIModeGain); // Broad, rich room illumination with deep colored bounce
 #else
 	float intensityMultiplier = lerp(lerp(1.0f, 3.0f, mSSGIIntensityPlus), 0.0f, mSSGIIntensityMinus);
-	float modeMultiplier = 1.0f; // Focused accent bounce
+	float modeMultiplier = 1.0f * lerp(1.0f, 3.0f, mDbgSSGIModeGain); // Focused accent bounce
 #endif
 	float3 finalGi = (totalGi / float(SSGI_ANGLES)) * (PI * intensityMultiplier * modeMultiplier);
 
