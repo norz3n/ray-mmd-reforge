@@ -160,7 +160,11 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 	float2 samplePixel = screen / ViewportSize;
 	float3 sampleNormal = GetNormal(uv.xy);
 	float3 samplePosition = GetViewPosition(projConstant, samplePixel, linearizeDepth(uv.xy));
+#if AA_QUALITY == 6
 	int frameCounter = (int)fmod(time * 60.0, 16.0);
+#else
+	int frameCounter = 0;
+#endif
 	float2 sampleRandom = float2(InterleavedGradientNoise(screen, frameCounter), PseudoRandom(screen + frameCounter));
 
 	float alpha = PI_2 / HBAO_DIRECTION_COUNT;

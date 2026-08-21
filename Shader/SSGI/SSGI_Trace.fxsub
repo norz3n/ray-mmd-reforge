@@ -37,7 +37,12 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 #endif
 
 	float2 screenPixel = uvCoord.xy * ViewportSize;
-	float noiseAngle = InterleavedGradientNoise(screenPixel);
+#if AA_QUALITY == 6
+	int frameCounter = (int)fmod(time * 60.0f, 16.0f);
+#else
+	int frameCounter = 0;
+#endif
+	float noiseAngle = InterleavedGradientNoise(screenPixel, frameCounter);
 	float noiseRadius = frac(noiseAngle * 5.588238f + (screenPixel.x + screenPixel.y * 5.588238f) * 0.61803398875f);
 
 	float startAngle = noiseAngle * PI_2;
@@ -143,6 +148,21 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 							}
 						}
 					}
+				}
+			}
+			else if (zSample <= 1e-4f)
+			{
+				// Sky/background radiance fallback: gather ambient indirect light from outdoor skybox
+				float3 skyLightVector = normalize(float3(direction.x, -direction.y, 0.45f));
+				float NdotSky = dot(nOrigin, skyLightVector);
+				if (NdotSky > -0.2f)
+				{
+					float3 skyColor = tex2Dlod(ShadingMapSamp, float4(currentUv, 0.0f, 0.0f)).rgb;
+					float skyWeight = saturate(NdotSky * 0.6f + 0.4f) * 0.25f * (1.0f - rayOcc);
+					rayColor += clamp(skyColor, 0.0f, 15.0f) * skyWeight;
+					rayOcc += skyWeight;
+					if (rayOcc > 0.95f)
+						break;
 				}
 			}
 		}

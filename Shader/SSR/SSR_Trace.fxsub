@@ -51,7 +51,11 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	float surfaceSmoothness = saturate(surfaceMat.smoothness + mSSRSmoothness * 0.5f);
 	int startMip = (surfaceSmoothness > 0.85f) ? 0 : ((surfaceSmoothness > 0.55f) ? 1 : 2);
 
+#if AA_QUALITY == 6
 	int frameCounter = (int)fmod(time * 60.0f, 16.0f);
+#else
+	int frameCounter = 0;
+#endif
 	float jitter = InterleavedGradientNoise(coord.xy * ViewportSize, frameCounter);
 	rayOriginVS += reflectRayVS * (jitter * 0.05f);
 
