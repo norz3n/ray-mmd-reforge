@@ -11,14 +11,15 @@
 #define SHADINGMODELID_MASK       10
 
 // How much SSAO/HBAO affects skin (0 = ignored, 1 = same as other materials).
-#define SKIN_AO_STRENGTH          0.75f
+#define SKIN_AO_STRENGTH          0.45
 // Dermal reflectance range for GI (light skin ~30-45%, dark ~10-20%; melanin/hemoglobin absorption).
 #define SKIN_GI_REFLECTANCE_DARK  0.15f
 #define SKIN_GI_REFLECTANCE_LIGHT 0.42f
-// Total skin diffuse response (Lambert + wrap + translucency + IBL back-light) may not exceed
-// the incident irradiance: dermal reflectance already accounts for ALL subsurface scattering,
-// so additive SSS terms must redistribute energy, never create it (UE5-style conservation).
-#define SKIN_SSS_ENERGY_BUDGET    1.0f
+// Total skin diffuse response (Lambert + wrap + translucency + IBL back-light) is capped at
+// BUDGET x incident irradiance. 1.0 = strict physical conservation (SSS only redistributes
+// energy); >1.0 lets the brightest texture regions (blush, highlights) keep their punch for
+// a more artistic glowing look, at the cost of skin possibly outshining white surfaces.
+#define SKIN_SSS_ENERGY_BUDGET    1.40f
 // SSGI brightness compensation: max +10% on reception, scaled by luminance (dim skin gets ~0,
 // bright skin gets the full cap)
 #define SKIN_GI_COMPENSATION      0.10f
