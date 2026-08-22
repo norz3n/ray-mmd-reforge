@@ -831,6 +831,12 @@ float3 GetAlbedo(float2 coord, float3 worldPos, float3 normal)
 		albedoColor *= MorphColor;
 	#endif
 
+#ifdef GLASS_TINT_EXPONENT
+	// Tinted glass (ALBEDO_MAP_APPLY_DIFFUSE): compress albedo toward white so transmission
+	// stays strongly transparent while keeping the hue; lower exponent = clearer glass
+	albedoColor = pow(albedoColor, GLASS_TINT_EXPONENT);
+#endif
+
 	return albedoColor;
 #else
 	float3 albedoColor = albedo;
@@ -840,6 +846,9 @@ float3 GetAlbedo(float2 coord, float3 worldPos, float3 normal)
 	#if ALBEDO_MAP_APPLY_MORPH_COLOR
 		albedoColor *= MorphColor;
 	#endif
+#ifdef GLASS_TINT_EXPONENT
+	albedoColor = pow(albedoColor, GLASS_TINT_EXPONENT);
+#endif
 	return albedoColor;
 #endif
 }
