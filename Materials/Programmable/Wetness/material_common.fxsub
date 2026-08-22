@@ -1312,7 +1312,8 @@ void MaterialVS(
 GbufferParam MaterialPS(
 	in float3 normal   : TEXCOORD0,
 	in float2 coord    : TEXCOORD1,
-	in float4 worldPos : TEXCOORD2)
+	in float4 worldPos : TEXCOORD2,
+	in float2 vpos     : VPOS)
 {
 	normal = normalize(normal);
 
@@ -1328,7 +1329,7 @@ GbufferParam MaterialPS(
 #endif
 
 	float alpha = GetAlpha(coord);
-	clip(alpha - ALPHA_THRESHOLD);
+	clip(alpha - AlphaDither(vpos) * ALPHA_THRESHOLD);
 #if ALPHA_MAP_FROM == 2
 	clip(-1);
 #endif
@@ -1373,7 +1374,8 @@ GbufferParam MaterialPS(
 GbufferParam Material2PS(
 	in float3 normal   : TEXCOORD0,
 	in float2 coord    : TEXCOORD1,
-	in float4 worldPos : TEXCOORD2)
+	in float4 worldPos : TEXCOORD2,
+	in float2 vpos     : VPOS)
 {
 	normal = normalize(normal);
 
@@ -1412,7 +1414,7 @@ GbufferParam Material2PS(
 #if ALPHA_MAP_FROM == 2
 	material.alpha = alpha;
 #else
-	material.alpha = alpha > ALPHA_THRESHOLD ? 0 : alpha;
+	material.alpha = (alpha > AlphaDither(vpos) * ALPHA_THRESHOLD) ? 0 : alpha;
 #endif
 
 	onFetchDataAfter(material, normal, coord, worldPos);
