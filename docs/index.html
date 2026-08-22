@@ -38,7 +38,7 @@
     <header class="hero">
         <div class="hero-content fade-in">
             <h1>Heavyweight graphics.<br><span class="highlight-text">Reforged for perfection.</span></h1>
-            <p>A modified fork of the original Ray-MMD library, focused on bridging realistic lighting with stylized rendering. We integrated AAA modern graphics techniques to provide a stable, noise-free image out of the box.</p>
+            <p>A modified fork of the original Ray-MMD library, rebuilt around a single unified Hi-Z buffer that accelerates every screen-space effect — reflections, global illumination, ambient occlusion, contact shadows, and glass refraction. Modern AAA graphics techniques for a stable, physically grounded image out of the box.</p>
             <div class="hero-buttons">
                 <div class="download-group">
                     <a href="https://github.com/norz3n/ray-mmd-reforge/archive/refs/heads/master.zip" class="btn-primary btn-large" id="download-btn">Download</a>
@@ -66,39 +66,69 @@
         
         <div class="feature-grid">
             <div class="feature-card fade-in">
-                <div class="feature-icon"><i class="ph ph-magic-wand"></i></div>
-                <h3>Temporal Anti-Aliasing</h3>
-                <p>Improved edge anti-aliasing and temporal stability to reduce subpixel flickering, providing a stable image on complex meshes.</p>
+                <div class="feature-icon"><i class="ph ph-stack"></i></div>
+                <h3>Unified Hi-Z Core</h3>
+                <p>One hierarchical Z-buffer shared by SSR, SSGI, HBAO/SSDO, contact shadows, and glass refraction — academically correct DDA traversal with near-plane clamping and cell-boundary fixes.</p>
             </div>
-            
+
             <div class="feature-card fade-in" style="transition-delay: 0.1s;">
                 <div class="feature-icon"><i class="ph ph-cube"></i></div>
-                <h3>Screen Space Voxel GI</h3>
-                <p>Hybrid GI architecture combining voxel grids with screen-space cone tracing for real-time indirect lighting without NaN artifacts.</p>
+                <h3>Screen Space Global Illumination</h3>
+                <p>Modular SSGI with progressive Hi-Z LOD gather, multi-bounce interreflection, rough specular GI, and visibility masking — replacing legacy VXGI entirely.</p>
             </div>
-            
+
             <div class="feature-card fade-in" style="transition-delay: 0.2s;">
                 <div class="feature-icon"><i class="ph ph-circle-half"></i></div>
                 <h3>Hybrid HBAO / SSDO</h3>
-                <p>Horizon-based ambient occlusion and directional occlusion for accurate contact shading and material definition.</p>
+                <p>Horizon-based ambient occlusion and directional occlusion with multi-scale Hi-Z sampling, plus occlusion-aware bent normals for believable indirect shading.</p>
             </div>
-            
+
             <div class="feature-card fade-in" style="transition-delay: 0.3s;">
                 <div class="feature-icon"><i class="ph ph-cloud-moon"></i></div>
-                <h3>Percentage-Closer Soft Shadows</h3>
-                <p>Distance-based soft shadows that blur based on the distance from the caster, reducing harsh shadow edges.</p>
+                <h3>PCSS &amp; Variance Shadow Maps</h3>
+                <p>Percentage-closer soft shadows with variable penumbra for local lights, and grain-free high-resolution VSM sun shadows that stay clean on character faces.</p>
             </div>
-            
+
             <div class="feature-card fade-in" style="transition-delay: 0.4s;">
                 <div class="feature-icon"><i class="ph ph-lightning"></i></div>
-                <h3>Optimized SSR</h3>
-                <p>Upgraded Screen Space Reflections using Binary Search and depth-aware blur for improved performance and accuracy.</p>
+                <h3>PBR Screen-Space Reflections</h3>
+                <p>Clean-room Hi-Z ray traversal with binary-search refinement, depth-aware bilateral blur, edge fade, and energy-conserving BRDF integration.</p>
             </div>
-            
+
             <div class="feature-card fade-in" style="transition-delay: 0.5s;">
-                <div class="feature-icon"><i class="ph ph-user-focus"></i></div>
-                <h3>Contact Shadows</h3>
-                <p>Screen-space raymarched shadows to reduce light leaking and grounding issues, improving spatial grounding.</p>
+                <div class="feature-icon"><i class="ph ph-sun-horizon"></i></div>
+                <h3>AgX Tone Mapping</h3>
+                <p>Exact 6th-order polynomial implementation of the official Blender 4.0 AgX mapper (default), with an ACES-fitted option for a filmic, highlight-preserving look.</p>
+            </div>
+
+            <div class="feature-card fade-in" style="transition-delay: 0.1s;">
+                <div class="feature-icon"><i class="ph ph-magic-wand"></i></div>
+                <h3>Temporal Anti-Aliasing</h3>
+                <p>5-tap Catmull-Rom bicubic history reconstruction, Karis luma weighting, variance clipping, and depth-validated history for a stable, flicker-free image.</p>
+            </div>
+
+            <div class="feature-card fade-in" style="transition-delay: 0.2s;">
+                <div class="feature-icon"><i class="ph ph-sparkle"></i></div>
+                <h3>Physical Skin, Hair &amp; Eyes</h3>
+                <p>Dynamic-curvature subsurface scattering with scale-invariant thickness, procedural anisotropic hair with Kajiya-Kay highlights, and corneal-dome procedural eyes.</p>
+            </div>
+
+            <div class="feature-card fade-in" style="transition-delay: 0.3s;">
+                <div class="feature-icon"><i class="ph ph-drop"></i></div>
+                <h3>Glass &amp; Transparency Pipeline</h3>
+                <p>Chromatic-dispersion refraction traced against the scene Hi-Z, tinted glass presets inheriting MMD diffuse color, and forced-transparency material presets.</p>
+            </div>
+
+            <div class="feature-card fade-in" style="transition-delay: 0.4s;">
+                <div class="feature-icon"><i class="ph ph-aperture"></i></div>
+                <h3>Cinematic Post-Processing</h3>
+                <p>Clean-room hexagonal bokeh DOF with blade control, anti-firefly Karis bloom, FidelityFX CAS sharpening, anamorphic flares, and dithered volumetrics.</p>
+            </div>
+
+            <div class="feature-card fade-in" style="transition-delay: 0.5s;">
+                <div class="feature-icon"><i class="ph ph-leaf"></i></div>
+                <h3>Procedural Foliage &amp; Cloth</h3>
+                <p>Vertex wind animation engine with four vegetation presets, rewritten cloth BRDF with Charlie Sheen distribution, and thin-film iridescence for advanced surfaces.</p>
             </div>
         </div>
     </section>
@@ -110,13 +140,13 @@
         </div>
         
         <div class="comparison-container fade-in">
-            <h3 class="comparison-title">SSVGI & PCSS</h3>
+            <h3 class="comparison-title">SSGI & PCSS</h3>
             <div class="comparison-slider">
                 <!-- After Image (Reforge) -->
-                <img src="./pics/miku_showcase_gi.png" alt="After (SSVGI)" class="img-after">
+                <img src="./pics/miku_showcase_gi.png" alt="After (SSGI)" class="img-after">
                 <!-- Before Image Wrapper (Original) -->
                 <div class="img-before-wrapper">
-                    <img src="./pics/miku_showcase_without_gi.png" alt="Before (No SSVGI)" class="img-before">
+                    <img src="./pics/miku_showcase_without_gi.png" alt="Before (No SSGI)" class="img-before">
                 </div>
                 <!-- Controls -->
                 <input type="range" min="0" max="100" value="50" class="slider-input">
