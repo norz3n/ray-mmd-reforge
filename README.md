@@ -5,12 +5,12 @@ Ray-MMD Reforge
   <img src="./Shader/screenshots/logo.png" alt="logo" width="600">
 </div>
 
-　　**Ray-MMD Reforge** is a modified fork of the original Ray-MMD library for [mikumikudance](http://www.geocities.jp/higuchuu4/index_e.htm). 
-　　Focused on bridging realistic lighting with stylized rendering, Reforge updates the original engine pipeline by integrating modern graphics techniques. We've added **Temporal Anti-Aliasing (TAA)**, **Screen Space Voxel Global Illumination (SSVGI)**, **Hybrid HBAO/SSDO**, and **Percentage-Closer Soft Shadows (PCSS)** to improve shadow accuracy, reduce visual noise, and provide a more stable image out of the box.
+　　**Ray-MMD Reforge** is a modified fork of the original Ray-MMD library for [mikumikudance](http://www.geocities.jp/higuchuu4/index_e.htm).
+　　Focused on bridging realistic lighting with stylized rendering, Reforge rebuilds the engine pipeline around a single **unified Hi-Z buffer** that accelerates every screen-space effect — reflections, global illumination, ambient occlusion, contact shadows, and glass refraction. On top of it sit modern graphics techniques: **Temporal Anti-Aliasing (TAA)**, **Screen Space Global Illumination (SSGI)**, **Hybrid HBAO/SSDO**, **Percentage-Closer Soft Shadows (PCSS)**, and the **AgX tone mapper** — for a stable, physically grounded image out of the box.
 
 Screenshots:
 ------------
-> *Note: These are legacy screenshots from the original Ray-MMD. New showcases demonstrating SSVGI, PCSS, and TAA are coming soon!*
+> *Note: These are legacy screenshots from the original Ray-MMD. New showcases demonstrating SSGI, PCSS, and TAA are coming soon!*
 
 [![link text](./Shader/screenshots/screen1_small.jpg)](https://raw.githubusercontent.com/ray-cast/ray-mmd/master/Shader/screenshots/screen1.jpg)
 [![link text](./Shader/screenshots/screen2_small.png)](https://raw.githubusercontent.com/ray-cast/ray-mmd/master/Shader/screenshots/screen2.png)
@@ -24,16 +24,49 @@ Requirement :
 * Direct3D 9 With Shader Model 3.0 (ps_3_0)
 * **Powerful GPU recommended** due to advanced shading techniques.
 
-Reforge Exclusive Features (v1.8.0) :
+Reforge Exclusive Features (through v1.13.0) :
 ------------
-* **Temporal Anti-Aliasing (TAA)**: Improved edge anti-aliasing and temporal stability to reduce subpixel flickering.
-* **Hybrid HBAO / SSDO**: Horizon-based ambient occlusion and directional occlusion for more accurate contact shading.
-* **Refined Shadow Architecture (v1.8.0)**: Directional lights (Sun) now use ultra-clean, high-resolution Variance Shadow Maps (VSM) to completely eliminate film grain noise and shadow acne on character faces, while PCSS is intelligently reserved for local lights (Point/Spot).
-* **Screen Space Voxel Global Illumination (SSVGI) & Hi-Z (v1.8.0)**: Hybrid GI architecture combining voxel grids with screen-space cone tracing for real-time indirect lighting. Fully integrates Hierarchical Z-Buffer (Hi-Z) for accelerated raymarching and includes fixes for NaN/INF artifacts.
-* **Contact Shadows**: Screen-space raymarched shadows to reduce light leaking and grounding issues.
-* **Optimized SSR & Hi-Z Passes (v1.8.0)**: Fixed broken Hierarchical Z-Buffer (Hi-Z) shader passes. Upgraded Screen Space Reflections using Binary Search and depth-aware blur for better performance and accuracy.
-* **Depth-Aware AA Pipeline**: Fixed black screen issues and updated edge detection for SMAA/TAA passes.
-* **Procedural Hair Materials**: Mathematically generated anisotropic hair normals that eliminate the need for heavy, repetitive static textures.
+
+**Unified Hi-Z Core**
+* **Unified Hierarchical Z-Buffer**: one Hi-Z acceleration structure shared by SSR, SSGI, HBAO/SSDO, Contact Shadows, and glass refraction.
+* **Clean-Room Hi-Z Traversal**: academically correct DDA-based hierarchical stepping with near-plane clamping and cell-boundary artifact fixes.
+
+**Global Illumination**
+* **Screen Space Global Illumination (SSGI)**: modular architecture with progressive Hi-Z LOD gather, replacing legacy VXGI entirely.
+* **Indirect Multi-Bounce Mode**: Jimenez-style albedo compensation, hemispherical Lambertian emission lobe, quadratic AO attenuation, and outdoor sky radiance gather.
+* **Rough Specular GI**: cone-angle-controlled glossy indirect reflections with tunable debug morphs.
+* **Visibility Masking**: dedicated SSGI visibility pass with quality presets to suppress self-illumination feedback on skin.
+* **Photometric Compression**: Reinhard soft-knee curve for natural dynamic range in lit scenes.
+
+**Reflections & Occlusion**
+* **PBR Screen-Space Reflections**: binary-search refinement, depth-aware bilateral blur, edge fade, and energy-conserving BRDF integration.
+* **Hybrid HBAO / SSDO**: horizon-based and directional occlusion with multi-scale Hi-Z sampling for accurate contact shading.
+* **Contact Shadows**: screen-space shadows rewritten on Hi-Z hierarchical ray traversal, with depth-discontinuity artifact fixes.
+* **Directional Bent Normals**: occlusion-aware normal bending for more believable indirect shading.
+
+**Lighting & Shadows**
+* **PCSS Variable Penumbra**: mathematically correct percentage-closer soft shadows for local lights, with calibrated PCF filtering to eliminate staircasing and acne.
+* **Variance Shadow Maps**: ultra-clean high-resolution sun shadows, completely grain-free on character faces.
+* **Dithered Volumetrics**: interleaved gradient noise for godrays and volumetric fog — smooth gradients without banding.
+
+**Materials**
+* **Dual-Lobe Skin Specular**: physically based dermal reflectance with strict light absorption for natural skin tone under GI.
+* **Analytic Pre-Integrated Skin Shading**: dynamic-curvature subsurface scattering, screen-space depth-thickness measurement, and physical forward transmission for organic translucency. Scale-invariant, so miniature models scatter correctly too.
+* **Procedural Hair Materials**: mathematical anisotropic hair normals plus Kajiya-Kay highlights — ported hbee hair presets with no heavy static textures.
+* **Physical Cloth & ClearCoat**: rewritten BRDFs with cloth-DFG and Charlie Sheen distribution.
+* **Procedural Eyes**: spherical corneal dome normal generation with limbal ring, UV-atlas safe, and CONVEX_NORMAL inversion mode for concave eye meshes. Dedicated Cornea ClearCoat eye materials included.
+* **Glass Pipeline**: tinted glass presets inheriting MMD diffuse color, chromatic-dispersion refraction, and Hi-Z traced refraction validated against scene depth.
+* **Wetness Special-Case Material**: now with ordered-dither alpha clipping; alpha cutout threshold unified at 0.5 across all passes.
+* **Procedural Foliage Wind**: vertex wind animation engine with four vegetation presets.
+* **Advanced Surface Detail**: thin-film iridescence, specular geometric anti-aliasing, Ultra Quality bump maps, and expanded Auto-Normal material presets.
+
+**Post-Processing**
+* **AgX Tone Mapping**: exact 6th-order polynomial implementation of the official Blender 4.0 AgX mapper (default), with an ACES-fitted option.
+* **Temporal Anti-Aliasing (TAA)**: 5-tap Catmull-Rom bicubic history reconstruction, Karis luma weighting, variance clipping, and depth-validated history.
+* **Cinematic Bokeh DOF**: clean-room hexagonal and cinematic bokeh with blade count control.
+* **Anti-Firefly Bloom**: Karis 13-tap downsampling filter with a soft-knee curve.
+* **Image Enhancement**: AMD FidelityFX CAS sharpening, procedural cinematic film grain, and a Panavision anamorphic lens flare profile.
+* **2-Band Cel-Shading**: optional stylized ramp integrated into the lighting path.
 
 Standard Features (Inherited) :
 ------------
@@ -67,7 +100,7 @@ Credits:
 * **ikeno** - Referencing algorithms and mathematical concepts from `ikVXGI` for Global Illumination.
 
 **Original Engine:**
-Financially supported on [Patreon](http://www.patreon.com/cubizer):  
+Financially supported on [Patreon](http://www.patreon.com/cubizer):
 
 #### Platinum supporters:
 * Penti_mmd
@@ -119,6 +152,8 @@ Credits :
 --------
 * Clean Room Hierarchical Z-Buffer (Hi-Z) & PBR Screen-Space Reflections based on Morgan McGuire & Michael Mara (2014) and Yasin Uludag (GPU Pro 5, 2014).
 * HBSSDO rendering concepts referenced from [dendewa](https://dendewa.vercel.app/).
+* AgX Tone Mapping per the official Blender 4.0 implementation ([link](https://github.com/EaryChow/AgX)).
+* Karis anti-firefly downsampling and luma weighting from Brian Karis' "Next Generation Post Processing in Call of Duty: Advanced Warfare".
 
 References :
 --------
