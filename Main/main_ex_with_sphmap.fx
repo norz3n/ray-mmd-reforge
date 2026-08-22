@@ -4,7 +4,7 @@
 #define ALPHA_MAP_FILE "alpha.png"
 
 const float alpha = 1.0;
-const float alphaThreshold = 0.999;
+const float alphaThreshold = 0.5;
 const float alphaMapLoopNum = 1.0;
 
 // it has no effect on transparent objects, only used for matcap right now
