@@ -12,6 +12,25 @@
 #include "shader/SSGI/SSGI_Common.fxsub"
 #include "shader/HiZ/HiZ_Main.fxsub"
 
+#if IBL_QUALITY
+/**
+ * Minimal 2-tap decode of the checkerboard-packed EnvLightMap.
+ *
+ * ibl.fxsub's DecodeYcbcr costs 5 taps plus chroma edge filtering and blew the
+ * ps_3_0 temp register budget (X4505) when inlined into the gather loop.  The
+ * env map is pre-blurred, so the edge filter is unnecessary here — only the
+ * neighbouring pixel's interleaved chroma channel is required.
+ */
+float3 SampleSkyRadiance(float2 skyUv)
+{
+	float4 packed = tex2Dlod(EnvLightMapSamp, float4(skyUv, 0.0f, 0.0f));
+	float4 neighbor = tex2Dlod(EnvLightMapSamp, float4(skyUv + float2(ViewportOffset2.x, 0.0f), 0.0f, 0.0f));
+	bool pattern = (fmod(skyUv.x * ViewportSize.x, 2.0f) == fmod(skyUv.y * ViewportSize.y, 2.0f));
+	float3 ycbcr = pattern ? float3(packed.rg, neighbor.g) : float3(packed.r, neighbor.g, packed.g);
+	return DecodeYcbcr(ycbcr);
+}
+#endif
+
 /**
  * Screen-Space Global Illumination Radiance Integration Pixel Shader.
  */
@@ -189,12 +208,13 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 		if (rayOcc < 0.85f)
 		{
 			[unroll]
-			for (int t = 0; t < 2; ++t)
+			for (int t = 0; t < 4; ++t)
 			{
 				// Per-pixel jittered tap distances: a fixed tapT makes the reconstructed sky
-				// direction a smooth screen-angle field (visible bands); jitter turns it into grain
-				float tapT = (t == 0) ? lerp(0.40f, 0.70f, rayJitter)
-				                      : lerp(0.72f, 0.95f, frac(rayJitter * 1.61803398875f));
+				// direction a smooth screen-angle field (visible bands); jitter turns it into
+				// grain that the bilateral blur removes.  Four taps keep a small bright sky
+				// keyhole (a window) from collapsing into a single hard streak.
+				float tapT = lerp(0.30f, 0.95f, frac(rayJitter * 1.61803398875f + float(t) * 0.265f));
 				float2 skyUv = uvCoord.xy + direction * (screenRadius * tapT);
 				if (skyUv.x >= 0.0f && skyUv.x <= 1.0f && skyUv.y >= 0.0f && skyUv.y <= 1.0f)
 				{
@@ -206,11 +226,19 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 						float NdotSky = saturate(dot(nOrigin, skyDir));
 						if (NdotSky > 0.0f)
 						{
-							// ShadingMap is empty where no geometry was shaded — fall back to the
-							// MMD background (same pattern as the traced glass refraction)
-								float3 skyColor = tex2Dlod(ShadingMapSamp, float4(skyUv, 0.0f, 0.0f)).rgb;
-								skyColor = any(skyColor) ? skyColor : srgb2linear(tex2Dlod(ScnSamp, float4(skyUv, 0.0f, 0.0f)).rgb);
-							float skyWeight = NdotSky * lerp(0.15f, 0.45f, mDbgSSGISkyLight) * (1.0f - rayOcc) / 2.0f;
+#if IBL_QUALITY
+							// EnvLightMap is the HDR screen-space projection of the environment
+							// alone (its DefaultEffect hides all geometry), so a background pixel
+							// holds the true sky radiance for that direction — unlike the
+							// tonemapped LDR scene background in ScnSamp.
+							float3 skyColor = SampleSkyRadiance(skyUv);
+#else
+							float3 skyColor = srgb2linear(tex2Dlod(ScnSamp, float4(skyUv, 0.0f, 0.0f)).rgb);
+#endif
+							// Total over 4 taps: NdotSky x lerp(0.30, 1.00, SkyLight) x (1-rayOcc) —
+							// the old 0.15/(2 taps) weighting was ~0.03 after occlusion and the sky
+							// effectively never participated in the gather.
+							float skyWeight = NdotSky * lerp(0.30f, 1.00f, mDbgSSGISkyLight) * (1.0f - rayOcc) / 4.0f;
 							rayColor += clamp(skyColor, 0.0f, 10.0f) * skyWeight;
 						}
 					}
