@@ -244,7 +244,7 @@ void ShadingMaterial(MaterialParam material, float3 P, float3 V, float shadow, i
 #endif
 }
 
-void GetGbufferParams(float4 texcoord, out MaterialParam material, out MaterialParam materialAlpha)
+void GetGbufferParams(float4 texcoord, out MaterialParam materialAlpha)
 {
 	float2 coord = texcoord.xy / texcoord.w;
 
@@ -258,6 +258,14 @@ void GetGbufferParams(float4 texcoord, out MaterialParam material, out MaterialP
 	DecodeGbuffer(MRT5, MRT6, MRT7, MRT8, materialAlpha);
 
 	clip(sum(materialAlpha.albedo + materialAlpha.specular) - 1e-5);
+}
+
+// Decoded separately (after the shadow/contact-shadow machinery) so a second
+// full MaterialParam is never live across the Hi-Z trace - keeping both
+// simultaneously exceeded the ps_3_0 temp register budget (X4505).
+void GetBaseMaterialParams(float4 texcoord, out MaterialParam material)
+{
+	float2 coord = texcoord.xy / texcoord.w;
 
 	float4 MRT1 = tex2Dlod(Gbuffer1Map, float4(coord, 0, 0));
 	float4 MRT2 = tex2Dlod(Gbuffer2Map, float4(coord, 0, 0));
@@ -289,37 +297,40 @@ void LightSourcePS(
 	out float4 oColor1 : COLOR1,
 	out float4 oColor2 : COLOR2)
 {
-	MaterialParam material;
 	MaterialParam materialAlpha;
-	GetGbufferParams(coord, material, materialAlpha);
+	GetGbufferParams(coord, materialAlpha);
 
 	float3 V = normalize(viewdir);
 	float rcpZ = 1.0f / viewdir.z;
 
-	float3 P1 = viewdir * (material.linearDepth * rcpZ);
 	float3 P2 = viewdir * (materialAlpha.linearDepth * rcpZ);
 
 	float shadow = 1;
 #if SHADOW_MAP_FROM >= 1
-	[branch]
-	if (dot(materialAlpha.normal, viewLightDirection) > 0.0f || materialAlpha.lightModel == SHADINGMODELID_SKIN || materialAlpha.lightModel == SHADINGMODELID_SUBSURFACE)
-	{
-		shadow = ShadingShadow(materialAlpha, P2, coord.xy / coord.w);
+	// Kept flat: a [branch] here (perf commit 93ebdf3d) never compiled - the
+	// gradient ops inside (ShadowSlopeScaledBias, contact-shadow ddx/ddy) are
+	// illegal under forced branching in ps_3_0 (X3528), and keeping the hoisted
+	// values live across the branch blew the temp register budget (X4505).
+	// Backface handling matches spot_lighting: PBR contributes nothing at
+	// nl <= 0 anyway, cel ramps are half-Lambert driven.
+	shadow = ShadingShadow(materialAlpha, P2, coord.xy / coord.w);
 #if CONTACT_SHADOW_QUALITY >= 1
-		float contactShadow = GetContactShadow(P2, materialAlpha.normal, viewLightDirection, coord.xy / coord.w, materialAlpha.linearDepth);
+	float contactShadow = GetContactShadow(P2, materialAlpha.normal, viewLightDirection, coord.xy / coord.w, materialAlpha.linearDepth);
 #if PCSS_SHADOW_ENABLE
-		shadow = min(shadow, contactShadow);
+	shadow = min(shadow, contactShadow);
 #else
-		shadow *= contactShadow;
+	shadow *= contactShadow;
 #endif
 #endif
-		clip(shadow - 1e-5);
-	}
-	else
-	{
-		shadow = 0;
-	}
+	clip(shadow - 1e-5);
 #endif
+
+	// Base layer decoded only now: it must not stay live through the
+	// shadow/contact machinery above (see GetBaseMaterialParams)
+	MaterialParam material;
+	GetBaseMaterialParams(coord, material);
+
+	float3 P1 = viewdir * (material.linearDepth * rcpZ);
 
 	float3 diffuse = 0, specular = 0;
 	float3 diffuseAlpha = 0, specularAlpha = 0;
@@ -344,15 +355,19 @@ void LightSourceShadowlessPS(
 	out float4 oColor1 : COLOR1,
 	out float4 oColor2 : COLOR2)
 {
-	MaterialParam material;
 	MaterialParam materialAlpha;
-	GetGbufferParams(coord, material, materialAlpha);
+	GetGbufferParams(coord, materialAlpha);
 
 	float3 V = normalize(viewdir);
 	float rcpZ = 1.0f / viewdir.z;
 
-	float3 P1 = viewdir * (material.linearDepth * rcpZ);
 	float3 P2 = viewdir * (materialAlpha.linearDepth * rcpZ);
+
+	// Base layer decoded only when needed (see GetBaseMaterialParams)
+	MaterialParam material;
+	GetBaseMaterialParams(coord, material);
+
+	float3 P1 = viewdir * (material.linearDepth * rcpZ);
 
 	float3 diffuse = 0, specular = 0;
 	float3 diffuseAlpha = 0, specularAlpha = 0;
