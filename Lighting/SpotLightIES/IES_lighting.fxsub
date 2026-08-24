@@ -245,10 +245,10 @@ void LightSourceShadowlessPS(
 	float3 P1 = viewdir * (material.linearDepth * rcpZ);
 	float3 P2 = viewdir * (materialAlpha.linearDepth * rcpZ);
 
-	float3 diffuse, specular = 0;
+	float3 diffuse = 0, specular = 0;
 	ShadingMaterial(material, P1, V, 1, diffuse, specular);
 
-	float3 diffuseAlpha, specularAlpha = 0;
+	float3 diffuseAlpha = 0, specularAlpha = 0;
 	[flatten] // gradients (geometric roughness AA) are illegal under [branch] in ps_3_0
 	if (any(materialAlpha.albedo + materialAlpha.specular))
 	{
