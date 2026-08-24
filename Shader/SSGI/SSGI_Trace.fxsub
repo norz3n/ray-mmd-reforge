@@ -25,6 +25,13 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 	float3 nOrigin = GetSSGINormal(uvCoord.xy);
 	float3 pOrigin = GetViewPosition(projInfo, uvCoord.xy, zOrigin);
 
+	// Receiver shading model: skin receiving skin radiance keeps the full
+	// albedo weighting (the emitter's dermal albedo is already baked into
+	// ShadingMap), so a boosted SSGI still brightens skin.  Only skin ->
+	// non-skin emission gets the bounce clamp below.
+	int receiverModel = (int)floor(tex2Dlod(Gbuffer8Map, float4(uvCoord.xy, 0.0f, 0.0f)).a);
+	bool receiverIsSkin = (receiverModel == SHADINGMODELID_SKIN || receiverModel == SHADINGMODELID_SUBSURFACE);
+
 	// Adaptive world radius scaling (mode 1: focused bounce, mode 2: large room-scale gather)
 	// Cone angle widens/narrows the gather cone; stock default (mSSGIConeAngleDefault = 0.5) keeps the radius unchanged
 #if GI_ENABLE >= 2
@@ -52,6 +59,21 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 	float startAngle = noiseAngle * PI_2;
 	float3 totalGi = 0.0f;
 	float minDistanceSq = max(mSSGIBias * mSSGIBias * 0.02f, 0.001f);
+
+#if GI_ENABLE >= 2
+	float giGain = PI * lerp(lerp(1.0f, 15.0f, mSSGIIntensityPlus), 0.0f, mSSGIIntensityMinus)
+		* (8.0f * lerp(1.0f, 2.5f, mDbgSSGIModeGain));
+#else
+	float giGain = PI * lerp(lerp(1.0f, 3.0f, mSSGIIntensityPlus), 0.0f, mSSGIIntensityMinus)
+		* (1.0f * lerp(1.0f, 3.0f, mDbgSSGIModeGain));
+#endif
+	// Gather gain at neutral user morphs — what SKIN_GI_EMISSION_SCALE was
+	// calibrated against.  Skin bounce is clamped to this level no matter how
+	// far the gain is pushed: skin may receive any amount of light but
+	// re-emits only its dermal albedo, so the SSGI boost should fill the room,
+	// not amplify the skin's own radiance.
+	float giGainRef = PI * (1.0f * lerp(1.0f, 3.0f, mDbgSSGIModeGain))
+		* ((GI_ENABLE >= 2) ? 8.0f : 1.0f);
 
 	[loop]
 	for (int a = 0; a < SSGI_ANGLES; ++a)
@@ -134,11 +156,15 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 								{
 									sampleColor *= lerp(4.0f, 16.0f, mDbgSSGIEmissiveBoost);
 								}
-								else if (isSkinEmitter)
+								else if (isSkinEmitter && !receiverIsSkin)
 								{
 									// Skin radiance overshoots in screen-space gathers (bright wide lobes);
-									// suppress its bounce contribution
-									sampleColor *= SKIN_GI_EMISSION_SCALE;
+									// suppress its bounce into the room, and clamp harder as the user's GI
+									// gain rises above the calibrated reference so boosted SSGI never
+									// amplifies skin beyond its dermal bounce albedo.  Skin receivers are
+									// exempt: skin-to-skin light keeps its full albedo weighting so skin
+									// still brightens with the boost.
+									sampleColor *= SKIN_GI_EMISSION_SCALE * saturate(giGainRef / max(giGain, 1e-4f));
 								}
 
 								// Front-to-back ray accumulation
@@ -196,14 +222,7 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 		totalGi += rayColor;
 	}
 
-#if GI_ENABLE >= 2
-	float intensityMultiplier = lerp(lerp(1.0f, 15.0f, mSSGIIntensityPlus), 0.0f, mSSGIIntensityMinus);
-	float modeMultiplier = 8.0f * lerp(1.0f, 2.5f, mDbgSSGIModeGain); // Broad, rich room illumination with deep colored bounce
-#else
-	float intensityMultiplier = lerp(lerp(1.0f, 3.0f, mSSGIIntensityPlus), 0.0f, mSSGIIntensityMinus);
-	float modeMultiplier = 1.0f * lerp(1.0f, 3.0f, mDbgSSGIModeGain); // Focused accent bounce
-#endif
-	float3 finalGi = (totalGi / float(SSGI_ANGLES)) * (PI * intensityMultiplier * modeMultiplier);
+	float3 finalGi = (totalGi / float(SSGI_ANGLES)) * giGain;
 
 	return float4(clamp(finalGi, 0.0f, 100.0f), 1.0f);
 }

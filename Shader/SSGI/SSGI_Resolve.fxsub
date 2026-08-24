@@ -54,9 +54,11 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 	[branch]
 	if (isSkin)
 	{
-		// Dermal absorption: albedo is already clamped to physical reflectance in DecodeGbuffer;
-		// keep only the stronger photometric compression specific to skin
-		rawGi = (rawGi / (1.0f + rawGi * 0.14f)) * mat.albedo;
+		// Dermal absorption: the dermal albedo clamp in DecodeGbuffer already caps how
+		// much light skin reflects (the "small percent"), so reception must stay
+		// near-linear like every other surface — a stronger Reinhard coefficient here
+		// saturated skin under SSGI+ and cancelled the boost entirely.
+		rawGi = (rawGi / (1.0f + rawGi * 0.05f)) * mat.albedo;
 		// Brightness compensation: recover the photometric loss, capped at +10%
 		rawGi *= 1.0f + SKIN_GI_COMPENSATION * saturate(dot(rawGi, float3(0.299f, 0.587f, 0.114f)));
 	}
