@@ -199,7 +199,7 @@ void LightSourcePS(
 	ShadingMaterial(material, P1, V, diffuse, specular);
 
 	float3 diffuseAlpha = 0, specularAlpha = 0;
-	[branch]
+	[flatten] // gradients (geometric roughness AA) are illegal under [branch] in ps_3_0
 	if (any(materialAlpha.albedo + materialAlpha.specular))
 	{
 		ShadingMaterial(materialAlpha, P2, V, diffuseAlpha, specularAlpha);
@@ -240,7 +240,7 @@ void LightSourceShadowlessPS(
 	ShadingMaterial(material, P1, V, diffuse, specular);
 
 	float3 diffuseAlpha, specularAlpha = 0;
-	[branch]
+	[flatten] // gradients (geometric roughness AA) are illegal under [branch] in ps_3_0
 	if (any(materialAlpha.albedo + materialAlpha.specular))
 	{
 		ShadingMaterial(materialAlpha, P2, V, diffuseAlpha, specularAlpha);
