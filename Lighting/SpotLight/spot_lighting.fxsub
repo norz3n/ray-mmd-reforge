@@ -12,15 +12,7 @@
 #endif
 
 #if CONTACT_SHADOW_QUALITY >= 1
-#	define CONTACT_SHADOW_USE_HIZ 1
-//	MME resolves #include relative to the main .fx file, so the HiZ modules
-//	are included directly here (HiZ_Main.fxsub uses root-relative paths that
-//	only work for .fx files in the repo root). Order matters: Common first.
-#	include "../../../shader/HiZ/HiZ_Common.fxsub"
-#	include "../../../shader/HiZ/HiZ_Build.fxsub"
-#	include "../../../shader/HiZ/HiZ_Traversal.fxsub"
 #	include "../../../shader/ContactShadow.fxsub"
-#	undef CONTACT_SHADOW_USE_HIZ
 #endif
 
 float mR : CONTROLOBJECT<string name = "(self)"; string item = "R+";>;

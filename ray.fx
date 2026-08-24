@@ -113,7 +113,7 @@ static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceB
 #include "shader/ColorGrading.fxsub"
 #include "shader/ShadingMaterials.fxsub"
 
-#if SSR_QUALITY || GI_ENABLE || GLASS_REFRACTION || (CONTACT_SHADOW_QUALITY && SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE) || SSDO_QUALITY
+#if SSR_QUALITY || GI_ENABLE || GLASS_REFRACTION
 #	include "shader/HiZ/HiZ_Main.fxsub"
 #endif
 
@@ -235,7 +235,7 @@ technique DeferredLighting<
 	"Clear=Depth;"
 	"ScriptExternal=Color;"
 
-#if SSR_QUALITY || GI_ENABLE || GLASS_REFRACTION || (CONTACT_SHADOW_QUALITY && SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE)
+#if SSR_QUALITY || GI_ENABLE || GLASS_REFRACTION
 	// The G-buffer is complete after ScriptExternal.  Build the hierarchy here
 	// so deferred sun shadows and later screen-space passes use this frame.
 	"RenderColorTarget=ZBufferMipmap1;            Pass=HiZ_Mipmap1;"
@@ -611,7 +611,7 @@ technique DeferredLighting<
 		PixelShader  = compile ps_3_0 ScreenSpaceBilateralFilterPS(ShadingMapTempSamp, mDiffusionOffsetY);
 	}
 #endif
-#if SSR_QUALITY || GI_ENABLE || GLASS_REFRACTION || (CONTACT_SHADOW_QUALITY && SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE) || SSDO_QUALITY
+#if SSR_QUALITY || GI_ENABLE || GLASS_REFRACTION
 	pass HiZ_Mipmap1<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;

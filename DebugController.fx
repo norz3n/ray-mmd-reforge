@@ -5,7 +5,6 @@
 #include "shader/gbuffer_sampler.fxsub"
 
 #if CONTACT_SHADOW_QUALITY >= 1
-#include "shader/HiZ/HiZ_Main.fxsub"
 #include "shader/ContactShadow.fxsub"
 #endif
 

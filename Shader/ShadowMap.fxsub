@@ -2,9 +2,7 @@
 #define SHADOW_POISSON_COUNT 25
 
 #if CONTACT_SHADOW_QUALITY >= 1
-#	define CONTACT_SHADOW_USE_HIZ 1
 #	include "shader/ContactShadow.fxsub"
-#	undef CONTACT_SHADOW_USE_HIZ
 #endif
 
 static float4x4 matLightProject = CreateOrthoProject(2, 2, mPSSMDepthZMin, mPSSMDepthZMax);
