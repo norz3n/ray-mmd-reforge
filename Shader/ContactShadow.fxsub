@@ -136,9 +136,13 @@ float TraceScreenSpaceShadow(
 		float penetration = rayPosition.z - nearestDepth;
 		if (behindSurface > 0.0f && penetration <= thickness)
 		{
-			occlusion = 1.0f;
+			// Fractional occlusion by penetration depth gives the edge a real
+			// penumbra.  A binary hit here turns the static step jitter into a
+			// frozen diagonal dither line along every shadow boundary.
+			occlusion = max(occlusion, saturate(penetration / (thickness * 0.5f)));
 			hitT = rayT;
-			break;
+			if (occlusion >= 1.0f)
+				break;
 		}
 	}
 
