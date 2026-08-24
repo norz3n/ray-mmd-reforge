@@ -13,7 +13,9 @@
 
 #if CONTACT_SHADOW_QUALITY >= 1
 #	define CONTACT_SHADOW_USE_HIZ 1
-#	include "../../../shader/HiZ/HiZ_Main.fxsub"
+#	include "../../../shader/HiZ/HiZ_Common.fxsub"
+#	include "../../../shader/HiZ/HiZ_Build.fxsub"
+#	include "../../../shader/HiZ/HiZ_Traversal.fxsub"
 #	include "../../../shader/ContactShadow.fxsub"
 #	undef CONTACT_SHADOW_USE_HIZ
 #endif

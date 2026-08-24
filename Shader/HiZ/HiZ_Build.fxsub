@@ -9,7 +9,10 @@
 #ifndef RAY_MMD_HIZ_BUILD_FXSUB
 #define RAY_MMD_HIZ_BUILD_FXSUB
 
-#include "shader/HiZ/HiZ_Common.fxsub"
+// NOTE: MME resolves #include relative to the main .fx file, not this .fxsub,
+// so this module does not include HiZ_Common.fxsub itself — the consumer must
+// include HiZ_Common.fxsub (root-relative "shader/HiZ/" or "../../../shader/HiZ/")
+// before this file. HiZ_Main.fxsub establishes that order.
 
 /**
  * Builds Mip Level 1 from full-resolution linear view depth.
