@@ -22,7 +22,10 @@ void ShadingMaterial(MaterialParam material, float3 V, float3 L, float2 coord, o
 	float3 bentNormal = tex2Dlod(SSDOMapSamp, float4(coord, 0, 0)).xyz * 2 - 1;
 	float ssdo = pow(saturate(1.0f - dot(bentNormal, L) * 0.85f), max(mSSDOScale, 0.1f));
 	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
-	shadow *= isSkin ? lerp(1.0f, ssdo, SKIN_AO_STRENGTH) : lerp(1.0f, ssdo, 0.85f);
+	// Toon ramps drive their terminator from the geometry shadow alone;
+	// screen-space AO would smear the band edges
+	bool isToonMat = (material.lightModel == SHADINGMODELID_CEL || material.lightModel == SHADINGMODELID_TONEBASED);
+	shadow *= isSkin ? lerp(1.0f, ssdo, SKIN_AO_STRENGTH) : (isToonMat ? 1.0f : lerp(1.0f, ssdo, 0.85f));
 #endif
 
 	float3 lightColor = SunColor * mSunIntensity * any(material.visibility);
@@ -52,7 +55,10 @@ void ShadingMaterial(MaterialParam material, float3 V, float3 L, float2 coord, o
 	specular = energy[1] * lightColor;
 
 #if SUN_SHADOW_QUALITY
-	diffuse += mColorShadowSunP * (1 - shadow);
+	// Toon ramps encode their own shadow color (customDataB); MMD's shadow
+	// tint on top would double-darken and shift the band hue
+	if (material.lightModel != SHADINGMODELID_CEL && material.lightModel != SHADINGMODELID_TONEBASED)
+		diffuse += mColorShadowSunP * (1 - shadow);
 #endif
 }
 #endif
@@ -97,6 +103,16 @@ void ShadingImageBasedLighting(sampler source, MaterialParam material, float4 sc
 
 	diffuse *= shadow;
 	specular *= shadow * shadow * shadow;
+
+#if TOON_ENABLE
+	// Match the stepped GI response (SSGI_Resolve): quantize the ambient luma
+	// so the smooth IBL gradient doesn't break the cel bands on the shadow side
+	if (material.lightModel == SHADINGMODELID_CEL || material.lightModel == SHADINGMODELID_TONEBASED)
+	{
+		float luma = dot(diffuse, float3(0.299f, 0.587f, 0.114f));
+		diffuse = (luma > 1e-4f) ? diffuse * ((floor(luma * 4.0f + 0.5f) / 4.0f) / max(luma, 1e-4f)) : diffuse;
+	}
+#endif
 #endif
 }
 
