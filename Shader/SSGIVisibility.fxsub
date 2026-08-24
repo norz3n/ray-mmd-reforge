@@ -24,12 +24,19 @@ void DepthObjectVS(
 float4 DepthObjectPS(float3 coord : TEXCOORD0) : COLOR
 {
 #if SSGI_RECIEVER_ALPHA_ENABLE
-	clip(!opadd - 0.001f);
-	float alpha = MaterialDiffuse.a;
+	// Exclusion clips only apply when the preset is not suppressing this material:
+	// clipped pixels are never written and keep the buffer's cleared visibility
+	// (1.0), silently ignoring presets <= 0 on additive / low-alpha materials.
+	[flatten]
+	if (visibility > 1e-4)
+	{
+		clip(!opadd - 0.001f);
+		float alpha = MaterialDiffuse.a;
 #if SSGI_RECIEVER_ALPHA_MAP_ENABLE
-	if (use_texture) alpha *= tex2D(DiffuseMapSamp, coord.xy).a;
+		if (use_texture) alpha *= tex2D(DiffuseMapSamp, coord.xy).a;
 #endif
-	clip(alpha - 0.01);
+		clip(alpha - 0.01);
+	}
 #endif
 
 	return visibility;

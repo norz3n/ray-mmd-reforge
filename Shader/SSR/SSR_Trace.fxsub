@@ -75,7 +75,10 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	confidence *= ssrMask;
 
 	float4 hitRadiance = tex2Dlod(ShadingMapSamp, float4(traceHit.hitUV, 0.0f, 0.0f));
-	return float4(hitRadiance.rgb, 1.0f) * confidence;
+	// Emitter gating: a material suppressed by its visibility preset must not
+	// act as a reflection source either (mirrors SSGI_Trace emitter weighting).
+	float hitEmitterVis = tex2Dlod(SSRMapSamp, float4(traceHit.hitUV, 0.0f, 0.0f)).a;
+	return float4(hitRadiance.rgb, 1.0f) * confidence * hitEmitterVis;
 }
 
 #endif // RAY_MMD_SSR_TRACE_FXSUB
