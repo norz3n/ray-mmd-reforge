@@ -24,7 +24,7 @@ Requirement :
 * Direct3D 9 With Shader Model 3.0 (ps_3_0)
 * **Powerful GPU recommended** due to advanced shading techniques.
 
-Reforge Exclusive Features (through v1.13.0) :
+Reforge Exclusive Features (through v1.14.0) :
 ------------
 
 **Unified Hi-Z Core**
@@ -56,6 +56,7 @@ Reforge Exclusive Features (through v1.13.0) :
 * **Physical Cloth & ClearCoat**: rewritten BRDFs with cloth-DFG and Charlie Sheen distribution.
 * **Procedural Eyes**: spherical corneal dome normal generation with limbal ring, UV-atlas safe, and CONVEX_NORMAL inversion mode for concave eye meshes. Dedicated Cornea ClearCoat eye materials included.
 * **Glass Pipeline**: tinted glass presets inheriting MMD diffuse color, chromatic-dispersion refraction, and Hi-Z traced refraction validated against scene depth.
+* **Forced Transparency Presets**: make an opaque PMX material transparent without editing the model — plain and glass (SHADINGMODELID_GLASS refraction) variants, shaded through the alpha gbuffer with the model's own texture and MMD diffuse.
 * **Wetness Special-Case Material**: now with ordered-dither alpha clipping; alpha cutout threshold unified at 0.5 across all passes.
 * **Procedural Foliage Wind**: vertex wind animation engine with four vegetation presets.
 * **Advanced Surface Detail**: thin-film iridescence, specular geometric anti-aliasing, Ultra Quality bump maps, and expanded Auto-Normal material presets.
