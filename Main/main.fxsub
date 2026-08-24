@@ -6,19 +6,19 @@
 #define TEXTURE_MIP_FILTER LINEAR
 #define TEXTURE_ANISOTROPY_LEVEL 0
 
-#if ALPHA_MAP_FROM == 3 || MATCAP_MAP_FROM == 3
+#if ALPHA_MAP_FROM == 3
 	texture DiffuseMap: MATERIALTEXTURE;
 #endif
 
-#if  ALPHA_MAP_FROM == 4 || MATCAP_MAP_FROM == 4
+#if ALPHA_MAP_FROM == 4
 	texture SphereMap : MATERIALSPHEREMAP;
 #endif
 
-#if ALPHA_MAP_FROM == 5 || MATCAP_MAP_FROM == 5
+#if ALPHA_MAP_FROM == 5
 	texture ToonMap : MATERIALTOONTEXTURE;
 #endif
 
-#if ALPHA_MAP_FROM == 6 || MATCAP_MAP_FROM == 6
+#if ALPHA_MAP_FROM == 6
 	shared texture2D DummyScreenTex : RENDERCOLORTARGET;
 #endif
 
@@ -90,31 +90,6 @@
 		texture = DummyScreenTex;
 #else
 		texture = NormalSubMap;
-#endif
-		MAXANISOTROPY = TEXTURE_ANISOTROPY_LEVEL;
-		MINFILTER = TEXTURE_FILTER; MAGFILTER = TEXTURE_FILTER; MIPFILTER = TEXTURE_MIP_FILTER;
-		ADDRESSU = WRAP; ADDRESSV = WRAP;
-	};
-#endif
-
-#if MATCAP_MAP_FROM >= 1 && MATCAP_MAP_FROM <= 6
-	#if MATCAP_MAP_FROM == 1
-		texture MatCapMap<string ResourceName = MATCAP_MAP_FILE;>;
-	#elif MATCAP_MAP_FROM == 2
-		texture MatCapMap : ANIMATEDTEXTURE<string ResourceName = MATCAP_MAP_FILE;>;
-	#endif
-	sampler MatCapMapSamp = sampler_state
-	{
-#if MATCAP_MAP_FROM == 3
-		texture = DiffuseMap;
-#elif MATCAP_MAP_FROM == 4
-		texture = SphereMap;
-#elif MATCAP_MAP_FROM == 5
-		texture = ToonMap;
-#elif MATCAP_MAP_FROM == 6
-		texture = DummyScreenTex;
-#else
-		texture = MatCapMap;
 #endif
 		MAXANISOTROPY = TEXTURE_ANISOTROPY_LEVEL;
 		MINFILTER = TEXTURE_FILTER; MAGFILTER = TEXTURE_FILTER; MIPFILTER = TEXTURE_MIP_FILTER;
@@ -366,44 +341,6 @@ float3 GetNormal(float3 N, float3 P, float2 coord)
 #endif
 }
 
-float3 GetSpecularHighlight(float3 normal, float2 coord)
-{
-#if MATCAP_MAP_FROM
-	normal = normalize(normal);
-
-   	coord = mul(normal, (float3x3)matWorldView).xy;
-	coord = coord * 0.5 + 0.5;
-
-	#if MATCAP_MAP_UV_FLIP == 1
-		coord.x = 1 - coord.x;
-	#elif MATCAP_MAP_UV_FLIP == 2
-		coord.y = 1 - coord.y;
-	#elif MATCAP_MAP_UV_FLIP == 3
-		coord = 1 - coord;
-	#endif
-
-	#if MATCAP_MAP_FROM == 3
-		float3 specularColor = use_texture ? tex2D(MatCapMapSamp, coord * matCapMapLoopNum).rgb : 0;
-	#elif MATCAP_MAP_FROM == 4
-		float3 specularColor = use_spheremap ? tex2D(MatCapMapSamp, coord * matCapMapLoopNum).rgb : 0;
-	#elif MATCAP_MAP_FROM == 5
-		float3 specularColor = use_toon ? tex2D(MatCapMapSamp, coord * matCapMapLoopNum).rgb : 0;
-	#elif MATCAP_MAP_FROM == 7
-		float3 specularColor = MaterialAmbient.rgb;
-	#elif MATCAP_MAP_FROM == 8
-		float3 specularColor = MaterialSpecular.rgb;
-	#elif MATCAP_MAP_FROM == 9
-		#error Unsupported options 9.
-	#else
-		float3 specularColor = tex2D(MatCapMapSamp, coord * matCapMapLoopNum).rgb;
-	#endif
-
-	return specularColor * matCapScale;
-#else
-	return 0.0f;
-#endif
-}
-
 void MainVS(
 	in float4 Position : POSITION,
 	in float4 Texcoord : TEXCOORD0,
@@ -419,15 +356,15 @@ void MainVS(
 	oTexcoord2 = Position;
 }
 
-float4 MainPS(float2 coord : TEXCOORD0, float3 normal : TEXCOORD1, in float4 worldPos : TEXCOORD2) : COLOR
+// Render passthrough for ray-mmd: alpha cutout only.  The matcap highlight
+// layer was removed in v1.15 — specular detail comes from the deferred
+// Materials passes (PBR + IBL), not from this forward layer.
+float4 MainPS(float2 coord : TEXCOORD0) : COLOR
 {
 	float alpha = GetAlpha(coord);
 	clip(alpha - alphaThreshold);
 
-	normal = normalize(normal);
-	normal = GetNormal(normal, worldPos, coord);
-
-	return float4(GetSpecularHighlight(normal, coord), 0);
+	return float4(0.0f, 0.0f, 0.0f, 0.0f);
 }
 
 #define OBJECT_TEC(name, mmdpass)\
