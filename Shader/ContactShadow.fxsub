@@ -166,9 +166,12 @@ float GetContactShadow(
 {
 	// Scale the micro-shadow range near the camera, then cap it before distant
 	// occluders can turn screen-space depth discontinuities into long shadows.
-	float maxDistance = min(0.5f, max(0.025f, linearDepth * 0.015f));
+	float maxDistance = min(1.5f, max(0.05f, linearDepth * 0.06f));
 	float jitter = InterleavedGradientNoise(screenCoord * ViewportSize);
-	return TraceScreenSpaceShadow(viewPosition, shadingNormal, L, maxDistance, jitter);
+	// High-exponent visibility keeps contact shadows plainly readable and near
+	// sun-shadow darkness at typical MMD camera distances instead of washing
+	// out into the ambient shading; full hit/miss endpoints are unchanged.
+	return pow(TraceScreenSpaceShadow(viewPosition, shadingNormal, L, maxDistance, jitter), 8.0f);
 }
 
 #endif // RAY_MMD_CONTACT_SHADOW_FXSUB
