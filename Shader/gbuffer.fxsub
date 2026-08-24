@@ -10,8 +10,10 @@
 #define SHADINGMODELID_TONEBASED  9
 #define SHADINGMODELID_MASK       10
 
-// How much SSAO/HBAO affects skin (0 = ignored, 1 = same as other materials).
-#define SKIN_AO_STRENGTH          0.45
+// How much SSAO/HBAO (and sun-shadow softening) affects skin (0 = ignored,
+// 1 = same as other materials).  Kept below 1 so skin keeps its soft SSS
+// falloff, but high enough that contact shadows actually ground the figure.
+#define SKIN_AO_STRENGTH          0.75
 // Dermal reflectance range for GI (light skin ~30-45%, dark ~10-20%; melanin/hemoglobin absorption).
 #define SKIN_GI_REFLECTANCE_DARK  0.15f
 #define SKIN_GI_REFLECTANCE_LIGHT 0.42f
