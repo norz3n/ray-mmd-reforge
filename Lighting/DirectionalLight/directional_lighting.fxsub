@@ -137,19 +137,36 @@ float2 RotateSample(float2 pos, float2 rotation)
 	return float2(pos.x * rotation.x - pos.y * rotation.y, pos.y * rotation.x + pos.x * rotation.y);
 }
 
-float2 ShadowPCF(sampler source, float2 coord, float receiverDepth) 
+// Vogel-disk PCF: 12 rotated taps replace the 5x5 (25-tap) binomial grid at the
+// same footprint. The IGN rotation that was previously computed and discarded now
+// actually decorrelates the pattern between pixels.
+#define SHADOW_PCF_SAMPLES 12
+static const float2 ShadowPCFDisk[SHADOW_PCF_SAMPLES] =
+{
+	float2( 0.000000,  0.000000),
+	float2( 0.435794,  0.000000),
+	float2(-0.217897,  0.540166),
+	float2(-0.297446, -0.584347),
+	float2( 0.686532,  0.183955),
+	float2(-0.730303,  0.278385),
+	float2( 0.358249, -0.733560),
+	float2( 0.245842,  0.826040),
+	float2(-0.771960, -0.445690),
+	float2( 0.908075, -0.193026),
+	float2(-0.640656,  0.697920),
+	float2( 0.053535, -0.967005)
+};
+
+float2 ShadowPCF(sampler source, float2 coord, float receiverDepth, float2 rotation)
 {
 	float2 shadow = 0.0;
 
 	[unroll]
-	for (int x = -sampleRadius; x <= sampleRadius; x++) 
+	for (int i = 0; i < SHADOW_PCF_SAMPLES; i++)
 	{
-		[unroll]
-		for (int y = -sampleRadius; y <= sampleRadius; y++)
-		{
-			float2 pos = coord + float2(x, y) * ShadowMapOffset2;
-			shadow += tex2Dlod(source, float4(pos, 0, 0)).rg * sampleKernel[sampleRadius + x] * sampleKernel[sampleRadius + y];
-		}
+		// Disk radius 2.0 matches the +/-2 texel span of the old radius-2 grid.
+		float2 pos = coord + RotateSample(ShadowPCFDisk[i] * 2.0 * ShadowMapOffset2, rotation);
+		shadow += tex2Dlod(source, float4(pos, 0, 0)).rg * (1.0 / SHADOW_PCF_SAMPLES);
 	}
 
 	return shadow;
@@ -157,7 +174,7 @@ float2 ShadowPCF(sampler source, float2 coord, float receiverDepth)
 
 float SampleCascadeShadowSingle(sampler source, float2 coord, float receiverDepth, float2 rotation, float lightSize, int cascadeIndex)
 {
-	float2 shadow = ShadowPCF(source, coord, receiverDepth);
+	float2 shadow = ShadowPCF(source, coord, receiverDepth, rotation);
 	return ChebyshevUpperBound(shadow, receiverDepth, 0.01, LightHardness);
 }
 
@@ -216,10 +233,8 @@ float ShadingShadow(MaterialParam material, float3 viewPosition, float2 screenUV
 		shadow = lerp(shadow, shadowNext, blendWeight);
 	}
 
-#if CONTACT_SHADOW_QUALITY >= 1
-	float contactShadow = GetContactShadow(viewPosition, material.normal, viewLightDirection, screenUV, material.linearDepth);
-	shadow *= contactShadow;
-#endif
+	// Contact shadows are applied once by the caller (see LightSourcePS); tracing
+	// them here as well doubled the ray cost and squared the darkening.
 
 	return shadow;
 }
@@ -310,12 +325,7 @@ void LightSourcePS(
 	// nl <= 0 anyway, cel ramps are half-Lambert driven.
 	shadow = ShadingShadow(materialAlpha, P2, coord.xy / coord.w);
 #if CONTACT_SHADOW_QUALITY >= 1
-	float contactShadow = GetContactShadow(P2, materialAlpha.normal, viewLightDirection, coord.xy / coord.w, materialAlpha.linearDepth);
-#if PCSS_SHADOW_ENABLE
-	shadow = min(shadow, contactShadow);
-#else
-	shadow *= contactShadow;
-#endif
+	shadow *= GetContactShadow(P2, materialAlpha.normal, viewLightDirection, coord.xy / coord.w, materialAlpha.linearDepth);
 #endif
 	clip(shadow - 1e-5);
 #endif
