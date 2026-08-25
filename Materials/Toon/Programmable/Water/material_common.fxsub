@@ -1,0 +1,324 @@
+float time : TIME;//<bool SyncInEditMode=true;>;
+
+float4x4 matView : VIEW;
+float4x4 matViewProject : VIEWPROJECTION;
+
+float3 CameraPosition  : POSITION  < string Object = "Camera"; >;
+float4 MaterialDiffuse : DIFFUSE  < string Object = "Geometry"; >;
+
+#define TEXTURE_FILTER ANISOTROPIC
+#define TEXTURE_MIP_FILTER ANISOTROPIC
+#define TEXTURE_ANISOTROPY_LEVEL 16
+
+#define SHADINGMODELID_GLASS 4
+
+#define MIDPOINT_8_BIT (127.0f / 255.0f)
+#define MAX_FRACTIONAL_8_BIT (255.0f / 256.0f)
+#define TWO_BITS_EXTRACTION_FACTOR (3.0f + MAX_FRACTIONAL_8_BIT)
+
+shared texture Gbuffer2RT: RENDERCOLORTARGET;
+shared texture Gbuffer3RT: RENDERCOLORTARGET;
+shared texture Gbuffer4RT: RENDERCOLORTARGET;
+shared texture Gbuffer5RT: RENDERCOLORTARGET;
+shared texture Gbuffer6RT: RENDERCOLORTARGET;
+shared texture Gbuffer7RT: RENDERCOLORTARGET;
+shared texture Gbuffer8RT: RENDERCOLORTARGET;
+
+#if WAVE_MAP_ENABLE
+	texture WaveNormalMap<string ResourceName = WAVE_MAP_FILE;>; 
+	sampler WaveNormalMapSamp = sampler_state
+	{
+		texture = WaveNormalMap;
+		MINFILTER = TEXTURE_FILTER; MAGFILTER = TEXTURE_FILTER; MIPFILTER = TEXTURE_MIP_FILTER;
+		ADDRESSU = WRAP; ADDRESSV = WRAP;
+	};
+#endif
+
+#if WAVE_NOISE_MAP_ENABLE
+	texture WaveNoiseMap<string ResourceName = WAVE_NOISE_MAP_FILE;>; 
+	sampler WaveNoiseMapSamp = sampler_state
+	{
+		texture = WaveNoiseMap;
+		MINFILTER = LINEAR; MAGFILTER = LINEAR; MIPFILTER = LINEAR;
+		ADDRESSU = WRAP; ADDRESSV = WRAP;
+	};
+#endif
+
+#if WAVE_FLOW_MAP_ENABLE
+	texture WaveFlowMap<string ResourceName = WAVE_FLOW_MAP_FILE;>; 
+	sampler WaveFlowMapSamp = sampler_state
+	{
+		texture = WaveFlowMap;
+		MINFILTER = LINEAR; MAGFILTER = LINEAR; MIPFILTER = LINEAR;
+		ADDRESSU = CLAMP; ADDRESSV = CLAMP;
+	};
+#endif
+
+#if WAVE_FOAM_MAP_ENABLE
+	texture WaveFoamMap<string ResourceName = WAVE_FOAM_MAP_FILE;>; 
+	sampler WaveFoamMapSamp = sampler_state
+	{
+		texture = WaveFoamMap;
+		MINFILTER = TEXTURE_FILTER; MAGFILTER = TEXTURE_FILTER; MIPFILTER = TEXTURE_MIP_FILTER;
+		ADDRESSU = WRAP; ADDRESSV = WRAP;
+	};
+#endif
+
+#if WAVE_RIPPLE_MAP_ENABLE
+	texture WaveRippleMap<string ResourceName = WAVE_RIPPLE_MAP_FILE;>; 
+	sampler WaveRippleMapSamp = sampler_state
+	{
+		texture = WaveRippleMap;
+		MAXANISOTROPY = TEXTURE_ANISOTROPY_LEVEL;
+		MINFILTER = TEXTURE_FILTER; MAGFILTER = TEXTURE_FILTER; MIPFILTER = TEXTURE_MIP_FILTER;
+		ADDRESSU = WRAP; ADDRESSV = WRAP;
+	};
+#endif
+
+struct MaterialParam
+{
+	float3 normal;
+	float3 albedo;
+	float3 specular;
+	float3 emissive;
+	float emissiveIntensity;
+	float smoothness;
+	float alpha;
+	float visibility;
+	float customDataA;
+	float3 customDataB;
+	int lightModel;
+};
+
+struct GbufferParam
+{
+	float4 buffer1 : COLOR0;
+	float4 buffer2 : COLOR1;
+	float4 buffer3 : COLOR2;
+	float4 buffer4 : COLOR3;
+};
+
+float3 EncodeNormal(float3 normal)
+{
+	float invP = rsqrt(max(-normal.z * 8.0f + 8.0f, 1e-6f));
+	float2 enc = normal.xy * invP + 0.5f;
+	float2 enc255 = enc * 255.0f;
+	float2 residual = floor(frac(enc255) * 16.0f);
+	return float3(floor(enc255), residual.x * 16.0f + residual.y) / 255.0f;
+}
+
+float3 rgb2ycbcr(float3 col)
+{
+	float3 encode;
+	encode.x = dot(float3(0.299, 0.587, 0.114),   col.rgb);
+	encode.y = dot(float3(-0.1687, -0.3312, 0.5), col.rgb);
+	encode.z = dot(float3(0.5, -0.4186, -0.0813), col.rgb);
+	return float3(encode.x, encode.y * MIDPOINT_8_BIT + MIDPOINT_8_BIT, encode.z * MIDPOINT_8_BIT + MIDPOINT_8_BIT);
+}
+
+float3 ComputeTangentBinormalNormal(float3 N, float3 P, float2 coord, float3 tangentNormal)
+{
+	float3 dp1 = ddx(P);
+	float3 dp2 = ddy(P);
+	float2 duv1 = ddx(coord);
+	float2 duv2 = ddy(coord);
+
+	float3x3 M = float3x3(dp1, dp2, N);
+	float2x3 I = float2x3(cross(M[1], M[2]), cross(M[2], M[0]));
+	float3 T = mul(float2(duv1.x, duv2.x), I);
+	float3 B = mul(float2(duv1.y, duv2.y), I);
+
+	float3x3 tbnTransform;
+	tbnTransform[0] = T * rsqrt(dot(T, T) + 1e-6f);
+	tbnTransform[1] = B * rsqrt(dot(B, B) + 1e-6f);
+	tbnTransform[2] = N;
+
+	return normalize(mul(tangentNormal, tbnTransform));
+}
+
+float luminance(float3 rgb)
+{
+	return dot(rgb, float3(0.2126f, 0.7152f, 0.0722f));
+}
+
+GbufferParam EncodeGbuffer(MaterialParam material, float linearDepth)
+{
+	GbufferParam gbuffer;
+	gbuffer.buffer1.xyz = material.albedo;
+	gbuffer.buffer1.w = material.smoothness;
+
+	material.normal = mul(material.normal, (float3x3)matView);
+	material.normal = normalize(material.normal);
+
+	gbuffer.buffer2.xyz = EncodeNormal(material.normal);
+	gbuffer.buffer2.w = material.customDataA;
+
+	gbuffer.buffer3.xyz = material.specular;
+	gbuffer.buffer3 = float4(luminance(gbuffer.buffer3.xyz), material.customDataB);
+
+	gbuffer.buffer4 = float4(linearDepth, material.emissiveIntensity, material.visibility, material.lightModel);
+	gbuffer.buffer4.w += material.alpha * MAX_FRACTIONAL_8_BIT;
+
+	return gbuffer;
+}
+
+float noise(float2 p)
+{
+	return tex2Dlod(WaveNoiseMapSamp, float4(p / 256.0, 0, 0)).x;
+}
+
+float fbm(float2 p) 
+{
+	float2x2 m2 = float2x2(1.6,-1.2,1.2,1.6);
+	float f = 0;
+	f += 0.5000 * noise( p ); p = mul(m2, p);
+	f += 0.2500 * noise( p ); p = mul(m2, p);
+	f += 0.1666 * noise( p );
+	return f;
+}
+
+float GetWaterHeight(float2 p)
+{
+	float2 shift1 = float2(0.32, 0.24) * time;
+	float2 shift2 = float2(0.38,-0.26) * time;
+	
+	float2 p2 = p * waveLoopsHigh;
+
+	float wave = 0;
+	wave += sin(dot(p2, 0.622) + shift2.x * 4.269);
+	wave *= fbm(p);
+	wave *= waveHeightHigh;
+
+	p *= waveLoopsLow;
+
+	float f = 0;
+	float s = 0.5;
+	float amp = 1.0;
+	float2x2 m = float2x2(0.72, -1.60,  1.60, 0.72);
+
+	for (int i = 0; i < 9; i++)
+	{
+		p = mul(m, p) * 0.947; 
+		f -= amp * abs(sin((noise(p + shift1 * s) - 0.5) * 2.0)); 
+		amp = amp * 0.59;
+		s *= -1.329;
+	}
+
+	return wave + f * waveHeightLow;
+}
+
+float4 GenWaterNormal(float2 coord)
+{
+	float2 dif = float2(0, 0.01);
+
+	float h0 = GetWaterHeight(coord * 15);
+	float h1 = GetWaterHeight(coord * 15 - dif);
+	float h2 = GetWaterHeight(coord * 15 + dif);
+	float h3 = GetWaterHeight(coord * 15 - dif.yx);
+	float h4 = GetWaterHeight(coord * 15 + dif.yx);
+
+	float3 bumpNormal = normalize(float3(h3 - h4, h1 - h2, 0.15));
+	return float4(bumpNormal, h0);
+}
+
+float2 GetParalaxOffset(sampler source, float2 coord, float3 V)
+{
+	const float gradientScale = 0.5 * 0.01;
+	const float heightScale   = 0.5 * 0.01;
+
+	float4 height = GenWaterNormal(coord);
+	height.xy = gradientScale * height.xy;
+	height.w  = heightScale   * height.w;
+
+	float2 paralaxOffset = V.xy * height.w + height.xy;
+	return paralaxOffset;
+}
+
+float3 GetWaveNormal(float2 coord, float3 N, float3 V, float3 P)
+{
+#if WAVE_MAP_ENABLE || WAVE_RIPPLE_MAP_ENABLE
+	float3 bumpNormal = 0;
+
+#if WAVE_MAP_ENABLE
+	float4 wave = coord.xyxy * waveMapLoopNumLow.xyxy;
+	wave *= float4(1, 1, 2, 2);
+
+	float2 paralaxOffset = GetParalaxOffset(WaveNormalMapSamp, wave.xy, V);
+
+	bumpNormal = GenWaterNormal(wave.xy + paralaxOffset.xy).xyz;
+	bumpNormal.xy *= waveMapScaleLow;
+#endif
+
+#if WAVE_RIPPLE_MAP_ENABLE
+	float4 ripple = coord.xyxy * rippleMapLoopNumLow.xyxy;
+	bumpNormal.xy += tex2D(WaveRippleMapSamp, ripple.xy).xy;
+#endif
+
+	return ComputeTangentBinormalNormal(N, P, coord, bumpNormal);
+#else
+	return N;
+#endif
+}
+
+void MaterialVS(
+	in float4 Position : POSITION, 
+	in float3 Normal : NORMAL, 
+	in float4 Texcoord: TEXCOORD0,
+	out float3 oNormal   : TEXCOORD0,
+	out float4 oTexcoord0 : TEXCOORD1,
+	out float4 oTexcoord1 : TEXCOORD2,
+	out float4 oTexcoord2 : TEXCOORD3,
+	out float4 oPosition : POSITION)
+{
+	oNormal = Normal;
+	oPosition = mul(Position, matViewProject);
+
+	oTexcoord0 = Texcoord;
+	oTexcoord1 = Position;
+	oTexcoord2 = float4(CameraPosition - Position.xyz, oPosition.w);
+}
+
+GbufferParam MaterialPS(
+	in float3 normal   : TEXCOORD0,
+	in float2 coord    : TEXCOORD1,
+	in float4 worldPos : TEXCOORD2,
+	in float4 viewdir  : TEXCOORD3)
+{
+	MaterialParam material = (MaterialParam)0;
+	material.albedo = scatteringLow;
+	material.normal = GetWaveNormal(coord, normal, normalize(viewdir.xyz), worldPos);
+	material.smoothness = smoothness;
+	material.specular = smoothnessBaseSpecular;
+	material.customDataA = 0;
+	material.customDataB = scatteringHigh;
+	material.emissive = 0.0;
+	material.emissiveIntensity = 0.0;
+	material.visibility = 1.0;
+	material.lightModel = SHADINGMODELID_GLASS;
+	material.alpha = MaterialDiffuse.a;
+
+	return EncodeGbuffer(material, viewdir.w);
+}
+
+#define OBJECT_TEC(name, mmdpass) \
+	technique name < string MMDPass = mmdpass; \
+	string Script = \
+		"RenderColorTarget0=Gbuffer5RT;" \
+		"RenderColorTarget1=Gbuffer6RT;" \
+		"RenderColorTarget2=Gbuffer7RT;" \
+		"RenderColorTarget3=Gbuffer8RT;" \
+		"Pass=DrawObject;"\
+	;> { \
+		pass DrawObject { \
+			AlphaTestEnable = false; AlphaBlendEnable = false; \
+			VertexShader = compile vs_3_0 MaterialVS(); \
+			PixelShader  = compile ps_3_0 MaterialPS(); \
+		} \
+	}
+
+OBJECT_TEC(MainTec0, "object")
+OBJECT_TEC(MainTecBS0, "object_ss")
+
+technique EdgeTec < string MMDPass = "edge"; > {}
+technique ShadowTech < string MMDPass = "shadow";  > {}
+technique ZplotTec < string MMDPass = "zplot"; > {}
