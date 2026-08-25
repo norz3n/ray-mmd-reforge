@@ -24,7 +24,7 @@ Requirement :
 * Direct3D 9 With Shader Model 3.0 (ps_3_0)
 * **Powerful GPU recommended** due to advanced shading techniques.
 
-Reforge Exclusive Features (through v1.14.0) :
+Reforge Exclusive Features (through v1.16.0) :
 ------------
 
 **Unified Hi-Z Core**
@@ -67,6 +67,11 @@ Reforge Exclusive Features (through v1.14.0) :
 * **Anti-Firefly Bloom**: Karis 13-tap downsampling filter with a soft-knee curve.
 * **Image Enhancement**: AMD FidelityFX CAS sharpening, procedural cinematic film grain, and a Panavision anamorphic lens flare profile.
 * **2-Band Cel-Shading**: optional stylized ramp integrated into the lighting path.
+
+**Toon Rendering**
+* **Community Toon Grading**: shadow color grade (multiply / add / hue-rotate / luminance-preserving warmth), low-saturation auto-tint for colorless albedos, Jashin self-power shadow fallback, and silhouette rim light folded into the cel bands — ported from HAToon2/PAToon2, M4Toon2, Jashin Toon and T_ToonShader as `ray.conf` knobs.
+* **Crisp Cel Ramp**: anti-aliased two-band terminator with a half-strength core shadow, hardened cast-shadow edges, stepped anime highlights, flat two-step ambient fill, and full SSGI reception on toon materials.
+* **Materials/Toon Library**: the entire material tree duplicated as ready-made cel-shaded presets with per-category shadow colors — skin, hair (including procedural presets), eyes, cloth, foliage — plus base cel and tone-based templates and a README.
 
 Standard Features (Inherited) :
 ------------
