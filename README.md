@@ -6,11 +6,11 @@ Ray-MMD Reforge
 </div>
 
 　　**Ray-MMD Reforge** is a modified fork of the original Ray-MMD library for [mikumikudance](http://www.geocities.jp/higuchuu4/index_e.htm).
-　　Focused on bridging realistic lighting with stylized rendering, Reforge rebuilds the engine pipeline around a single **unified Hi-Z buffer** that accelerates every screen-space effect — reflections, global illumination, ambient occlusion, contact shadows, and glass refraction. On top of it sit modern graphics techniques: **Temporal Anti-Aliasing (TAA)**, **Screen Space Global Illumination (SSGI)**, **Hybrid HBAO/SSDO**, **Percentage-Closer Soft Shadows (PCSS)**, and the **AgX tone mapper** — for a stable, physically grounded image out of the box.
+　　Focused on bridging realistic lighting with stylized rendering, Reforge rebuilds the engine pipeline around a single **unified Hi-Z buffer** that accelerates every screen-space effect — reflections, global illumination, ambient occlusion, contact shadows, and glass refraction. On top of it sit modern graphics techniques: **Temporal Anti-Aliasing (TAA)**, **Screen Space Global Illumination (SSGI)**, **Hybrid HBAO/SSDO**, and the **AgX tone mapper** — for a stable, physically grounded image out of the box.
 
 Screenshots:
 ------------
-> *Note: These are legacy screenshots from the original Ray-MMD. New showcases demonstrating SSGI, PCSS, and TAA are coming soon!*
+> *Note: These are legacy screenshots from the original Ray-MMD. New showcases demonstrating SSGI, HBAO/SSDO, and TAA are coming soon!*
 
 [![link text](./Shader/screenshots/screen1_small.jpg)](https://raw.githubusercontent.com/ray-cast/ray-mmd/master/Shader/screenshots/screen1.jpg)
 [![link text](./Shader/screenshots/screen2_small.png)](https://raw.githubusercontent.com/ray-cast/ray-mmd/master/Shader/screenshots/screen2.png)
@@ -45,8 +45,7 @@ Reforge Exclusive Features (through v1.14.0) :
 * **Directional Bent Normals**: occlusion-aware normal bending for more believable indirect shading.
 
 **Lighting & Shadows**
-* **PCSS Variable Penumbra**: mathematically correct percentage-closer soft shadows for local lights, with calibrated PCF filtering to eliminate staircasing and acne.
-* **Variance Shadow Maps**: ultra-clean high-resolution sun shadows, completely grain-free on character faces.
+* **Variance Shadow Maps**: ultra-clean high-resolution sun shadows, completely grain-free on character faces, with rotated Vogel-disk PCF filtering to eliminate staircasing and acne.
 * **Dithered Volumetrics**: interleaved gradient noise for godrays and volumetric fog — smooth gradients without banding.
 
 **Materials**
