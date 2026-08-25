@@ -39,9 +39,7 @@ float4 SSGIBlurPS(
 	cCenter = clamp(cCenter, 0.0f, 100.0f);
 
 #if GI_ENABLE >= 2
-	// Spacing 3.0 widens the kernel ~36% over the old 2.2 at zero extra taps;
-	// grain reappearing again is a sign to restore the second X/Y pair instead.
-	float2 blurDir = (stepSize < 2.0f ? float2(ViewportOffset2.x, 0.0f) : float2(0.0f, ViewportOffset2.y)) * 3.0f;
+	float2 blurDir = (stepSize < 2.0f ? float2(ViewportOffset2.x, 0.0f) : float2(0.0f, ViewportOffset2.y)) * 2.2f;
 #else
 	float2 blurDir = stepSize < 2.0f ? float2(ViewportOffset2.x, 0.0f) : float2(0.0f, ViewportOffset2.y);
 #endif

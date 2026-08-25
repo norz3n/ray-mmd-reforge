@@ -303,11 +303,12 @@ technique DeferredLighting<
 #endif
 
 #if GI_ENABLE
-	// Single X/Y bilateral pair: the old script ran a second identical X/Y pass
-	// (same shader, same spacing) purely as a repeat smoothing iteration at full
-	// cost.  If GI grain reappears, restore the second pair here rather than
-	// raising SSGI_RADIUS.
+	// Two X/Y bilateral pairs: one pair leaves visible GI grain at GI_QUALITY 3;
+	// widening the tap spacing instead just resamples the noise into larger
+	// blotches. The second pair is a true repeat smoothing iteration - keep both.
 	"RenderColorTarget=SSGIMap;     Clear=Color; Pass=SSGI;"
+	"RenderColorTarget=SSGIMapTemp; Pass=SSGIBlurX;"
+	"RenderColorTarget=SSGIMap;     Pass=SSGIBlurY;"
 	"RenderColorTarget=SSGIMapTemp; Pass=SSGIBlurX;"
 	"RenderColorTarget=SSGIMap;     Pass=SSGIBlurY;"
 	"RenderColorTarget=ShadingMap;  Pass=SSGIFinalCombine;"
