@@ -25,7 +25,9 @@ float3 SampleSkyRadiance(float2 skyUv)
 {
 	float4 packed = tex2Dlod(EnvLightMapSamp, float4(skyUv, 0.0f, 0.0f));
 	float4 neighbor = tex2Dlod(EnvLightMapSamp, float4(skyUv + float2(ViewportOffset2.x, 0.0f), 0.0f, 0.0f));
-	bool pattern = (fmod(skyUv.x * ViewportSize.x, 2.0f) == fmod(skyUv.y * ViewportSize.y, 2.0f));
+	// Checkerboard parity of the pixel: parities are equal iff (x+y) is even.
+	// frac-based test avoids the fragile float == comparison of fmod(a)==fmod(b).
+	bool pattern = (frac((skyUv.x * ViewportSize.x + skyUv.y * ViewportSize.y) * 0.5f) < 0.5f);
 	float3 ycbcr = pattern ? float3(packed.rg, neighbor.g) : float3(packed.r, neighbor.g, packed.g);
 	return DecodeYcbcr(ycbcr);
 }
@@ -117,7 +119,21 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 
 			// Progressive LOD: use full-res for near steps, Hi-Z pyramid for far steps
 			int sampleLOD = (s > 1) ? min(s - 1, 3) : 0;
-			float zSample = (sampleLOD == 0) ? GetSSGILinearDepth(currentUv) : HiZ_SampleDepthAtMip(currentUv, sampleLOD);
+			// LOD-0 taps fetch depth and shading model in one Gbuffer8 read; the
+			// Hi-Z mips store depth only, so far steps fall back to a dedicated
+			// model tap inside the NdotL test below.
+			float lod0ModelA = -1.0f;
+			float zSample;
+			if (sampleLOD == 0)
+			{
+				float4 g8 = tex2Dlod(Gbuffer8Map, float4(currentUv, 0.0f, 0.0f));
+				zSample = g8.r;
+				lod0ModelA = g8.a;
+			}
+			else
+			{
+				zSample = HiZ_SampleDepthAtMip(currentUv, sampleLOD);
+			}
 
 			if (zSample > 0.0f && zSample < 1000.0f)
 			{
@@ -135,7 +151,14 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 					float NdotL = dot(nOrigin, lightVector);
 					if (NdotL > 0.03f)
 					{
-						int shadingModel = (int)floor(tex2Dlod(Gbuffer8Map, float4(currentUv, 0.0f, 0.0f)).a);
+						// sampleLOD only depends on the loop index, so this branch is
+						// uniform across the wave and never costs both taps.
+						float modelA;
+						if (lod0ModelA >= 0.0f)
+							modelA = lod0ModelA;
+						else
+							modelA = tex2Dlod(Gbuffer8Map, float4(currentUv, 0.0f, 0.0f)).a;
+						int shadingModel = (int)floor(modelA);
 						bool isEmissive = (shadingModel == SHADINGMODELID_EMISSIVE);
 						bool isSkinEmitter = (shadingModel == SHADINGMODELID_SKIN || shadingModel == SHADINGMODELID_SUBSURFACE);
 

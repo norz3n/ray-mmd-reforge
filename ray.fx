@@ -303,9 +303,11 @@ technique DeferredLighting<
 #endif
 
 #if GI_ENABLE
+	// Single X/Y bilateral pair: the old script ran a second identical X/Y pass
+	// (same shader, same spacing) purely as a repeat smoothing iteration at full
+	// cost.  If GI grain reappears, restore the second pair here rather than
+	// raising SSGI_RADIUS.
 	"RenderColorTarget=SSGIMap;     Clear=Color; Pass=SSGI;"
-	"RenderColorTarget=SSGIMapTemp; Pass=SSGIBlurX;"
-	"RenderColorTarget=SSGIMap;     Pass=SSGIBlurY;"
 	"RenderColorTarget=SSGIMapTemp; Pass=SSGIBlurX;"
 	"RenderColorTarget=SSGIMap;     Pass=SSGIBlurY;"
 	"RenderColorTarget=ShadingMap;  Pass=SSGIFinalCombine;"
