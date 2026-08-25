@@ -70,8 +70,11 @@ float3 DecodeNormal(float3 enc)
 	float nz = floor(enc.z * 255) / 16;
 	enc.xy += float2(floor(nz) / 16, frac(nz)) / 255;
 	float2 fenc = enc.xy * 4 - 2;
-	float f = dot(fenc, fenc);
-	if (!(f >= 0.0f && f <= 10.0f)) return float3(0.0f, 1.0f, 0.0f);
+	// Branchless validity clamp instead of the early-out return: this decoder runs
+	// dozens of times per pixel inside the SSDO/SSGI blur loops, and corrupt
+	// texels only occur on cleared/empty G-buffer pixels that consumers clip anyway.
+	// dot() is never negative, so only the upper bound needs clamping.
+	float f = min(dot(fenc, fenc), 10.0f);
 	float g = sqrt(max(1.0f - f / 4.0f, 0.0f));
 	float3 normal;
 	normal.xy = fenc * g;
