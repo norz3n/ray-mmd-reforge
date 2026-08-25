@@ -74,13 +74,13 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 	{
 		rawGi *= mat.albedo * (1.0f - mat.customDataA * (0.04f + 0.96f * pow(1.0f - NdV, 5.0f)));
 	}
-	else if (mat.lightModel == SHADINGMODELID_CEL || mat.lightModel == SHADINGMODELID_TONEBASED)
-	{
-		float luma = dot(rawGi, float3(0.299f, 0.587f, 0.114f));
-		rawGi = (luma > 1e-4f) ? rawGi * ((floor(luma * 4.0f + 0.5f) / 4.0f) / max(luma, 1e-4f)) * mat.albedo : rawGi * mat.albedo;
-	}
 	else
 	{
+		// CEL/TONEBASED included: no luma quantization here - bounced GI is
+		// dim (luma ~0.05-0.15) and a coarse step ladder zeroed it entirely,
+		// which read as "SSGI does nothing on toon materials". The double
+		// bilateral blur already keeps GI low-frequency enough not to smear
+		// the cel bands; the flat shadow fill comes from the ramp itself
 		rawGi = (rawGi / (1.0f + rawGi * 0.05f)) * mat.albedo;
 	}
 
