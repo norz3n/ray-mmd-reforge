@@ -106,11 +106,12 @@ void ShadingImageBasedLighting(sampler source, MaterialParam material, float4 sc
 
 #if TOON_ENABLE
 	// Match the stepped GI response (SSGI_Resolve): quantize the ambient luma
-	// so the smooth IBL gradient doesn't break the cel bands on the shadow side
+	// so the smooth IBL gradient doesn't break the cel bands on the shadow side.
+	// 2 steps keeps the shadow fill flat - crisp cel, not painterly
 	if (material.lightModel == SHADINGMODELID_CEL || material.lightModel == SHADINGMODELID_TONEBASED)
 	{
 		float luma = dot(diffuse, float3(0.299f, 0.587f, 0.114f));
-		diffuse = (luma > 1e-4f) ? diffuse * ((floor(luma * 4.0f + 0.5f) / 4.0f) / max(luma, 1e-4f)) : diffuse;
+		diffuse = (luma > 1e-4f) ? diffuse * ((floor(luma * 2.0f + 0.5f) / 2.0f) / max(luma, 1e-4f)) : diffuse;
 	}
 #endif
 #endif

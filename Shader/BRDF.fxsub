@@ -138,6 +138,15 @@ float DiffuseBRDF(float3 N, float3 L, float3 V, float roughness)
 	return BurleyBRDF(nl, nv, vh, roughness);
 }
 
+// Rim knobs are floats, so they can't gate a preprocessor #if; defaults keep
+// old ray.confs (no knob) compiling, the compiler folds the constant branch
+#ifndef TOON_RIM_STRENGTH
+#define TOON_RIM_STRENGTH 0
+#endif
+#ifndef TOON_RIM_POWER
+#define TOON_RIM_POWER 2.5
+#endif
+
 float3 ToonBasedShading(float nl, float vh, float nv, float3 shadowColor, float3 specular, float shadow, float roughness, float hardness)
 {
 	float Fd90 = (0.5 + 2.0 * vh * vh) * roughness;
@@ -147,22 +156,82 @@ float3 ToonBasedShading(float nl, float vh, float nv, float3 shadowColor, float3
 	float3 f90 = ComputeSpecularMicroOcclusion(f0);
 	float3 fresnel = fresnelSchlick(f0, f90, vh);
 
-	return lerp(shadowColor, 1.0, saturate(nl * hardness + 1 - hardness) * shadow) * (1  - fresnel);
+	float litFactor = saturate(nl * hardness + 1 - hardness) * shadow;
+
+	// Jashin rim: silhouette boost folded in before the ramp so it inherits the bands
+	litFactor += (TOON_RIM_STRENGTH > 0) ? pow(saturate(1 - nv), TOON_RIM_POWER) * TOON_RIM_STRENGTH : 0;
+
+	return lerp(shadowColor, 1.0, litFactor) * (1  - fresnel);
 }
+
+#if TOON_ENABLE
+// Hue rotation via YIQ: chroma rotates, luminance stays put
+float3 ShiftToonHue(float3 c, float degrees)
+{
+	float a = radians(degrees);
+	float s = sin(a), co = cos(a);
+	float y = dot(c, float3(0.299f, 0.587f, 0.114f));
+	float i = dot(c, float3(0.5959f, -0.2746f, -0.3213f));
+	float q = dot(c, float3(0.2115f, -0.5227f, 0.3112f));
+	float i2 = i * co - q * s;
+	q = i * s + q * co;
+	i = i2;
+	return saturate(float3(
+		y + 0.956f * i + 0.619f * q,
+		y - 0.272f * i - 0.647f * q,
+		y - 1.106f * i - 1.703f * q));
+}
+
+// Community-toon shadow grading, one place for every knob:
+// self-power fallback (Jashin) -> low-saturation auto-tint (M4Toon2) ->
+// mul/add/hue grade (PAToon2/M4Toon2) -> warm push (T_ToonShader skin mode)
+float3 ToonShadowGrade(float3 shadowColor, float3 albedo)
+{
+	if (TOON_SELF_POWER_SHADOW > 0 && all(shadowColor < 1e-4))
+		shadowColor = pow(saturate(albedo - 0.01f), TOON_SELF_POWER_SHADOW);
+
+	float sat = max(max(albedo.r, albedo.g), albedo.b) - min(min(albedo.r, albedo.g), albedo.b);
+	if (sat <= TOON_AUTOTINT_THRESHOLD && any(TOON_AUTOTINT_COLOR))
+	{
+		float3 tinted = saturate(shadowColor * TOON_AUTOTINT_COLOR);
+		shadowColor = lerp(shadowColor, tinted, (1 - sat) * TOON_AUTOTINT_STRENGTH);
+	}
+
+	shadowColor = shadowColor * TOON_SHADOW_MUL + TOON_SHADOW_ADD;
+
+	if (TOON_SHADOW_HUE != 0)
+		shadowColor = ShiftToonHue(shadowColor, TOON_SHADOW_HUE);
+
+	if (TOON_SHADOW_WARMTH > 0)
+	{
+		float w = TOON_SHADOW_WARMTH;
+		float3 warm = float3(1.0f + 0.30f * w, 1.0f - 0.10f * w, 1.0f - 0.35f * w);
+		float luma = dot(shadowColor, float3(0.299f, 0.587f, 0.114f));
+		// scale back so only the chroma moves, not the brightness
+		shadowColor *= warm * (luma / max(dot(warm * shadowColor, float3(0.299f, 0.587f, 0.114f)), 1e-4f));
+	}
+
+	return saturate(shadowColor);
+}
+#endif
 
 float3 CelShading(float nl, float vh, float nv, float3 shadowColor, float3 specular, float shadow, float roughness, float threshold)
 {
 	// Hardened shadow: soft PCF/contact-shadow gradients would smear the band
 	// edges; anime ramps need a crisp geometric terminator
-	shadow = smoothstep(0.25f, 0.75f, shadow);
+	shadow = smoothstep(0.35f, 0.65f, shadow);
 	float halfLambert = nl * 0.5f + 0.5f;
 	float litFactor = halfLambert * shadow;
 
-	// Anti-aliased 2-band anime shadow ramp with soft secondary core shadow
-	float band1 = smoothstep(threshold - 0.035f, threshold + 0.035f, litFactor);
-	float band2 = smoothstep(threshold * 0.5f - 0.025f, threshold * 0.5f + 0.025f, litFactor);
+	litFactor += (TOON_RIM_STRENGTH > 0) ? pow(saturate(1 - nv), TOON_RIM_POWER) * TOON_RIM_STRENGTH : 0;
 
-	float3 deepShadow = shadowColor * shadowColor;
+	// Anti-aliased 2-band anime shadow ramp with soft secondary core shadow
+	float band1 = smoothstep(threshold - 0.02f, threshold + 0.02f, litFactor);
+	float band2 = smoothstep(threshold * 0.5f - 0.015f, threshold * 0.5f + 0.015f, litFactor);
+
+	// Half-strength core shadow: squaring a saturated shadow color doubles its
+	// chroma and reads as burnt; 50% keeps the depth cue without the fry
+	float3 deepShadow = lerp(shadowColor, shadowColor * shadowColor, 0.5f);
 	float3 midShadow = shadowColor;
 
 	float3 celRamp = lerp(deepShadow, midShadow, band2);
@@ -412,13 +481,18 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 	float3 diffuse = 0;
 
 	[branch]
-	if (material.lightModel == SHADINGMODELID_CEL)
-		// Terminator driven by the (hardened) geometry shadow only - AO must not
-		// shift the band edges, the ramp's own shadow colors carry the shading
-		diffuse = CelShading(nl, vh, nv, material.customDataB, material.specular, shadow, roughness, material.customDataA);
-	else if (material.lightModel == SHADINGMODELID_TONEBASED)
-		// Same as CEL: terminator from the geometry shadow only, AO must not shift the ramp edge
-		diffuse = ToonBasedShading(nl, vh, nv, material.customDataB, material.specular, shadow, roughness, material.customDataA);
+	if (material.lightModel == SHADINGMODELID_CEL || material.lightModel == SHADINGMODELID_TONEBASED)
+	{
+		float3 toonShadow = ToonShadowGrade(material.customDataB, material.albedo);
+
+		if (material.lightModel == SHADINGMODELID_CEL)
+			// Terminator driven by the (hardened) geometry shadow only - AO must not
+			// shift the band edges, the ramp's own shadow colors carry the shading
+			diffuse = CelShading(nl, vh, nv, toonShadow, material.specular, shadow, roughness, material.customDataA);
+		else
+			// Same as CEL: terminator from the geometry shadow only, AO must not shift the ramp edge
+			diffuse = ToonBasedShading(nl, vh, nv, toonShadow, material.specular, shadow, roughness, material.customDataA);
+	}
 	else
 		diffuse = BurleyBRDF(nl, nv, vh, roughness) * nl * diffuseOcclusion;
 #else
