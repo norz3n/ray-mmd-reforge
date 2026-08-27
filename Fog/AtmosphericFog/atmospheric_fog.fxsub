@@ -115,7 +115,8 @@ void AtmosphericFogMieBlurVS(
 
 float4 AtmosphericFogMieBlurPS(in float4 coord : TEXCOORD0, float4 illuminationPosition : TEXCOORD1) : COLOR0
 {
-	float jitter = InterleavedGradientNoise(coord.xy * ViewportSize, 0);
+	int frameCounter = (int)fmod(time * 60.0, 16.0);
+	float jitter = InterleavedGradientNoise(coord.xy * ViewportSize, frameCounter);
 
 	float3 sampleColor = 0.0;
 	float2 sampleDecay = float2(1.0, 0.96);
