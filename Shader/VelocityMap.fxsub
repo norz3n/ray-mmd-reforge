@@ -1,0 +1,269 @@
+#ifndef RAY_MMD_VELOCITY_MAP_FXSUB
+#define RAY_MMD_VELOCITY_MAP_FXSUB
+
+float TransparentThreshold = 0.5;
+
+float4x4 WorldViewProjMatrix : WORLDVIEWPROJECTION;
+
+bool use_texture;
+
+float4 MaterialDiffuse : DIFFUSE < string Object = "Geometry"; >;
+
+float2 ViewportSize : VIEWPORTPIXELSIZE;
+static float ViewportAspect = ViewportSize.x / ViewportSize.y;
+
+texture ObjectTexture : MATERIALTEXTURE;
+sampler ObjTexSampler = sampler_state
+{
+	texture = <ObjectTexture>;
+	MINFILTER = LINEAR;
+	MAGFILTER = LINEAR;
+};
+
+// 260,000 vertices capacity (512x512)
+#define VPBUF_WIDTH  512
+#define VPBUF_HEIGHT 512
+
+static float2 VPBufOffset = float2(0.5 / VPBUF_WIDTH, 0.5 / VPBUF_HEIGHT);
+
+texture DepthBuffer : RenderDepthStencilTarget <
+	int Width = VPBUF_WIDTH;
+	int Height = VPBUF_HEIGHT;
+	string Format = "D24S8";
+>;
+
+texture VertexPosBufTex : RenderColorTarget <
+	int Width = VPBUF_WIDTH;
+	int Height = VPBUF_HEIGHT;
+	bool AntiAlias = false;
+	int Miplevels = 1;
+	string Format = "A32B32G32R32F";
+>;
+sampler VertexPosBuf = sampler_state
+{
+	Texture = <VertexPosBufTex>;
+	ADDRESSU = CLAMP; ADDRESSV = CLAMP;
+	MAGFILTER = NONE; MINFILTER = NONE; MIPFILTER = NONE;
+};
+
+texture VertexPosBufTex2 : RenderColorTarget <
+	int Width = VPBUF_WIDTH;
+	int Height = VPBUF_HEIGHT;
+	bool AntiAlias = false;
+	int Miplevels = 1;
+	string Format = "A32B32G32R32F";
+>;
+sampler VertexPosBuf2 = sampler_state
+{
+	Texture = <VertexPosBufTex2>;
+	ADDRESSU = CLAMP; ADDRESSV = CLAMP;
+	MAGFILTER = NONE; MINFILTER = NONE; MIPFILTER = NONE;
+};
+
+#define INFOBUFSIZE 8
+
+texture DepthBufferMB : RenderDepthStencilTarget <
+	int Width = INFOBUFSIZE;
+	int Height = 1;
+	string Format = "D24S8";
+>;
+
+texture MatrixBufTex : RenderColorTarget <
+	int Width = INFOBUFSIZE;
+	int Height = 1;
+	bool AntiAlias = false;
+	int Miplevels = 1;
+	string Format = "A32B32G32R32F";
+>;
+
+float4 MatrixBufArray[INFOBUFSIZE] : TEXTUREVALUE <
+	string TextureName = "MatrixBufTex";
+>;
+
+static float4x4 lastMatrix = float4x4(MatrixBufArray[0], MatrixBufArray[1], MatrixBufArray[2], MatrixBufArray[3]);
+
+float ftime : TIME<bool SyncInEditMode = true;>;
+float stime : TIME<bool SyncInEditMode = false;>;
+
+static float last_stime = MatrixBufArray[4].x;
+static bool Appear = (abs(last_stime - stime) > 0.5);
+
+float2 ScreenPosRasterize(float4 ScreenPos)
+{
+	return ScreenPos.xy / ScreenPos.w;
+}
+
+float4 getVertexPosBuf(float index)
+{
+	float2 tpos = float2(index % VPBUF_WIDTH, trunc(index / VPBUF_WIDTH));
+	tpos += float2(0.5, 0.5);
+	tpos /= float2(VPBUF_WIDTH, VPBUF_HEIGHT);
+	return tex2Dlod(VertexPosBuf2, float4(tpos, 0, 0));
+}
+
+struct VS_OUTPUT
+{
+	float4 Pos        : POSITION;
+	float2 Tex        : TEXCOORD0;
+	float4 LastPos    : TEXCOORD1;
+	float4 CurrentPos : TEXCOORD2;
+};
+
+VS_OUTPUT Velocity_VS(float4 Pos : POSITION, float2 Tex : TEXCOORD0, uniform bool useToon, int index : _INDEX)
+{
+	VS_OUTPUT Out = (VS_OUTPUT)0;
+	if (useToon)
+	{
+		Out.LastPos = getVertexPosBuf((float)index);
+	}
+	Out.CurrentPos = Pos;
+	Out.Pos = mul(Pos, WorldViewProjMatrix);
+	Out.Tex = Tex;
+	return Out;
+}
+
+float4 Velocity_PS(VS_OUTPUT IN, uniform bool useToon) : COLOR0
+{
+	float4 lastPos, ViewPos;
+	if (useToon)
+	{
+		lastPos = mul(IN.LastPos, lastMatrix);
+		ViewPos = mul(IN.CurrentPos, WorldViewProjMatrix);
+	}
+	else
+	{
+		lastPos = mul(IN.CurrentPos, lastMatrix);
+		ViewPos = mul(IN.CurrentPos, WorldViewProjMatrix);
+	}
+
+	float alpha = MaterialDiffuse.a;
+	float mb_depth = ViewPos.z / ViewPos.w;
+
+	if (use_texture)
+	{
+		alpha *= tex2D(ObjTexSampler, IN.Tex).a;
+	}
+
+	float2 curScreen = (ViewPos.xy / max(ViewPos.w, 1e-5)) * float2(0.5, -0.5) + 0.5;
+	float2 prevScreen = (lastPos.xy / max(lastPos.w, 1e-5)) * float2(0.5, -0.5) + 0.5;
+	float2 velocity = curScreen - prevScreen;
+
+	if (Appear) velocity = 0;
+
+	// Scale and bias to [0, 1] range: 0.5 is 0 velocity
+	velocity = velocity + 0.5;
+	return float4(velocity, mb_depth, (alpha >= TransparentThreshold));
+}
+
+struct VS_OUTPUT2
+{
+	float4 Pos : POSITION;
+	float2 texCoord : TEXCOORD0;
+};
+
+VS_OUTPUT2 DrawMatrixBuf_VS(float4 Pos : POSITION, float2 Tex : TEXCOORD)
+{
+	VS_OUTPUT2 Out;
+	Out.Pos = Pos;
+	Out.texCoord = Tex;
+	return Out;
+}
+
+float4 DrawMatrixBuf_PS(float2 texCoord : TEXCOORD0) : COLOR
+{
+	int dindex = (int)((texCoord.x * INFOBUFSIZE) + 0.2);
+	if (dindex < 4)
+	{
+		return WorldViewProjMatrix[dindex];
+	}
+	else
+	{
+		return float4(stime, ftime, 0, 1);
+	}
+}
+
+struct VS_OUTPUT3
+{
+	float4 Pos : POSITION;
+	float4 BasePos : TEXCOORD0;
+};
+
+VS_OUTPUT3 DrawVertexBuf_VS(float4 Pos : POSITION, int index : _INDEX)
+{
+	VS_OUTPUT3 Out;
+	float findex = (float)index;
+	float2 tpos = 0;
+	tpos.x = modf(findex / VPBUF_WIDTH, tpos.y);
+	tpos.y /= VPBUF_HEIGHT;
+
+	Out.Pos.xy = (tpos * 2 - 1) * float2(1, -1);
+	Out.Pos.zw = float2(0, 1);
+	Out.BasePos = Pos;
+	return Out;
+}
+
+float4 DrawVertexBuf_PS(VS_OUTPUT3 IN) : COLOR0
+{
+	return IN.BasePos;
+}
+
+VS_OUTPUT2 CopyVertexBuf_VS(float4 Pos : POSITION, float2 Tex : TEXCOORD)
+{
+	VS_OUTPUT2 Out;
+	Out.Pos = Pos;
+	Out.texCoord = Tex + VPBufOffset;
+	return Out;
+}
+
+float4 CopyVertexBuf_PS(float2 texCoord : TEXCOORD0) : COLOR
+{
+	return tex2D(VertexPosBuf, texCoord);
+}
+
+stateblock PMD_State = stateblock_state
+{
+	DestBlend = InvSrcAlpha; SrcBlend = SrcAlpha;
+	AlphaBlendEnable = false;
+	AlphaTestEnable = true;
+	VertexShader = compile vs_3_0 Velocity_VS(true);
+	PixelShader  = compile ps_3_0 Velocity_PS(true);
+};
+
+stateblock Accessory_State = stateblock_state
+{
+	DestBlend = InvSrcAlpha; SrcBlend = SrcAlpha;
+	AlphaBlendEnable = false;
+	AlphaTestEnable = true;
+	VertexShader = compile vs_3_0 Velocity_VS(false);
+	PixelShader  = compile ps_3_0 Velocity_PS(false);
+};
+
+stateblock makeMatrixBufState = stateblock_state
+{
+	AlphaBlendEnable = false;
+	AlphaTestEnable = false;
+	VertexShader = compile vs_3_0 DrawMatrixBuf_VS();
+	PixelShader  = compile ps_3_0 DrawMatrixBuf_PS();
+};
+
+stateblock makeVertexBufState = stateblock_state
+{
+	DestBlend = InvSrcAlpha; SrcBlend = SrcAlpha;
+	FillMode = POINT;
+	CullMode = NONE;
+	ZEnable = false;
+	AlphaBlendEnable = false;
+	AlphaTestEnable = false;
+	VertexShader = compile vs_3_0 DrawVertexBuf_VS();
+	PixelShader  = compile ps_3_0 DrawVertexBuf_PS();
+};
+
+stateblock copyVertexBufState = stateblock_state
+{
+	AlphaBlendEnable = false;
+	AlphaTestEnable = false;
+	VertexShader = compile vs_3_0 CopyVertexBuf_VS();
+	PixelShader  = compile ps_3_0 CopyVertexBuf_PS();
+};
+
+#endif // RAY_MMD_VELOCITY_MAP_FXSUB

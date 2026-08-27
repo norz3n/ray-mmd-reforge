@@ -43,6 +43,29 @@ sampler FogMapSamp = sampler_state {
 	AddressU = CLAMP; AddressV = CLAMP;
 };
 #endif
+
+#if POST_MOTION_BLUR_ENABLE == 2
+texture VelocityMap: OFFSCREENRENDERTARGET<
+	string Description = "Per-object velocity buffer for ray motion blur";
+	float2 ViewportRatio = {1.0, 1.0};
+	string Format = "A16B16G16R16F";
+	float4 ClearColor = { 0.5, 0.5, 1.0, 0.0 };
+	float ClearDepth = 1.0;
+	string DefaultEffect =
+		"self = hide;"
+		"*fog.pmx = hide;"
+		"*controller.pmx = hide;"
+		"*editor*.pmx = hide;"
+		"*.pmx = ./Shader/VelocityMap.fx;"
+		"*.pmd = ./Shader/VelocityMap.fx;"
+		"* = hide;";
+>;
+sampler VelocityMapSamp = sampler_state {
+	texture = <VelocityMap>;
+	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+#endif
 #if MULTI_LIGHT_ENABLE
 texture LightMap: OFFSCREENRENDERTARGET<
 	string Description = "Multi light source map for ray";

@@ -17,7 +17,17 @@ float4 PostProcessMotionBlurPS(in float2 uv : TEXCOORD0, uniform sampler2D sourc
 	float4 prevClipPos = mul(float4(worldPosition, 1.0), matViewProjectPrev);
 	float2 prevUV = (prevClipPos.xy / max(prevClipPos.w, 1e-5)) * float2(0.5, -0.5) + 0.5;
 
-	float2 velocity = uv - prevUV;
+	float2 camVelocity = uv - prevUV;
+	float2 velocity = camVelocity;
+
+#if POST_MOTION_BLUR_ENABLE == 2
+	float4 objVelSample = tex2Dlod(VelocityMapSamp, float4(uv, 0, 0));
+	float2 objVelocity = (objVelSample.xy - 0.5f) * 4.0f; // Decode normalized velocity
+	if (objVelSample.a > 0.5f && (abs(objVelocity.x) > 1e-4f || abs(objVelocity.y) > 1e-4f))
+	{
+		velocity = objVelocity;
+	}
+#endif
 	
 	// Clamp velocity to prevent massive smearing during teleports/camera cuts
 	float maxVelocity = 0.05f; // 5% of screen width
