@@ -373,6 +373,26 @@ void ComputeBokehNearAccum(sampler _MainTex, float4 _MainTex_TexelSize, float4 s
 	nearAcc += float4(samp.rgb, 1.0f) * nearWeight * step(_MainTex_TexelSize.y, -samp.a);
 }
 
+float2 ApplyCatsEyeDeformation(float2 disp, float2 uv)
+{
+#if DOF_BOKEH_CATS_EYE
+	float2 centerOffset = uv - 0.5f;
+	float distSq = dot(centerOffset * float2(ViewportAspect, 1.0f), centerOffset * float2(ViewportAspect, 1.0f));
+	
+	float2 radialDir = normalize(centerOffset + 1e-5f);
+	float2 tangentDir = float2(-radialDir.y, radialDir.x);
+
+	float radialComp = dot(disp, radialDir);
+	float tangentComp = dot(disp, tangentDir);
+
+	// Optical mechanical vignetting squeeze towards corners
+	float squeeze = 1.0f / (1.0f + distSq * 2.5f);
+	return radialDir * radialComp + tangentDir * (tangentComp * squeeze);
+#else
+	return disp;
+#endif
+}
+
 float4 ComputeBokehFarPS(
 	in float2 uv : TEXCOORD0,
 	in float2 screen : SV_POSITION,
@@ -391,7 +411,7 @@ float4 ComputeBokehFarPS(
 	[loop]
 	for (int i = 0; i < DOF_POSSION_SAMPLES; i++)
 	{
-		float2 disp = _CameraBokehKernel[i].xy * maxRadius;
+		float2 disp = ApplyCatsEyeDeformation(_CameraBokehKernel[i].xy * maxRadius, uv);
 		ComputeBokehFarAccum(_MainTex_LinearSampler, _MainTex_TexelSize, samp0, uv, disp, mip, farAcc);
 	}
 
@@ -416,7 +436,7 @@ float4 ComputeBokehNearPS(
 	[loop]
 	for (int i = 0; i < DOF_POSSION_SAMPLES; i++)
 	{
-		float2 disp = _CameraBokehKernel[i].xy * maxRadius;
+		float2 disp = ApplyCatsEyeDeformation(_CameraBokehKernel[i].xy * maxRadius, uv);
 		ComputeBokehNearAccum(_MainTex_LinearSampler, _MainTex_TexelSize, samp0, uv, disp, nearAcc);
 	}
 
