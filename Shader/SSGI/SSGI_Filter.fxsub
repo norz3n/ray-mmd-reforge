@@ -16,11 +16,10 @@
  * Geometry-aware radiance outlier clamp. It kills trace speckles before blur spreads them.
  */
 float4 SSGIOutlierRejectPS(
-	in float2 uvCoordIn : TEXCOORD0,
+	in float2 uvCoord : TEXCOORD0,
 	in float3 viewDir : TEXCOORD1,
 	uniform sampler source) : COLOR
 {
-	float2 uvCoord = uvCoordIn - ViewportOffset;
 	float zCenter = GetSSGILinearDepth(uvCoord);
 	if (!(zCenter > 0.0f && zCenter < 1000.0f))
 		return float4(0.0f, 0.0f, 0.0f, 0.0f);
@@ -63,13 +62,12 @@ float4 SSGIOutlierRejectPS(
  * Separable finish pass. Atrous removes speckles; this makes the remaining GI field visibly soft.
  */
 float4 SSGIBlurPS(
-	in float2 uvCoordIn : TEXCOORD0,
+	in float2 uvCoord : TEXCOORD0,
 	in float3 viewDir : TEXCOORD1,
 	uniform sampler source,
 	uniform float isHorizontal,
 	uniform float stepScale) : COLOR
 {
-	float2 uvCoord = uvCoordIn - ViewportOffset;
 	float zCenter = GetSSGILinearDepth(uvCoord);
 	if (!(zCenter > 0.0f && zCenter < 1000.0f))
 		return float4(0.0f, 0.0f, 0.0f, 0.0f);
