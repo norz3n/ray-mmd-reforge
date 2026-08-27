@@ -14,9 +14,8 @@
 /**
  * Composites denoised indirect GI irradiance with material albedo, BRDF shading models, and occlusion.
  */
-float4 SSGIFinalCombinePS(in float2 uvCoordIn : TEXCOORD0, in float3 viewDir : TEXCOORD1) : COLOR
+float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) : COLOR
 {
-	float2 uvCoord = uvCoordIn - ViewportOffset;
 	float zCenter = GetSSGILinearDepth(uvCoord);
 	MaterialParam mat;
 	DecodeGbuffer(

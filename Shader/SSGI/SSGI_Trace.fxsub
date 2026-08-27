@@ -64,22 +64,21 @@ float3 SSGISampleStableEmissive(float2 uv, float zCenter, float3 centerColor, fl
 /**
  * Screen-Space Global Illumination Radiance Integration Pixel Shader.
  */
-float4 SSGIPassPS(in float4 uvCoordIn : TEXCOORD0, in float3 viewDir : TEXCOORD1) : COLOR
+float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) : COLOR
 {
-	float2 uvCoord = uvCoordIn.xy - ViewportOffset;
-	float zOrigin = GetSSGILinearDepth(uvCoord);
+	float zOrigin = GetSSGILinearDepth(uvCoord.xy);
 	if (!(zOrigin > 0.0f && zOrigin < 1000.0f))
 		clip(-1);
 
 	float4 projInfo = GetProjConstant();
-	float3 nOrigin = GetSSGINormal(uvCoord);
-	float3 pOrigin = GetViewPosition(projInfo, uvCoord, zOrigin);
+	float3 nOrigin = GetSSGINormal(uvCoord.xy);
+	float3 pOrigin = GetViewPosition(projInfo, uvCoord.xy, zOrigin);
 
 	// Receiver shading model: skin receiving skin radiance keeps the full
 	// albedo weighting (the emitter's dermal albedo is already baked into
 	// ShadingMap), so a boosted SSGI still brightens skin.  Only skin ->
 	// non-skin emission gets the bounce clamp below.
-	int receiverModel = (int)floor(tex2Dlod(Gbuffer8Map, float4(uvCoord, 0.0f, 0.0f)).a);
+	int receiverModel = (int)floor(tex2Dlod(Gbuffer8Map, float4(uvCoord.xy, 0.0f, 0.0f)).a);
 	bool receiverIsSkin = (receiverModel == SHADINGMODELID_SKIN || receiverModel == SHADINGMODELID_SUBSURFACE);
 
 	// Adaptive world radius scaling (mode 1: focused bounce, mode 2: large room-scale gather)
@@ -95,7 +94,7 @@ float4 SSGIPassPS(in float4 uvCoordIn : TEXCOORD0, in float3 viewDir : TEXCOORD1
 #endif
 	screenRadius *= clamp(mSSGIConeAngle * 2.0f, 0.25f, 4.0f);
 
-	float2 screenPixel = uvCoord * ViewportSize;
+	float2 screenPixel = uvCoord.xy * ViewportSize;
 #if AA_QUALITY == 6
 	int frameCounter = (int)fmod(time * 60.0f, 16.0f);
 #else
@@ -134,7 +133,7 @@ float4 SSGIPassPS(in float4 uvCoordIn : TEXCOORD0, in float3 viewDir : TEXCOORD1
 
 		float3 rayColor = 0.0f;
 		float rayOcc = 0.0f;
-		float2 prevUv = uvCoord;
+		float2 prevUv = uvCoord.xy;
 
 		[loop]
 		for (int s = 0; s < SSGI_STEPS; ++s)
@@ -142,7 +141,7 @@ float4 SSGIPassPS(in float4 uvCoordIn : TEXCOORD0, in float3 viewDir : TEXCOORD1
 			// Linear-quadratic hybrid progression: equidistant spacing avoids skipping emitters while keeping near-field detail
 			float stepProgress = (float(s) + rayJitter) / float(SSGI_STEPS);
 			float stepDist = lerp(stepProgress, stepProgress * stepProgress, 0.25f);
-			float2 currentUv = uvCoord + direction * (screenRadius * stepDist);
+			float2 currentUv = uvCoord.xy + direction * (screenRadius * stepDist);
 
 			if (currentUv.x < 0.0f || currentUv.x > 1.0f || currentUv.y < 0.0f || currentUv.y > 1.0f)
 				break;
