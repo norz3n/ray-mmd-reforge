@@ -436,6 +436,8 @@ technique DeferredLighting<
 #else
 	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=HDRTonemapping;"
 #endif
+#else
+	"RenderColorTarget=ShadingMapTemp; Pass=HDRTonemapping;"
 #endif
 
 #if AA_QUALITY == 1
