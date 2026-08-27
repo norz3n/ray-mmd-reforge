@@ -303,14 +303,13 @@ technique DeferredLighting<
 #endif
 
 #if GI_ENABLE
-	// Two X/Y bilateral pairs: one pair leaves visible GI grain at GI_QUALITY 3;
-	// widening the tap spacing instead just resamples the noise into larger
-	// blotches. The second pair is a true repeat smoothing iteration - keep both.
+	// Reject trace outliers first; blur and resolve reconstruct a low-frequency GI field.
 	"RenderColorTarget=SSGIMap;     Clear=Color; Pass=SSGI;"
-	"RenderColorTarget=SSGIMapTemp; Pass=SSGIBlurX;"
-	"RenderColorTarget=SSGIMap;     Pass=SSGIBlurY;"
-	"RenderColorTarget=SSGIMapTemp; Pass=SSGIBlurX;"
-	"RenderColorTarget=SSGIMap;     Pass=SSGIBlurY;"
+	"RenderColorTarget=SSGIMapTemp; Pass=SSGIPrefilter;"
+	"RenderColorTarget=SSGIMap;     Pass=SSGIBlurX;"
+	"RenderColorTarget=SSGIMapTemp; Pass=SSGIBlurY;"
+	"RenderColorTarget=SSGIMap;     Pass=SSGIBlurX2;"
+	"RenderColorTarget=SSGIMapTemp; Pass=SSGIBlurY2;"
 	"RenderColorTarget=ShadingMap;  Pass=SSGIFinalCombine;"
 #endif
 
@@ -752,17 +751,35 @@ technique DeferredLighting<
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
 		PixelShader  = compile ps_3_0 SSGIPassPS();
 	}
+	pass SSGIPrefilter<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 SSGIOutlierRejectPS(SSGIMapSamp);
+	}
 	pass SSGIBlurX<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSGIBlurPS(SSGIMapSamp, 1.0f);
+		PixelShader  = compile ps_3_0 SSGIBlurPS(SSGIMapSampTemp, 1.0f, 1.0f);
 	}
 	pass SSGIBlurY<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSGIBlurPS(SSGIMapSampTemp, 3.0f);
+		PixelShader  = compile ps_3_0 SSGIBlurPS(SSGIMapSamp, 0.0f, 1.0f);
+	}
+	pass SSGIBlurX2<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 SSGIBlurPS(SSGIMapSampTemp, 1.0f, 2.5f);
+	}
+	pass SSGIBlurY2<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 SSGIBlurPS(SSGIMapSamp, 0.0f, 2.5f);
 	}
 	pass SSGIFinalCombine<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = true; AlphaTestEnable = false;

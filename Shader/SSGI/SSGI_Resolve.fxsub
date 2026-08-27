@@ -24,7 +24,7 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 		tex2Dlod(Gbuffer8Map, float4(uvCoord, 0.0f, 0.0f)),
 		mat);
 
-	float3 rawGi = tex2Dlod(SSGIMapSamp, float4(uvCoord, 0.0f, 0.0f)).rgb;
+	float3 rawGi = tex2Dlod(SSGIMapSampTemp, float4(uvCoord, 0.0f, 0.0f)).rgb;
 	rawGi = clamp(rawGi, 0.0f, 100.0f);
 
 	// Pre-albedo gathered irradiance, reused below as a local radiance field for indirect specular

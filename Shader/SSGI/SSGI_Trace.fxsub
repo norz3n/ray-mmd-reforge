@@ -3,14 +3,14 @@
  *
  * Module: SSGI_Trace.fxsub
  * Independent Hierarchical Diffuse Raymarching & Radiance Integration Engine.
- * Gathers hemisphere indirect irradiance with staggered jitter and progressive Hi-Z LOD stepping.
+ * Gathers hemisphere indirect irradiance with staggered jitter from the full-resolution G-buffer.
  */
 
 #ifndef RAY_MMD_SSGI_TRACE_FXSUB
 #define RAY_MMD_SSGI_TRACE_FXSUB
 
 #include "shader/SSGI/SSGI_Common.fxsub"
-#include "shader/HiZ/HiZ_Main.fxsub"
+#include "shader/BilateralCommon.fxsub"
 
 #if IBL_QUALITY
 /**
@@ -32,6 +32,34 @@ float3 SampleSkyRadiance(float2 skyUv)
 	return DecodeYcbcr(ycbcr);
 }
 #endif
+
+inline float SSGIEmissiveTapWeight(float2 uv, float zCenter, float depthTolerance)
+{
+	float4 g8 = tex2Dlod(Gbuffer8Map, float4(uv, 0.0f, 0.0f));
+	float emissive = 1.0f - saturate(abs(floor(g8.a) - SHADINGMODELID_EMISSIVE));
+	return emissive * BilateralDepthWeight(g8.r, zCenter, depthTolerance);
+}
+
+float3 SSGISampleStableEmissive(float2 uv, float zCenter, float3 centerColor, float stepProgress)
+{
+	float2 stepUv = ViewportOffset2 * lerp(2.0f, 5.0f, stepProgress);
+	float depthTolerance = min(max(zCenter * 0.04f, 0.5f), 5.0f);
+
+	float wCenter = 3.0f;
+	float wR = SSGIEmissiveTapWeight(uv + float2(stepUv.x, 0.0f), zCenter, depthTolerance);
+	float wL = SSGIEmissiveTapWeight(uv - float2(stepUv.x, 0.0f), zCenter, depthTolerance);
+	float wU = SSGIEmissiveTapWeight(uv + float2(0.0f, stepUv.y), zCenter, depthTolerance);
+	float wD = SSGIEmissiveTapWeight(uv - float2(0.0f, stepUv.y), zCenter, depthTolerance);
+	float totalW = wCenter + wR + wL + wU + wD;
+
+	float3 color = centerColor * wCenter;
+	color += clamp(tex2Dlod(ShadingMapSamp, float4(uv + float2(stepUv.x, 0.0f), 0.0f, 0.0f)).rgb, 0.0f, 100.0f) * wR;
+	color += clamp(tex2Dlod(ShadingMapSamp, float4(uv - float2(stepUv.x, 0.0f), 0.0f, 0.0f)).rgb, 0.0f, 100.0f) * wL;
+	color += clamp(tex2Dlod(ShadingMapSamp, float4(uv + float2(0.0f, stepUv.y), 0.0f, 0.0f)).rgb, 0.0f, 100.0f) * wU;
+	color += clamp(tex2Dlod(ShadingMapSamp, float4(uv - float2(0.0f, stepUv.y), 0.0f, 0.0f)).rgb, 0.0f, 100.0f) * wD;
+
+	return color / max(totalW, 1e-5f);
+}
 
 /**
  * Screen-Space Global Illumination Radiance Integration Pixel Shader.
@@ -72,12 +100,12 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 #else
 	int frameCounter = 0;
 #endif
-	// White-noise hash instead of IGN: IGN's fixed diagonal gradient pattern survives the
-	// bilateral blur as visible diagonal banding when there is no temporal accumulation
+	// White-noise hash: isotropic decorrelation avoids directional banding
 	float noiseAngle = frac(sin(dot(screenPixel + float(frameCounter) * 5.588238f, float2(127.1f, 311.7f))) * 43758.5453f);
-	float noiseRadius = frac(noiseAngle * 5.588238f + (screenPixel.x + screenPixel.y * 5.588238f) * 0.61803398875f);
+	float noiseRadius = frac(sin(dot(screenPixel + float(frameCounter) * 5.588238f, float2(269.5f, 183.3f))) * 43758.5453f);
 
-	float startAngle = noiseAngle * PI_2;
+	// Stratified sector jitter: keeps angular coherence across adjacent pixels to prevent blotchy clumping
+	float startAngle = noiseAngle * (PI_2 / float(SSGI_ANGLES));
 	float3 totalGi = 0.0f;
 	float minDistanceSq = max(mSSGIBias * mSSGIBias * 0.02f, 0.001f);
 
@@ -109,31 +137,20 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 		[loop]
 		for (int s = 0; s < SSGI_STEPS; ++s)
 		{
-			// Quadratic progression for dense near-field and wide far-field sampling
+			// Linear-quadratic hybrid progression: equidistant spacing avoids skipping emitters while keeping near-field detail
 			float stepProgress = (float(s) + rayJitter) / float(SSGI_STEPS);
-			float stepDist = stepProgress * stepProgress;
+			float stepDist = lerp(stepProgress, stepProgress * stepProgress, 0.25f);
 			float2 currentUv = uvCoord.xy + direction * (screenRadius * stepDist);
 
 			if (currentUv.x < 0.0f || currentUv.x > 1.0f || currentUv.y < 0.0f || currentUv.y > 1.0f)
 				break;
 
-			// Progressive LOD: use full-res for near steps, Hi-Z pyramid for far steps
-			int sampleLOD = (s > 1) ? min(s - 1, 3) : 0;
-			// LOD-0 taps fetch depth and shading model in one Gbuffer8 read; the
-			// Hi-Z mips store depth only, so far steps fall back to a dedicated
-			// model tap inside the NdotL test below.
-			float lod0ModelA = -1.0f;
-			float zSample;
-			if (sampleLOD == 0)
-			{
-				float4 g8 = tex2Dlod(Gbuffer8Map, float4(currentUv, 0.0f, 0.0f));
-				zSample = g8.r;
-				lod0ModelA = g8.a;
-			}
-			else
-			{
-				zSample = HiZ_SampleDepthAtMip(currentUv, sampleLOD);
-			}
+			// Hi-Z depths are min-reduced over 2x2/4x4 pixels.  Reconstructing a
+			// position from that depth at currentUv while reading its normal/color at
+			// full resolution creates block-shaped false emitters on small receivers.
+			// A fixed four-step gather is cheaper and coherent with one G-buffer tap.
+			float4 g8 = tex2Dlod(Gbuffer8Map, float4(currentUv, 0.0f, 0.0f));
+			float zSample = g8.r;
 
 			if (zSample > 0.0f && zSample < 1000.0f)
 			{
@@ -151,14 +168,7 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 					float NdotL = dot(nOrigin, lightVector);
 					if (NdotL > 0.03f)
 					{
-						// sampleLOD only depends on the loop index, so this branch is
-						// uniform across the wave and never costs both taps.
-						float modelA;
-						if (lod0ModelA >= 0.0f)
-							modelA = lod0ModelA;
-						else
-							modelA = tex2Dlod(Gbuffer8Map, float4(currentUv, 0.0f, 0.0f)).a;
-						int shadingModel = (int)floor(modelA);
+						int shadingModel = (int)floor(g8.a);
 						bool isEmissive = (shadingModel == SHADINGMODELID_EMISSIVE);
 						bool isSkinEmitter = (shadingModel == SHADINGMODELID_SKIN || shadingModel == SHADINGMODELID_SUBSURFACE);
 
@@ -167,19 +177,22 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 						float NsDotMinusL = dot(nSample, -lightVector);
 						if (NsDotMinusL > 0.0f || isEmissive)
 						{
-							float emitterCosine = isEmissive ? 1.0f : saturate(NsDotMinusL);
+							float emitterCosine = isEmissive ? saturate(NsDotMinusL * 0.5f + 0.5f) : saturate(NsDotMinusL);
 							float geomFactor = saturate(NdotL) * emitterCosine;
 							float distRatio = saturate(dist / maxWorldDistance);
-							float fade = 1.0f - distRatio * distRatio;
+							float fade = saturate(1.0f - distRatio);
+							fade = fade * fade * (3.0f - 2.0f * fade);
 						#if GI_ENABLE >= 2
-							float falloffRate = isEmissive ? 0.015f : 0.035f;
+							float falloffLinear = isEmissive ? 0.08f : 0.035f;
+							float falloffQuad   = isEmissive ? 0.005f : 0.0f;
 						#else
-							float falloffRate = isEmissive ? 0.08f : 0.35f;
+							float falloffLinear = isEmissive ? 0.15f : 0.35f;
+							float falloffQuad   = isEmissive ? 0.02f : 0.0f;
 						#endif
-							float invDistFalloff = 1.0f / (1.0f + dist * falloffRate);
+							float invDistFalloff = 1.0f / (1.0f + dist * falloffLinear + dist * dist * falloffQuad);
 							// Near-field contact damping to prevent point-blank singularity in 90-degree corner joints
 							float nearContactDamping = smoothstep(0.005f, 0.12f, dist);
-							float atten = (fade * fade) * invDistFalloff * (isEmissive ? 1.0f : nearContactDamping);
+							float atten = fade * invDistFalloff * (isEmissive ? smoothstep(0.01f, 0.15f, dist) : nearContactDamping);
 
 							// Thickness and SSGI emitter visibility weighting
 							float emitterVis = tex2Dlod(SSGIVisibilityMapSamp, float4(currentUv, 0.0f, 0.0f)).a;
@@ -196,7 +209,10 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 
 								if (isEmissive)
 								{
-									sampleColor *= lerp(4.0f, 16.0f, mDbgSSGIEmissiveBoost);
+									sampleColor = SSGISampleStableEmissive(currentUv, zSample, sampleColor, stepProgress);
+									float emissiveLuma = dot(sampleColor, float3(0.299f, 0.587f, 0.114f));
+									float compressedLuma = emissiveLuma / (1.0f + emissiveLuma * 0.12f);
+									sampleColor = sampleColor * (compressedLuma / max(emissiveLuma, 1e-4f)) * lerp(2.5f, 8.0f, mDbgSSGIEmissiveBoost);
 								}
 								else if (isSkinEmitter && !receiverIsSkin)
 								{

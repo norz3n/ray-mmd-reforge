@@ -471,13 +471,13 @@ sampler SSDOMapSampTemp = sampler_state {
 
 #if GI_ENABLE > 0
 shared texture SSGIMap : RENDERCOLORTARGET<
-	float2 ViewportRatio = {1.0, 1.0};
+	float2 ViewportRatio = {0.5, 0.5};
 	bool AntiAlias = false;
 	string Format = "A16B16G16R16F";
 	float4 ClearColor = {0, 0, 0, 0};
 >;
 texture SSGIMapTemp : RENDERCOLORTARGET<
-	float2 ViewportRatio = {1.0, 1.0};
+	float2 ViewportRatio = {0.5, 0.5};
 	bool AntiAlias = false;
 	string Format = "A16B16G16R16F";
 	float4 ClearColor = {0, 0, 0, 0};
