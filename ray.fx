@@ -1267,12 +1267,15 @@ technique DeferredLighting<
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
 		PixelShader  = compile ps_3_0 TAAPS(ShadingMapTempSamp);
 	}
+#endif
+#if AA_QUALITY == 6 || POST_MOTION_BLUR_ENABLE
 	pass TAAMatrixUpdatePass<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
 		PixelShader  = compile ps_3_0 TAAMatrixUpdatePS();
 	}
+#endif
 #if POST_MOTION_BLUR_ENABLE
 #if POST_SHARPEN_ENABLE
 	pass PostProcessMotionBlur<string Script= "Draw=Buffer;";>{
@@ -1290,6 +1293,7 @@ technique DeferredLighting<
 	}
 #endif
 #endif
+#if AA_QUALITY == 6
 	pass TAAFinal<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
