@@ -287,10 +287,54 @@ float4 GlareLightCompPS(
 	in float4 coord1 : TEXCOORD0,
 	in float3 coord2 : TEXCOORD1) : COLOR
 {
+#if HDR_BLOOM_SPECTRAL_MODE > 0
+	float2 centerVec = coord1.xy - 0.5f;
+	float distSq = dot(centerVec, centerVec);
+	float2 dispDir = centerVec;
+
+	// Spectral wavelength offsets: Red expands outward, Blue compresses inward
+	// Quadratic radial falloff simulates real optical lens dispersion
+#if HDR_BLOOM_SPECTRAL_MODE == 1
+	float baseDisp = 0.008f * (1.0f + distSq * 2.0f);
+#elif HDR_BLOOM_SPECTRAL_MODE == 2
+	float baseDisp = 0.018f * (1.0f + distSq * 3.0f);
+#else
+	float baseDisp = 0.032f * (1.0f + distSq * 4.0f);
+#endif
+
+	float2 offR2 = dispDir * (baseDisp * 0.4f);
+	float2 offB2 = -offR2;
+	float3 bloom2;
+	bloom2.r = tex2Dlod(BloomSamp2nd, float4(coord1.xy + offR2 + 0.5 / (ViewportSize * 0.25), 0, 0)).r;
+	bloom2.g = tex2Dlod(BloomSamp2nd, float4(coord1.xy + 0.5 / (ViewportSize * 0.25), 0, 0)).g;
+	bloom2.b = tex2Dlod(BloomSamp2nd, float4(coord1.xy + offB2 + 0.5 / (ViewportSize * 0.25), 0, 0)).b;
+
+	float2 offR3 = dispDir * (baseDisp * 0.8f);
+	float2 offB3 = -offR3;
+	float3 bloom3;
+	bloom3.r = tex2Dlod(BloomSamp3rd, float4(coord1.xy + offR3 + 0.5 / (ViewportSize * 0.125), 0, 0)).r;
+	bloom3.g = tex2Dlod(BloomSamp3rd, float4(coord1.xy + 0.5 / (ViewportSize * 0.125), 0, 0)).g;
+	bloom3.b = tex2Dlod(BloomSamp3rd, float4(coord1.xy + offB3 + 0.5 / (ViewportSize * 0.125), 0, 0)).b;
+
+	float2 offR4 = dispDir * (baseDisp * 1.5f);
+	float2 offB4 = -offR4;
+	float3 bloom4;
+	bloom4.r = tex2Dlod(BloomSamp4th, float4(coord1.xy + offR4 + 0.5 / (ViewportSize * 0.0625), 0, 0)).r;
+	bloom4.g = tex2Dlod(BloomSamp4th, float4(coord1.xy + 0.5 / (ViewportSize * 0.0625), 0, 0)).g;
+	bloom4.b = tex2Dlod(BloomSamp4th, float4(coord1.xy + offB4 + 0.5 / (ViewportSize * 0.0625), 0, 0)).b;
+
+	float2 offR5 = dispDir * (baseDisp * 2.5f);
+	float2 offB5 = -offR5;
+	float3 bloom5;
+	bloom5.r = tex2Dlod(BloomSamp5th, float4(coord1.xy + offR5 + 0.5 / (ViewportSize * 0.03125), 0, 0)).r;
+	bloom5.g = tex2Dlod(BloomSamp5th, float4(coord1.xy + 0.5 / (ViewportSize * 0.03125), 0, 0)).g;
+	bloom5.b = tex2Dlod(BloomSamp5th, float4(coord1.xy + offB5 + 0.5 / (ViewportSize * 0.03125), 0, 0)).b;
+#else
 	float3 bloom2 = tex2Dlod(BloomSamp2nd, float4(coord1.xy + 0.5 / (ViewportSize * 0.25), 0, 0)).rgb;
 	float3 bloom3 = tex2Dlod(BloomSamp3rd, float4(coord1.xy + 0.5 / (ViewportSize * 0.125), 0, 0)).rgb;
 	float3 bloom4 = tex2Dlod(BloomSamp4th, float4(coord1.xy + 0.5 / (ViewportSize * 0.0625), 0, 0)).rgb;
 	float3 bloom5 = tex2Dlod(BloomSamp5th, float4(coord1.xy + 0.5 / (ViewportSize * 0.03125), 0, 0)).rgb;
+#endif
 
 	float3 bloom = 0.0f;
 	bloom += bloom2 * coord1.w;
