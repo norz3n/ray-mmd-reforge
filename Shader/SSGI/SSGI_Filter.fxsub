@@ -25,7 +25,7 @@ float4 SSGIOutlierRejectPS(
 		return float4(0.0f, 0.0f, 0.0f, 0.0f);
 
 	float3 nCenter = GetSSGINormal(uvCoord);
-	float2 tapStep = ViewportOffset2 * 2.0f;
+	float2 tapStep = ViewportOffset2;
 	float depthTolerance = min(max(zCenter * 0.035f, 0.65f), 5.0f);
 	float totalW = 0.0f;
 	float3 totalC = 0.0f;
@@ -76,7 +76,8 @@ float4 SSGIBlurPS(
 	float3 nCenter = GetSSGINormal(uvCoord);
 	float3 pCenter = GetViewPosition(projInfo, uvCoord, zCenter);
 
-	float2 blurDir = (isHorizontal > 0.5f ? float2(ViewportOffset2.x * 2.0f, 0.0f) : float2(0.0f, ViewportOffset2.y * 2.0f)) * stepScale;
+	float2 blurDir = (isHorizontal > 0.5f ? float2(ViewportOffset2.x, 0.0f) : float2(0.0f, ViewportOffset2.y)) * stepScale;
+	float depthTolerance = min(max(zCenter * 0.05f, 1.2f), 8.0f);
 	float planeThreshold = min(max(zCenter * 0.045f, 0.80f), 6.0f);
 	float totalW = 1.0f;
 	float4 totalC = clamp(tex2Dlod(source, float4(uvCoord, 0.0f, 0.0f)), 0.0f, 100.0f);
@@ -93,10 +94,19 @@ float4 SSGIBlurPS(
 		zA = (zA > 0.0f && zA < 1000.0f) ? zA : (zCenter + 10000.0f);
 		zB = (zB > 0.0f && zB < 1000.0f) ? zB : (zCenter + 10000.0f);
 
-		float normalWeightA = saturate(0.25f + 0.75f * BilateralNormalWeight(GetSSGINormal(uvA), nCenter));
-		float normalWeightB = saturate(0.25f + 0.75f * BilateralNormalWeight(GetSSGINormal(uvB), nCenter));
-		float wA = spatialWeight * BilateralPlaneWeight(abs(dot(nCenter, GetViewPosition(projInfo, uvA, zA) - pCenter)), planeThreshold) * normalWeightA;
-		float wB = spatialWeight * BilateralPlaneWeight(abs(dot(nCenter, GetViewPosition(projInfo, uvB, zB) - pCenter)), planeThreshold) * normalWeightB;
+		float depthWeightA = BilateralDepthWeight(zA, zCenter, depthTolerance);
+		float depthWeightB = BilateralDepthWeight(zB, zCenter, depthTolerance);
+
+		float normalWeightA = saturate(0.35f + 0.65f * BilateralNormalWeight(GetSSGINormal(uvA), nCenter));
+		float normalWeightB = saturate(0.35f + 0.65f * BilateralNormalWeight(GetSSGINormal(uvB), nCenter));
+
+		float planeDistA = abs(dot(nCenter, GetViewPosition(projInfo, uvA, zA) - pCenter));
+		float planeDistB = abs(dot(nCenter, GetViewPosition(projInfo, uvB, zB) - pCenter));
+		float planeWeightA = max(BilateralPlaneWeight(planeDistA, planeThreshold), depthWeightA * 0.45f);
+		float planeWeightB = max(BilateralPlaneWeight(planeDistB, planeThreshold), depthWeightB * 0.45f);
+
+		float wA = spatialWeight * depthWeightA * planeWeightA * normalWeightA;
+		float wB = spatialWeight * depthWeightB * planeWeightB * normalWeightB;
 
 		totalC += clamp(tex2Dlod(source, float4(uvA, 0.0f, 0.0f)), 0.0f, 100.0f) * wA;
 		totalC += clamp(tex2Dlod(source, float4(uvB, 0.0f, 0.0f)), 0.0f, 100.0f) * wB;

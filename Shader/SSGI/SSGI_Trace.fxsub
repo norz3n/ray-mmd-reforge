@@ -107,7 +107,7 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 	// Stratified sector jitter: keeps angular coherence across adjacent pixels to prevent blotchy clumping
 	float startAngle = noiseAngle * (PI_2 / float(SSGI_ANGLES));
 	float3 totalGi = 0.0f;
-	float minDistanceSq = max(mSSGIBias * mSSGIBias * 0.02f, 0.001f);
+	float minDistanceSq = max(mSSGIBias * mSSGIBias * 0.5f, 0.35f);
 
 #if GI_ENABLE >= 2
 	float giGain = PI * lerp(lerp(1.0f, 15.0f, mSSGIIntensityPlus), 0.0f, mSSGIIntensityMinus)
@@ -133,6 +133,7 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 
 		float3 rayColor = 0.0f;
 		float rayOcc = 0.0f;
+		float2 prevUv = uvCoord.xy;
 
 		[loop]
 		for (int s = 0; s < SSGI_STEPS; ++s)
@@ -190,8 +191,8 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 							float falloffQuad   = isEmissive ? 0.02f : 0.0f;
 						#endif
 							float invDistFalloff = 1.0f / (1.0f + dist * falloffLinear + dist * dist * falloffQuad);
-							// Near-field contact damping to prevent point-blank singularity in 90-degree corner joints
-							float nearContactDamping = smoothstep(0.005f, 0.12f, dist);
+							// Near-field contact damping to prevent self-sampling texture ghosting on fine meshes
+							float nearContactDamping = smoothstep(0.35f, 0.70f, dist);
 							float atten = fade * invDistFalloff * (isEmissive ? smoothstep(0.01f, 0.15f, dist) : nearContactDamping);
 
 							// Thickness and SSGI emitter visibility weighting
@@ -209,6 +210,15 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 
 								if (isEmissive)
 								{
+									// 1-step bisection: refine hit towards leading edge of emitter for subpixel precision
+									float2 midUv = (prevUv + currentUv) * 0.5f;
+									float4 g8Mid = tex2Dlod(Gbuffer8Map, float4(midUv, 0.0f, 0.0f));
+									if ((int)floor(g8Mid.a) == SHADINGMODELID_EMISSIVE)
+									{
+										currentUv = midUv;
+										zSample = g8Mid.r;
+									}
+
 									sampleColor = SSGISampleStableEmissive(currentUv, zSample, sampleColor, stepProgress);
 									float emissiveLuma = dot(sampleColor, float3(0.299f, 0.587f, 0.114f));
 									float compressedLuma = emissiveLuma / (1.0f + emissiveLuma * 0.12f);
@@ -237,6 +247,8 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 					}
 				}
 			}
+
+			prevUv = currentUv;
 		}
 
 #if GI_ENABLE >= 2

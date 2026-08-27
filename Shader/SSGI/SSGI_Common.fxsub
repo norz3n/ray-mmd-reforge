@@ -73,7 +73,7 @@ inline float3 GetSSGINormal(float2 uv)
  */
 inline float ComputeThicknessWeight(float zDiff, float viewZ, float distance)
 {
-	float dynamicThickness = max(0.6f, 1.2f + viewZ * 0.02f + distance * 0.12f);
+	float dynamicThickness = max(0.35f, 0.50f + distance * 0.08f);
 	float x = saturate(abs(zDiff) / dynamicThickness);
 	return 1.0f - (x * x * (3.0f - 2.0f * x));
 }

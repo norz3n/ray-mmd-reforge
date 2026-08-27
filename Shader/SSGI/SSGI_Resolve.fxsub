@@ -91,9 +91,9 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 
 #if SSGI_SPECULAR_GI
 	// Rough specular indirect: Fresnel(F0)-weighted slice of the gathered irradiance.
-	// Fades out on mirror-smooth surfaces (SSR covers those) and is skipped for skin/glass/emissive models.
+	// Fades out on mirror-smooth surfaces (SSR covers those) and is skipped for skin/glass/emissive/cloth models.
 	float3 specGi = 0.0f;
-	if (!isSkin && mat.lightModel != SHADINGMODELID_GLASS && mat.lightModel != SHADINGMODELID_EMISSIVE)
+	if (!isSkin && mat.lightModel != SHADINGMODELID_GLASS && mat.lightModel != SHADINGMODELID_EMISSIVE && mat.lightModel != SHADINGMODELID_CLOTH)
 	{
 		float3 F = mat.specular + (1.0f - mat.specular) * pow(1.0f - NdV, 5.0f);
 		float roughWeight = saturate(1.0f - mat.smoothness * 1.25f);
