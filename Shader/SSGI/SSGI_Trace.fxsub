@@ -184,11 +184,11 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 							float fade = saturate(1.0f - distRatio);
 							fade = fade * fade * (3.0f - 2.0f * fade);
 						#if GI_ENABLE >= 2
-							float falloffLinear = isEmissive ? 0.08f : 0.035f;
-							float falloffQuad   = isEmissive ? 0.005f : 0.0f;
+							float falloffLinear = isEmissive ? 0.02f : 0.035f;
+							float falloffQuad   = isEmissive ? 0.001f : 0.0f;
 						#else
-							float falloffLinear = isEmissive ? 0.15f : 0.35f;
-							float falloffQuad   = isEmissive ? 0.02f : 0.0f;
+							float falloffLinear = isEmissive ? 0.05f : 0.35f;
+							float falloffQuad   = isEmissive ? 0.005f : 0.0f;
 						#endif
 							float invDistFalloff = 1.0f / (1.0f + dist * falloffLinear + dist * dist * falloffQuad);
 							// Near-field contact damping to prevent self-sampling texture ghosting on fine meshes
