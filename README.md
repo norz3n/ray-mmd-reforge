@@ -24,7 +24,7 @@ Requirement :
 * Direct3D 9 With Shader Model 3.0 (ps_3_0)
 * **Powerful GPU recommended** due to advanced shading techniques.
 
-Reforge Exclusive Features (through v1.16.0) :
+Reforge Exclusive Features (through v1.17.0) :
 ------------
 
 **Unified Hi-Z Core**
@@ -32,7 +32,7 @@ Reforge Exclusive Features (through v1.16.0) :
 * **Clean-Room Hi-Z Traversal**: academically correct DDA-based hierarchical stepping with near-plane clamping and cell-boundary artifact fixes.
 
 **Global Illumination**
-* **Screen Space Global Illumination (SSGI)**: modular architecture with progressive Hi-Z LOD gather, replacing legacy VXGI entirely.
+* **Screen Space Global Illumination (SSGI)**: rewritten modular architecture using hybrid linear-quadratic raymarching at full 1:1 resolution, replacing both legacy VXGI and Hi-Z dependent traces.
 * **Indirect Multi-Bounce Mode**: Jimenez-style albedo compensation, hemispherical Lambertian emission lobe, quadratic AO attenuation, and outdoor sky radiance gather.
 * **Rough Specular GI**: cone-angle-controlled glossy indirect reflections with tunable debug morphs.
 * **Visibility Masking**: dedicated SSGI visibility pass with quality presets to suppress self-illumination feedback on skin.
