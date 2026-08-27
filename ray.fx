@@ -191,6 +191,10 @@ static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceB
 #	include "shader/TAA.fxsub"
 #endif
 
+#if POST_MOTION_BLUR_ENABLE && (AA_QUALITY == 6)
+#	include "shader/PostProcessMotionBlur.fxsub"
+#endif
+
 #if POST_SHARPEN_ENABLE
 #	include "shader/PostProcessSharpen.fxsub"
 #endif
@@ -470,12 +474,24 @@ technique DeferredLighting<
 #if AA_QUALITY == 6
 	"RenderColorTarget0=TAAHistoryMap; RenderColorTarget1=TAADepthMap; Pass=TAAPass;"
 	"RenderColorTarget1=;"
+
+#if POST_MOTION_BLUR_ENABLE
+#if POST_SHARPEN_ENABLE
+	"RenderColorTarget=ShadingMapTemp; Pass=PostProcessMotionBlur;"
+	"RenderColorTarget=TAAMatrixMap; Pass=TAAMatrixUpdatePass;"
+	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=PostProcessSharpen;"
+#else
+	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=PostProcessMotionBlur;"
+	"RenderColorTarget=TAAMatrixMap; Pass=TAAMatrixUpdatePass;"
+#endif
+#else
 	"RenderColorTarget=TAAMatrixMap; Pass=TAAMatrixUpdatePass;"
 #if POST_SHARPEN_ENABLE
 	"RenderColorTarget=ShadingMapTemp; Pass=TAAFinal;"
 	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=PostProcessSharpen;"
 #else
 	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=TAAFinal;"
+#endif
 #endif
 #endif
 ;>
@@ -1247,6 +1263,14 @@ technique DeferredLighting<
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
 		PixelShader  = compile ps_3_0 TAAMatrixUpdatePS();
 	}
+#if POST_MOTION_BLUR_ENABLE
+	pass PostProcessMotionBlur<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 PostProcessMotionBlurPS();
+	}
+#endif
 	pass TAAFinal<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
