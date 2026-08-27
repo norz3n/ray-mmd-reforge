@@ -76,7 +76,8 @@ float4 SSGIBlurPS(
 	float3 nCenter = GetSSGINormal(uvCoord);
 	float3 pCenter = GetViewPosition(projInfo, uvCoord, zCenter);
 
-	float2 blurDir = (isHorizontal > 0.5f ? float2(ViewportOffset2.x, 0.0f) : float2(0.0f, ViewportOffset2.y)) * stepScale;
+	float stepActual = (stepScale > 1.5f) ? 3.0f : 1.0f;
+	float2 blurDir = (isHorizontal > 0.5f ? float2(ViewportOffset2.x, 0.0f) : float2(0.0f, ViewportOffset2.y)) * stepActual;
 	float depthTolerance = min(max(zCenter * 0.05f, 1.2f), 8.0f);
 	float planeThreshold = min(max(zCenter * 0.045f, 0.80f), 6.0f);
 	float totalW = 1.0f;
