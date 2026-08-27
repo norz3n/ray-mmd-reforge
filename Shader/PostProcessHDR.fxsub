@@ -1,3 +1,7 @@
+#ifndef FILMIC_HALATION_MODE
+#	define FILMIC_HALATION_MODE 1
+#endif
+
 #if POST_DISPERSION_MODE == 2
 float3 SampleSpectrum(float x)
 {
@@ -86,6 +90,39 @@ float4 HDRTonemappingVS(
 	return Position;
 }
 
+float3 ComputeFilmicHalation(float3 baseColor, float2 uv)
+{
+#if FILMIC_HALATION_MODE > 0
+#if HDR_BLOOM_MODE > 0
+	float3 tightBloom = tex2Dlod(BloomSamp2nd, float4(uv, 0, 0)).rgb;
+#else
+	float3 tightBloom = baseColor;
+#endif
+
+	// Edge difference between local scattered light and high-frequency foreground
+	float3 diff = max(0.0f, tightBloom * 1.6f - baseColor);
+	float edgeLuma = dot(diff, float3(0.299f, 0.587f, 0.114f));
+	
+	// Non-linear thresholding for bright silhouette boundaries
+	float halationFactor = smoothstep(0.05f, 0.65f, edgeLuma);
+	
+	// Kodak Vision3 warm red/amber spectral emulsion response
+	const float3 kHalationColor = float3(1.0f, 0.22f, 0.04f);
+	
+#if FILMIC_HALATION_MODE == 1
+	float intensity = 0.40f;
+#elif FILMIC_HALATION_MODE == 2
+	float intensity = 0.85f;
+#else
+	float intensity = 0.40f;
+#endif
+
+	return kHalationColor * (halationFactor * intensity * saturate(luminance(tightBloom) * 1.5f));
+#else
+	return 0.0f;
+#endif
+}
+
 float4 HDRTonemappingPS(in float4 coord: TEXCOORD0, uniform sampler source) : COLOR
 {
 	float3 color = ColorDispersion(source, coord.xy, mDispersionRadius, 1.0 + mDispersionRadius);
@@ -95,6 +132,10 @@ float4 HDRTonemappingPS(in float4 coord: TEXCOORD0, uniform sampler source) : CO
 #if HDR_BLOOM_MODE > 0
 	float3 bloom = tex2Dlod(BloomSamp1st, float4(coord.xy, 0, 0)).rgb;
 	color += bloom;
+#endif
+
+#if FILMIC_HALATION_MODE > 0
+	color += ComputeFilmicHalation(color, coord.xy);
 #endif
 
 	color = ColorTemperature(color, mColorTemperature);
