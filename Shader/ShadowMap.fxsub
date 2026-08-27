@@ -1,7 +1,7 @@
 #define SHADOW_BLUR_COUNT 6
 #define SHADOW_POISSON_COUNT 25
 
-#if CONTACT_SHADOW_QUALITY >= 1
+#if CONTACT_SHADOW_QUALITY >= 1 || SSGS_QUALITY >= 1
 #	include "shader/ContactShadow.fxsub"
 #endif
 
@@ -154,6 +154,14 @@ float4 ShadowMapGenPS(
 	float3 L = mul(-SunDirection, (float3x3)matView);
 	float contactShadow = GetContactShadow(viewPosition, material.normal, L, coord, material.linearDepth);
 	shadow *= contactShadow;
+#if SSGS_QUALITY >= 1
+	shadow *= GetGlobalShadow(viewPosition, material.normal, L, coord);
+#endif
+#elif SSGS_QUALITY >= 1
+	float4 MRT6_ssgs = tex2Dlod(Gbuffer6Map, float4(coord, 0, 0));
+	material.normal = DecodeNormal(MRT6_ssgs.xyz);
+	float3 L_ssgs = mul(-SunDirection, (float3x3)matView);
+	shadow *= GetGlobalShadow(viewPosition, material.normal, L_ssgs, coord);
 #endif
 
 	return shadow;
