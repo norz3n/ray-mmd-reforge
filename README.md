@@ -46,6 +46,7 @@ Reforge Exclusive Features (through v1.17.0) :
 
 **Lighting & Shadows**
 * **Variance Shadow Maps**: ultra-clean high-resolution sun shadows, completely grain-free on character faces, with rotated Vogel-disk PCF filtering to eliminate staircasing and acne.
+* **Screen-Space Global Shadows (SSGS)**: long-range directional raymarched shadows with distance-adaptive soft penumbra expansion, grounding characters and geometry without shadow map dependence.
 * **Dithered Volumetrics**: interleaved gradient noise for godrays and volumetric fog — smooth gradients without banding.
 
 **Materials**
@@ -62,6 +63,8 @@ Reforge Exclusive Features (through v1.17.0) :
 
 **Post-Processing**
 * **AgX Tone Mapping**: exact 6th-order polynomial implementation of the official Blender 4.0 AgX mapper (default), with an ACES-fitted option.
+* **Camera Motion Blur**: cinematic screen-space velocity motion blur reconstructed from camera view-projection history, universal across all AA modes with 12-tap linear accumulation and shutter control.
+* **Spectral / Chromatic Bloom**: physical radial wavelength dispersion across bloom tiers simulating anamorphic/optical lens dispersion.
 * **Temporal Anti-Aliasing (TAA)**: 5-tap Catmull-Rom bicubic history reconstruction, Karis luma weighting, variance clipping, and depth-validated history.
 * **Cinematic Bokeh DOF**: clean-room hexagonal and cinematic bokeh with blade count control.
 * **Anti-Firefly Bloom**: Karis 13-tap downsampling filter with a soft-knee curve.
