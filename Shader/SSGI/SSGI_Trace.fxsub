@@ -84,13 +84,13 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 	// Adaptive world radius scaling (mode 1: focused bounce, mode 2: large room-scale gather)
 	// Cone angle widens/narrows the gather cone; stock default (mSSGIConeAngleDefault = 0.5) keeps the radius unchanged
 #if GI_ENABLE >= 2
-	float maxWorldDistance = max(mSSGIScale * 75.0f, 5.0f);
+	float maxWorldDistance = max(mSSGIScale * 150.0f, 5.0f);
 	float projScale = max(abs(projInfo.x), 1e-4f);
-	float screenRadius = clamp(maxWorldDistance / (zOrigin * projScale), 0.02f, 0.85f);
+	float screenRadius = clamp(maxWorldDistance / (zOrigin * projScale), 0.02f, 1.25f);
 #else
-	float maxWorldDistance = max(mSSGIScale * 35.0f, 2.0f);
+	float maxWorldDistance = max(mSSGIScale * 60.0f, 2.0f);
 	float projScale = max(abs(projInfo.x), 1e-4f);
-	float screenRadius = clamp(maxWorldDistance / (zOrigin * projScale), 0.01f, 0.6f);
+	float screenRadius = clamp(maxWorldDistance / (zOrigin * projScale), 0.01f, 1.0f);
 #endif
 	screenRadius *= clamp(mSSGIConeAngle * 2.0f, 0.25f, 4.0f);
 
@@ -181,7 +181,8 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 							float emitterCosine = isEmissive ? saturate(NsDotMinusL * 0.5f + 0.5f) : saturate(NsDotMinusL);
 							float geomFactor = saturate(NdotL) * emitterCosine;
 							float distRatio = saturate(dist / maxWorldDistance);
-							float fade = saturate(1.0f - distRatio);
+							float rayFade = saturate(1.0f - stepProgress);
+							float fade = saturate(1.0f - distRatio) * rayFade;
 							fade = fade * fade * (3.0f - 2.0f * fade);
 						#if GI_ENABLE >= 2
 							float falloffLinear = isEmissive ? 0.02f : 0.035f;
