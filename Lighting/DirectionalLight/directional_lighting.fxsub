@@ -327,6 +327,9 @@ void LightSourcePS(
 #if CONTACT_SHADOW_QUALITY >= 1
 	shadow *= GetContactShadow(P2, materialAlpha.normal, viewLightDirection, coord.xy / coord.w, materialAlpha.linearDepth);
 #endif
+#if SSGS_QUALITY >= 1
+	shadow *= GetGlobalShadow(P2, materialAlpha.normal, viewLightDirection, coord.xy / coord.w);
+#endif
 	clip(shadow - 1e-5);
 #endif
 

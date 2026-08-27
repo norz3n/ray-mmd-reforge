@@ -178,4 +178,127 @@ float GetContactShadow(
 	return pow(TraceScreenSpaceShadow(viewPosition, shadingNormal, L, maxDistance, jitter), 8.0f);
 }
 
+// -----------------------------------------------------------------------
+// Screen-Space Global Shadows (SSGS)
+// Long-range companion to contact shadows.  Traces a wider, softer ray
+// toward the directional light using the same depth-buffer traversal.
+// The soft penumbra radius grows with travel distance, giving a plausible
+// gradient where shadow-map resolution runs out.
+// -----------------------------------------------------------------------
+#if SSGS_QUALITY >= 1
+
+#if SSGS_QUALITY == 1
+#	define SSGS_STEP_COUNT    16
+#	define SSGS_MAX_DISTANCE  3.0f
+#elif SSGS_QUALITY == 2
+#	define SSGS_STEP_COUNT    24
+#	define SSGS_MAX_DISTANCE  8.0f
+#else
+#	define SSGS_STEP_COUNT    32
+#	define SSGS_MAX_DISTANCE  15.0f
+#endif
+
+/**
+ * Traces a long-range screen-space shadow ray toward the directional light.
+ *
+ * Unlike contact shadows the thickness budget grows with ray distance so that
+ * objects farther away cast wider, softer penumbrae.  The accumulated
+ * occlusion is smoothstep-blended to avoid a sharp cut-off at maxDistance.
+ *
+ * @param viewPosition  Ray origin in view space.
+ * @param shadingNormal Surface shading normal in view space.
+ * @param lightDirVS    Unit direction *toward* the light in view space.
+ * @param jitter        Per-pixel stochastic offset for TAA accumulation.
+ * @return Shadow visibility in [0, 1].
+ */
+float TraceScreenSpaceGlobalShadow(
+	float3 viewPosition,
+	float3 shadingNormal,
+	float3 lightDirVS,
+	float jitter)
+{
+	float3 viewPositionDx = ddx(viewPosition);
+	float3 viewPositionDy = ddy(viewPosition);
+	float3 geometricNormal = ContactShadowGeometricNormal(viewPositionDx, viewPositionDy, shadingNormal);
+
+	float3 lightDirection = normalize(lightDirVS);
+	float nDotL = dot(shadingNormal, lightDirection);
+	if (nDotL <= 0.0f)
+		return 1.0f;
+
+	float terminatorFade = smoothstep(0.0f, 0.2f, nDotL);
+
+	float pixelFootprint = max(length(viewPositionDx), length(viewPositionDy));
+	float slopeScale = 1.0f - saturate(nDotL);
+	float normalBias = max(0.05f, pixelFootprint * 1.5f) * (1.0f + 2.0f * slopeScale);
+	float3 rayOrigin = viewPosition + geometricNormal * normalBias;
+
+	float stepLength = SSGS_MAX_DISTANCE / (float)SSGS_STEP_COUNT;
+	float occlusion = 0.0f;
+	float hitT = 1.0f;
+
+	[loop]
+	for (int stepIndex = 0; stepIndex < SSGS_STEP_COUNT; ++stepIndex)
+	{
+		float rayT = ((float)stepIndex + 0.5f + 0.5f * frac(jitter)) /
+			(float)SSGS_STEP_COUNT;
+		float3 rayPosition = rayOrigin + lightDirection * (rayT * SSGS_MAX_DISTANCE);
+		float2 sampleUV = ContactShadowProject(rayPosition);
+
+		if (any(sampleUV < 0.0f) || any(sampleUV > 1.0f))
+			break;
+
+		// Thickness grows linearly with travel distance — farther objects
+		// cast wider penumbrae, matching the intuition of a large distant sun.
+		float travelDist = rayT * SSGS_MAX_DISTANCE;
+		float thickness = max(stepLength * 2.0f, travelDist * 0.08f + normalBias);
+
+		float2 sceneDepth = ContactShadowSampleDepth(sampleUV);
+		float nearestDepth = min(sceneDepth.x, sceneDepth.y);
+		float farthestDepth = max(sceneDepth.x, sceneDepth.y);
+
+		float behindSurface = rayPosition.z - farthestDepth;
+		float penetration = rayPosition.z - nearestDepth;
+		if (behindSurface > 0.0f && penetration <= thickness)
+		{
+			// Soft penumbra: occlusion ramps from 0 to 1 across the thickness band,
+			// then fades back out at the far end of the ray.
+			float softOcclusion = saturate(penetration / (thickness * 0.5f));
+			// Penumbra also widens at grazing angles.
+			softOcclusion *= terminatorFade;
+			occlusion = max(occlusion, softOcclusion);
+			hitT = rayT;
+		}
+	}
+
+	// Smoothly fade the shadow out at the maximum ray distance.
+	float distanceFade = 1.0f - smoothstep(0.7f, 1.0f, hitT);
+	return 1.0f - occlusion * distanceFade;
+}
+
+/**
+ * Public interface for SSGS in directional-light passes.
+ *
+ * @param viewPosition  Reconstructed pixel position in view space.
+ * @param shadingNormal Surface normal in view space.
+ * @param L             Unit direction toward the light.
+ * @param screenCoord   Viewport UV [0, 1].
+ * @return Global shadow multiplier in [0, 1].
+ */
+float GetGlobalShadow(
+	float3 viewPosition,
+	float3 shadingNormal,
+	float3 L,
+	float2 screenCoord)
+{
+	float jitter = InterleavedGradientNoise(screenCoord * ViewportSize + float2(7.3f, 5.1f));
+	float shadow = TraceScreenSpaceGlobalShadow(viewPosition, shadingNormal, L, jitter);
+	// Moderate contrast curve: SSGS is a soft complement to the shadow map,
+	// not a hard binary occluder.  A linear-to-sqrt remap gives visible
+	// penumbrae without blackening the whole scene.
+	return sqrt(shadow);
+}
+
+#endif // SSGS_QUALITY >= 1
+
 #endif // RAY_MMD_CONTACT_SHADOW_FXSUB
