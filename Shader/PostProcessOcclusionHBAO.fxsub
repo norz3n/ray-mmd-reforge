@@ -160,7 +160,7 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 	float2 samplePixel = screen / ViewportSize;
 	float3 sampleNormal = GetNormal(uv.xy);
 	float3 samplePosition = GetViewPosition(projConstant, samplePixel, linearizeDepth(uv.xy));
-#if AA_QUALITY == 6
+#if AA_QUALITY == 6 || HBAO_TEMPORAL_DENOISE
 	int frameCounter = (int)fmod(time * 60.0, 16.0);
 #else
 	int frameCounter = 0;
@@ -258,3 +258,64 @@ float4 ScreenSpaceDirOccBlurPS(
 
 	return total_c / total_w;
 }
+
+#if HBAO_TEMPORAL_DENOISE
+float4 SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0) : COLOR
+{
+	float curDepth = linearizeDepth(uv);
+	float4 curAO = tex2Dlod(SSDOMapSamp, float4(uv, 0, 0));
+
+	if (curDepth > 999.0f)
+	{
+		return curAO;
+	}
+
+	float4 projInfo = GetProjConstant();
+	float3 viewPosition = GetViewPosition(projInfo, uv, curDepth);
+	float3 worldPosition = mul(float4(viewPosition, 1.0), matViewInverse).xyz;
+
+	float4x4 matViewProjectPrev = GetPrevViewProject();
+	float4 prevClipPos = mul(float4(worldPosition, 1.0), matViewProjectPrev);
+	float2 prevUV = (prevClipPos.xy / max(prevClipPos.w, 1e-5)) * float2(0.5, -0.5) + 0.5;
+
+	if (any(prevUV < 0.0f) || any(prevUV > 1.0f))
+	{
+		return curAO;
+	}
+
+	float prevDepth = linearizeDepth(prevUV);
+	if (abs(prevDepth - curDepth) > max(0.2f, curDepth * 0.06f))
+	{
+		return curAO;
+	}
+
+	float4 historyAO = tex2Dlod(SSDOMapHistorySamp, float4(prevUV, 0, 0));
+
+	// 3x3 Neighborhood Box Clamping
+	float2 texelSize = ViewportOffset2;
+	float4 minAO = curAO;
+	float4 maxAO = curAO;
+
+	[unroll]
+	for (int x = -1; x <= 1; ++x)
+	{
+		[unroll]
+		for (int y = -1; y <= 1; ++y)
+		{
+			float4 sampleNeighbor = tex2Dlod(SSDOMapSamp, float4(uv + float2(x, y) * texelSize, 0, 0));
+			minAO = min(minAO, sampleNeighbor);
+			maxAO = max(maxAO, sampleNeighbor);
+		}
+	}
+
+	float4 boxMargin = (maxAO - minAO) * 0.25f;
+	historyAO = clamp(historyAO, minAO - boxMargin, maxAO + boxMargin);
+
+	return lerp(curAO, historyAO, 0.85f);
+}
+
+float4 SSDOCopyTemporalPS(in float2 uv : TEXCOORD0) : COLOR
+{
+	return tex2Dlod(SSDOMapSampTemp, float4(uv, 0, 0));
+}
+#endif

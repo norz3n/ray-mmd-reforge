@@ -499,6 +499,19 @@ sampler SSDOMapSampTemp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP;  AddressV = CLAMP;
 };
+
+#if HBAO_TEMPORAL_DENOISE
+texture SSDOMapHistory : RENDERCOLORTARGET<
+	float2 ViewportRatio = {1.0, 1.0};
+	bool AntiAlias = false;
+	string Format = "A8R8G8B8";
+>;
+sampler SSDOMapHistorySamp = sampler_state {
+	texture = <SSDOMapHistory>;
+	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
+	AddressU = CLAMP;  AddressV = CLAMP;
+};
+#endif
 #endif
 
 #if GI_ENABLE > 0
