@@ -491,12 +491,12 @@ texture SSDOMapTemp : RENDERCOLORTARGET<
 >;
 sampler SSDOMapSamp = sampler_state {
 	texture = <SSDOMap>;
-	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
 	AddressU = CLAMP;  AddressV = CLAMP;
 };
 sampler SSDOMapSampTemp = sampler_state {
 	texture = <SSDOMapTemp>;
-	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
 	AddressU = CLAMP;  AddressV = CLAMP;
 };
 

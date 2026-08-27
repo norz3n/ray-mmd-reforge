@@ -3,7 +3,7 @@
  *
  * Based on dendewaLAB (Ray-LAB 1.5.2) HBAO architecture.
  * Extended for Ray-MMD Reforge with Horizon Elevation Clipping, Temporal Jittering,
- * and Normal-Plane Distance Bilateral Filtering.
+ * Perspective-Correct Screen Radii, and Normal-Plane Distance Bilateral Filtering.
  *
  * Reference: dendewaLAB (Ray-LAB 1.5.2 by dendewa)
  */
@@ -43,26 +43,16 @@ float linearizeDepth(float2 uv)
 	return tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).r;
 }
 
-float linearizeDepthLod(float2 uv, int lod)
-{
-	return tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).r;
-}
-
 float3 GetNormal(float2 uv)
 {
 	float4 MRT6 = tex2Dlod(Gbuffer6Map, float4(uv, 0, 0));
 	return DecodeGBufferNormal(MRT6);
 }
 
-float3 ComputeViewSpacePosition(float2 uv, float linearEyeDepth)
-{
-	return GetViewPosition(GetProjConstant(), uv, linearEyeDepth);
-}
-
 float Falloff(float distanceSquare, float maxRadius)
 {
 	float negInvRadius2 = -1.0 / (maxRadius * maxRadius);
-	return distanceSquare * negInvRadius2 + 1.0;
+	return saturate(distanceSquare * negInvRadius2 + 1.0);
 }
 
 float AODepthContinuityWeight(float depthDelta, float viewDepth, float rayLength)
@@ -92,49 +82,51 @@ float4 HorizonOcclusion(
 	float3 viewNormal,
 	float3 viewPosition,
 	float2 direction,
-	float  maxRadius,
+	float  pixelRadius,
+	float  worldRadius,
 	float  jitter,
 	float  bias,
 	float4 projConstant)
 {
-	float2 sampleStepDelta = direction * maxRadius / HBAO_SAMPLER_COUNT;
-	float2 sampleDirection = direction + frac(jitter) * sampleStepDelta;
-	float2 sampleTexelSize = ViewportOffset.xy * (ViewportSize.y / 1080);
+	// Step delta in UV space scaled strictly by pixel size (independent of resolution distortion)
+	float stepPixel = pixelRadius / (float)HBAO_SAMPLER_COUNT;
+	float2 stepUV = direction * (stepPixel * ViewportOffset2);
 
 	float4 sampleOcclusion = 0.0f;
-	float maxHorizonSin = 0.0f;
+	float maxHorizonSin = bias;
 
 	[unroll]
 	for (int s = 0; s < HBAO_SAMPLER_COUNT; ++s)
 	{
-		float2 sampleOffset = mad(sampleDirection, sampleTexelSize, uv);
-		sampleDirection += sampleStepDelta;
+		// Jitter sample positions along the ray; +0.25 offset prevents self-occlusion at the origin
+		float stepIndex = (float)s + frac(jitter) + 0.25f;
+		float2 sampleOffset = uv + stepUV * stepIndex;
 
-		float depth = tex2Dlod(Gbuffer8Map, float4(sampleOffset + ViewportOffset, 0, 0)).r;
+		float depth = tex2Dlod(Gbuffer8Map, float4(sampleOffset, 0, 0)).r;
 
 		float3 samplePosition = GetViewPosition(projConstant, sampleOffset, depth);
 		float3 sampleDir = samplePosition - viewPosition;
 		float sampleLength2 = dot(sampleDir, sampleDir);
-		float sampleLengthInv = rsqrt(sampleLength2);
+		float sampleLengthInv = rsqrt(max(sampleLength2, 1e-6f));
 		float sampleLength = sampleLength2 * sampleLengthInv;
 		sampleDir *= sampleLengthInv;
 
+		// Sample elevation angle above tangent plane (sine of horizon elevation)
 		float sampleAngle = dot(sampleDir, viewNormal);
-		float sampleFalloff = Falloff(sampleLength2, maxRadius);
+		float sampleFalloff = Falloff(sampleLength2, worldRadius);
 		float depthDelta = abs(samplePosition.z - viewPosition.z);
 		float depthWeight = AODepthContinuityWeight(depthDelta, viewPosition.z, sampleLength);
-		float rangeWeight = AORangePropagationWeight(sampleLength, maxRadius);
-		float nearBoost = AONearDistanceBoost(sampleLength, maxRadius);
+		float rangeWeight = AORangePropagationWeight(sampleLength, worldRadius);
+		float nearBoost = AONearDistanceBoost(sampleLength, worldRadius);
 
-		// Reject background/sky samples (depth == 0): their sampleDir points toward
-		// the camera and can spuriously raise maxHorizonSin, suppressing occlusion
-		// from valid nearby geometry on object silhouette edges.
+		// Reject background/sky samples (depth == 0)
 		float depthValid = step(1e-4f, depth);
 
-		float horizonMask = (sampleAngle > maxHorizonSin) ? 1.0f : 0.0f;
+		// Monotonic incremental horizon integration
+		float deltaSin = saturate(sampleAngle - maxHorizonSin);
 		maxHorizonSin = max(maxHorizonSin, sampleAngle * depthValid);
 
-		float sh = saturate(sampleAngle - bias) * saturate(sampleFalloff) * depthWeight * rangeWeight * nearBoost * horizonMask * depthValid;
+		float sh = deltaSin * sampleFalloff * depthWeight * rangeWeight * nearBoost * depthValid;
 		sampleOcclusion.w += sh;
 		sampleOcclusion.xyz += sh * sampleDir;
 	}
@@ -154,12 +146,21 @@ float4 ScreenSpaceDirOccPassVS(
 
 float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_POSITION) : COLOR
 {
+	float centerDepth = linearizeDepth(uv.xy);
+
+	// Early out for background/sky pixels to save ALU and texture bandwidth
+	if (centerDepth <= 1e-4f)
+	{
+		return float4(0.5f, 0.5f, 0.5f, 1.0f);
+	}
+
 	float4 projConstant = GetProjConstant();
 	float maxRadius = lerp(lerp(20.0, 60.0, mSSAORadiusP), 2.0, mSSAORadiusM);
 
-	float2 samplePixel = screen / ViewportSize;
+	float2 samplePixel = uv.xy;
 	float3 sampleNormal = GetNormal(uv.xy);
-	float3 samplePosition = GetViewPosition(projConstant, samplePixel, linearizeDepth(uv.xy));
+	float3 samplePosition = GetViewPosition(projConstant, samplePixel, centerDepth);
+
 #if AA_QUALITY == 6 || HBAO_TEMPORAL_DENOISE
 	int frameCounter = (int)fmod(time * 60.0, 16.0);
 #else
@@ -168,10 +169,13 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 	float2 sampleRandom = float2(InterleavedGradientNoise(screen, frameCounter), PseudoRandom(screen + frameCounter));
 
 	float alpha = PI_2 / HBAO_DIRECTION_COUNT;
-	float maxRadiusPixels = 0.1f * ViewportSize.y;
-	float radius = clamp(maxRadius * log2(max(samplePosition.z, 1.001f)) * atan(matProject._m11), HBAO_SAMPLER_COUNT, maxRadiusPixels);
+	float maxRadiusPixels = mAmbientOcclusionMaxRadiusPixelPercentage * ViewportSize.y;
 
-	float4 occlusion = 0;
+	// Perspective-correct screen-space radius projection: Radius_px = (R_world * projScale) / Z
+	float projScale = ViewportSize.y * 0.5f * matProject._m11;
+	float radiusPixels = clamp((maxRadius * projScale) / max(samplePosition.z, 0.1f), (float)HBAO_SAMPLER_COUNT, maxRadiusPixels);
+
+	float4 occlusion = 0.0f;
 
 	// Precalculate the rotation step outside the loop
 	float sinAlpha, cosAlpha;
@@ -185,7 +189,16 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 	[loop]
 	for (int d = 0; d < HBAO_DIRECTION_COUNT; ++d)
 	{
-		occlusion += HorizonOcclusion(samplePixel, sampleNormal, samplePosition, direction, radius, sampleRandom.y, mAmbientOcclusionBias, projConstant);
+		occlusion += HorizonOcclusion(
+			samplePixel,
+			sampleNormal,
+			samplePosition,
+			direction,
+			radiusPixels,
+			maxRadius,
+			sampleRandom.y,
+			mAmbientOcclusionBias,
+			projConstant);
 
 		// Rotate direction vector iteratively using a 2D rotation matrix (2 mad operations instead of cos/sin)
 		direction = float2(
@@ -194,11 +207,11 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 		);
 	}
 
-	occlusion *= (1.0f / (HBAO_SAMPLER_COUNT * HBAO_DIRECTION_COUNT));
-	occlusion.xyz = mad((occlusion.xyz * 2.2), 0.5, 0.5);
+	occlusion *= (1.0f / (float)HBAO_DIRECTION_COUNT);
+	occlusion.xyz = mad((occlusion.xyz * 2.2f), 0.5f, 0.5f);
 
 	occlusion.w = occlusion.w * tex2Dlod(SSAOMapSamp, float4(uv.xy, 0, 0)).a;
-	occlusion.w = 1.0 - occlusion.w;
+	occlusion.w = 1.0f - occlusion.w;
 	occlusion.w = pow(saturate(occlusion.w), mSSAOScale);
 
 	return occlusion;
@@ -210,16 +223,18 @@ float4 ScreenSpaceDirOccBlurPS(
 	uniform sampler source,
 	uniform float2 offset) : COLOR
 {
-	float4 projConstant = GetProjConstant();
 	float center_d = linearizeDepth(uv);
+	if (center_d <= 1e-4f)
+	{
+		return float4(0.5f, 0.5f, 0.5f, 1.0f);
+	}
 
+	float4 projConstant = GetProjConstant();
 	float total_w = 1.0f;
 	float4 total_c = tex2Dlod(source, float4(uv, 0, 0));
 
 	float3 normal = GetNormal(uv);
 	float3 center_pos = GetViewPosition(projConstant, uv, center_d);
-
-	float angle = pow2(saturate(dot(normal, normalize(viewdir))));
 
 	float blurSigma = SSDO_BLUR_RADIUS * 0.5f;
 	float blurFalloff = 1.0f / (2.0f * blurSigma * blurSigma);
@@ -237,7 +252,8 @@ float4 ScreenSpaceDirOccBlurPS(
 		float planeDist1 = abs(dot(normal, pos1 - center_pos));
 		float planeDist2 = abs(dot(normal, pos2 - center_pos));
 
-		float2 weight = exp2(-r * r * blurFalloff - pow2(float2(planeDist1, planeDist2) * mAmbientOcclusionBilateralSharpness));
+		// Bilateral weight combining Gaussian spatial falloff and normal-plane distance
+		float2 weight = exp2(-r * r * (blurFalloff * 1.442695f) - pow2(float2(planeDist1, planeDist2) * mAmbientOcclusionBilateralSharpness));
 
 		weight.x *= saturate(dot(GetNormal(offset1), normal));
 		weight.y *= saturate(dot(GetNormal(offset2), normal));
@@ -265,7 +281,7 @@ float4 SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0) : COLOR
 	float curDepth = linearizeDepth(uv);
 	float4 curAO = tex2Dlod(SSDOMapSamp, float4(uv, 0, 0));
 
-	if (curDepth > 999.0f)
+	if (curDepth > 999.0f || curDepth <= 1e-4f)
 	{
 		return curAO;
 	}
@@ -302,9 +318,12 @@ float4 SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0) : COLOR
 		[unroll]
 		for (int y = -1; y <= 1; ++y)
 		{
-			float4 sampleNeighbor = tex2Dlod(SSDOMapSamp, float4(uv + float2(x, y) * texelSize, 0, 0));
-			minAO = min(minAO, sampleNeighbor);
-			maxAO = max(maxAO, sampleNeighbor);
+			if (x != 0 || y != 0)
+			{
+				float4 sampleNeighbor = tex2Dlod(SSDOMapSamp, float4(uv + float2(x, y) * texelSize, 0, 0));
+				minAO = min(minAO, sampleNeighbor);
+				maxAO = max(maxAO, sampleNeighbor);
+			}
 		}
 	}
 
