@@ -22,25 +22,6 @@ sampler TAADepthMapSamp = sampler_state {
 	AddressU = CLAMP; AddressV = CLAMP;
 };
 
-texture TAAMatrixMap : RENDERCOLORTARGET <
-	int2 Dimensions = {4, 1};
-	bool AntiAlias = false;
-	string Format = "A32B32G32R32F";
->;
-sampler TAAMatrixMapSamp = sampler_state {
-	texture = <TAAMatrixMap>;
-	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
-	AddressU = CLAMP; AddressV = CLAMP;
-};
-
-float4x4 GetPrevViewProject()
-{
-	float4 r0 = tex2Dlod(TAAMatrixMapSamp, float4(0.125, 0.5, 0, 0));
-	float4 r1 = tex2Dlod(TAAMatrixMapSamp, float4(0.375, 0.5, 0, 0));
-	float4 r2 = tex2Dlod(TAAMatrixMapSamp, float4(0.625, 0.5, 0, 0));
-	float4 r3 = tex2Dlod(TAAMatrixMapSamp, float4(0.875, 0.5, 0, 0));
-	return float4x4(r0, r1, r2, r3);
-}
 
 float3 RGB2YCoCg(float3 rgb)
 {
@@ -193,14 +174,6 @@ void TAAPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1, uniform s
 	oDepth = float4(linearDepth, 0.0, 0.0, 0.0);
 }
 
-float4 TAAMatrixUpdatePS(in float2 coord : TEXCOORD0) : COLOR
-{
-	int index = (int)(coord.x * 4.0);
-	if (index == 0) return matViewProject[0];
-	if (index == 1) return matViewProject[1];
-	if (index == 2) return matViewProject[2];
-	return matViewProject[3];
-}
 
 float4 TAAFinalPS(in float2 coord : TEXCOORD0) : COLOR
 {

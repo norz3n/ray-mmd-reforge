@@ -417,6 +417,10 @@ texture ShadingMapTemp : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0, 1.0};
 	string Format = "A16B16G16R16F";
 >;
+texture ShadingMapTemp2 : RENDERCOLORTARGET<
+	float2 ViewportRatio = {1.0, 1.0};
+	string Format = "A16B16G16R16F";
+>;
 texture ShadingMapTempSpecular : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0, 1.0};
 	string Format = "A16B16G16R16F";
@@ -433,6 +437,11 @@ sampler ShadingMapPointSamp = sampler_state {
 };
 sampler ShadingMapTempSamp = sampler_state {
 	texture = <ShadingMapTemp>;
+	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+sampler ShadingMapTemp2Samp = sampler_state {
+	texture = <ShadingMapTemp2>;
 	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };

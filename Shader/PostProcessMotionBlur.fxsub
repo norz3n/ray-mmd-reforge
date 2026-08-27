@@ -1,12 +1,12 @@
 
-float4 PostProcessMotionBlurPS(in float2 uv : TEXCOORD0) : COLOR
+float4 PostProcessMotionBlurPS(in float2 uv : TEXCOORD0, uniform sampler2D source) : COLOR
 {
 	float linearDepth = tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).r;
 	
 	// If it's the skybox/background, don't motion blur (or blur based on camera rotation only)
 	if (linearDepth > 999.0f)
 	{
-		return tex2Dlod(TAAHistoryMapSamp, float4(uv, 0, 0));
+		return tex2Dlod(source, float4(uv, 0, 0));
 	}
 
 	float4 projInfo = GetProjConstant();
@@ -39,7 +39,7 @@ float4 PostProcessMotionBlurPS(in float2 uv : TEXCOORD0) : COLOR
 	{
 		float offset = (float(i) / float(numSamples - 1)) - 0.5f;
 		float2 sampleUV = uv + velocity * offset;
-		color += tex2Dlod(TAAHistoryMapSamp, float4(sampleUV, 0, 0)).rgb;
+		color += tex2Dlod(source, float4(sampleUV, 0, 0)).rgb;
 	}
 	
 	color /= float(numSamples);

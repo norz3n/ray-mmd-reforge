@@ -187,11 +187,15 @@ static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceB
 #	include "shader/SMAA.fxsub"
 #endif
 
+#if (AA_QUALITY == 6) || POST_MOTION_BLUR_ENABLE
+#	include "shader/PostProcessMatrix.fxsub"
+#endif
+
 #if AA_QUALITY == 6
 #	include "shader/TAA.fxsub"
 #endif
 
-#if POST_MOTION_BLUR_ENABLE && (AA_QUALITY == 6)
+#if POST_MOTION_BLUR_ENABLE
 #	include "shader/PostProcessMotionBlur.fxsub"
 #endif
 
@@ -425,21 +429,20 @@ technique DeferredLighting<
 #endif
 
 #if AA_QUALITY == 0
-#if POST_SHARPEN_ENABLE
+#if POST_MOTION_BLUR_ENABLE && POST_SHARPEN_ENABLE
+	"RenderColorTarget=ShadingMapTemp2; Pass=HDRTonemapping;"
+#elif POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
 	"RenderColorTarget=ShadingMapTemp; Pass=HDRTonemapping;"
-	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=PostProcessSharpen;"
 #else
 	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=HDRTonemapping;"
 #endif
-#else
-	"RenderColorTarget=ShadingMapTemp;"
-	"Pass=HDRTonemapping;"
 #endif
 
 #if AA_QUALITY == 1
-#if POST_SHARPEN_ENABLE
+#if POST_MOTION_BLUR_ENABLE && POST_SHARPEN_ENABLE
+	"RenderColorTarget=ShadingMapTemp2; Pass=FXAA;"
+#elif POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
 	"RenderColorTarget=ShadingMapTemp; Pass=FXAA;"
-	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=PostProcessSharpen;"
 #else
 	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=FXAA;"
 #endif
@@ -448,11 +451,12 @@ technique DeferredLighting<
 #if AA_QUALITY == 2 || AA_QUALITY == 3
 	"RenderColorTarget=SMAAEdgeMap;  Clear=Color; Pass=SMAAEdgeDetection;"
 	"RenderColorTarget=SMAABlendMap; Clear=Color; Pass=SMAABlendingWeightCalculation;"
-#if POST_SHARPEN_ENABLE
-	"RenderColorTarget=ShadingMapTemp; Pass=SMAANeighborhoodBlending;"
-	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=PostProcessSharpen;"
+#if POST_MOTION_BLUR_ENABLE && POST_SHARPEN_ENABLE
+	"RenderColorTarget=ShadingMapTemp2; Pass=SMAANeighborhoodBlendingFinal;"
+#elif POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
+	"RenderColorTarget=ShadingMapTemp; Pass=SMAANeighborhoodBlendingFinal;"
 #else
-	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=SMAANeighborhoodBlending;"
+	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=SMAANeighborhoodBlendingFinal;"
 #endif
 #endif
 
@@ -463,9 +467,10 @@ technique DeferredLighting<
 
 	"RenderColorTarget=SMAAEdgeMap;  Clear=Color; Pass=SMAAEdgeDetection2x;"
 	"RenderColorTarget=SMAABlendMap; Clear=Color; Pass=SMAABlendingWeightCalculation2x;"
-#if POST_SHARPEN_ENABLE
+#if POST_MOTION_BLUR_ENABLE && POST_SHARPEN_ENABLE
+	"RenderColorTarget=ShadingMapTemp2; Pass=SMAANeighborhoodBlendingFinal;"
+#elif POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
 	"RenderColorTarget=ShadingMapTemp; Pass=SMAANeighborhoodBlendingFinal;"
-	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=PostProcessSharpen;"
 #else
 	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=SMAANeighborhoodBlendingFinal;"
 #endif
@@ -474,24 +479,29 @@ technique DeferredLighting<
 #if AA_QUALITY == 6
 	"RenderColorTarget0=TAAHistoryMap; RenderColorTarget1=TAADepthMap; Pass=TAAPass;"
 	"RenderColorTarget1=;"
-
-#if POST_MOTION_BLUR_ENABLE
-#if POST_SHARPEN_ENABLE
-	"RenderColorTarget=ShadingMapTemp; Pass=PostProcessMotionBlur;"
-	"RenderColorTarget=TAAMatrixMap; Pass=TAAMatrixUpdatePass;"
-	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=PostProcessSharpen;"
-#else
-	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=PostProcessMotionBlur;"
-	"RenderColorTarget=TAAMatrixMap; Pass=TAAMatrixUpdatePass;"
-#endif
-#else
-	"RenderColorTarget=TAAMatrixMap; Pass=TAAMatrixUpdatePass;"
-#if POST_SHARPEN_ENABLE
+#if POST_MOTION_BLUR_ENABLE && POST_SHARPEN_ENABLE
+	"RenderColorTarget=ShadingMapTemp2; Pass=TAAFinal;"
+#elif POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
 	"RenderColorTarget=ShadingMapTemp; Pass=TAAFinal;"
-	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=PostProcessSharpen;"
 #else
 	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=TAAFinal;"
 #endif
+#endif
+
+#if POST_MOTION_BLUR_ENABLE
+	"RenderColorTarget=TAAMatrixMap; Pass=TAAMatrixUpdatePass;"
+#if POST_SHARPEN_ENABLE
+	"RenderColorTarget=ShadingMapTemp; Pass=PostProcessMotionBlur;"
+	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=PostProcessSharpen;"
+#else
+	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=PostProcessMotionBlur;"
+#endif
+#else
+#if AA_QUALITY == 6
+	"RenderColorTarget=TAAMatrixMap; Pass=TAAMatrixUpdatePass;"
+#endif
+#if POST_SHARPEN_ENABLE
+	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=PostProcessSharpen;"
 #endif
 #endif
 ;>
@@ -1264,12 +1274,21 @@ technique DeferredLighting<
 		PixelShader  = compile ps_3_0 TAAMatrixUpdatePS();
 	}
 #if POST_MOTION_BLUR_ENABLE
+#if POST_SHARPEN_ENABLE
 	pass PostProcessMotionBlur<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 PostProcessMotionBlurPS();
+		PixelShader  = compile ps_3_0 PostProcessMotionBlurPS(ShadingMapTemp2Samp);
 	}
+#else
+	pass PostProcessMotionBlur<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 PostProcessMotionBlurPS(ShadingMapTempSamp);
+	}
+#endif
 #endif
 	pass TAAFinal<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
