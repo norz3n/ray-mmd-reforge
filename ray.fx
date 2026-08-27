@@ -491,12 +491,13 @@ technique DeferredLighting<
 #endif
 
 #if POST_MOTION_BLUR_ENABLE
-	"RenderColorTarget=TAAMatrixMap; Pass=TAAMatrixUpdatePass;"
 #if POST_SHARPEN_ENABLE
 	"RenderColorTarget=ShadingMapTemp; Pass=PostProcessMotionBlur;"
+	"RenderColorTarget=TAAMatrixMap; Pass=TAAMatrixUpdatePass;"
 	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=PostProcessSharpen;"
 #else
 	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=PostProcessMotionBlur;"
+	"RenderColorTarget=TAAMatrixMap; Pass=TAAMatrixUpdatePass;"
 #endif
 #else
 #if AA_QUALITY == 6
