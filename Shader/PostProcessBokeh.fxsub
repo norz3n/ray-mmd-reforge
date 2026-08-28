@@ -402,6 +402,10 @@ float4 ComputeBokehFarPS(
 {
 	float4 farAcc = 0.0f;
 	float4 samp0 = tex2Dlod(_MainTex_PointSampler, float4(uv, 0, 0));
+	if (samp0.a < _MainTex_TexelSize.y)
+	{
+		return float4(samp0.rgb, 0.0f);
+	}
 
 	float maxRadius = GetMaxBokehRadius(DOF_POSSION_RADIUS);
 	float mip = min(4.0f, abs(samp0.a) / maxRadius * float(DOF_POSSION_RADIUS) / float(DOF_POSSION_POINT_PER_RING) * 0.5f);
@@ -428,6 +432,10 @@ float4 ComputeBokehNearPS(
 {
 	float4 nearAcc = 0.0f;
 	float4 samp0 = tex2Dlod(_MainTex_PointSampler, float4(uv, 0, 0));
+	if (samp0.a > -_MainTex_TexelSize.y)
+	{
+		return float4(samp0.rgb, 0.0f);
+	}
 
 	float maxRadius = GetMaxBokehRadius(DOF_POSSION_RADIUS * 0.7f);
 
