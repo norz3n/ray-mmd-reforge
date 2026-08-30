@@ -205,10 +205,13 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 	bentNormalAcc = normalize(normalize(bentNormalAcc) + viewNormal * 0.1f);
 	totalAO = saturate(totalAO / (float)GTAO_SLICE_COUNT);
 
+	// Modulate AO by material-level SSAOVisibility mask: 0.0 means 0% AO (100% visible)
+	float ssaoMask = tex2Dlod(SSAOMapSamp, float4(uv.xy, 0, 0)).a;
+	totalAO = lerp(1.0f, totalAO, ssaoMask);
+
 	float4 occlusion;
 	occlusion.xyz = bentNormalAcc * 0.5f + 0.5f;
 	occlusion.w = lerp(1.0f, pow(totalAO, max(mSSAOScale, 1e-3f)), step(1e-4f, mSSAOScale));
-	occlusion.w *= tex2Dlod(SSAOMapSamp, float4(uv.xy, 0, 0)).a;
 
 	return occlusion;
 }
