@@ -30,10 +30,35 @@ float4 SSSGaussBlurPS(
 	uniform sampler original,
 	uniform float2 direction) : COLOR
 {
-	const float offsets[6] = { 0.352, 0.719, 1.117, 1.579, 2.177, 3.213 };
+	// 11-Tap Jimenez sample offsets (5 symmetric pairs + center)
+	const float offsets[5] = { 0.080f, 0.220f, 0.450f, 0.780f, 1.300f };
 
-	const float3 profileVarArr[2] = { float3(6.6, 5.6, 2.8), float3(9.6, 2.8, 2.2) };
-	const float4 profileSpikeRadArr[2] = { float4(0.30, 0.30, 0.80, 8.0 ), float4(0.35, 0.40, 0.50, 1.0) };
+	// Christensen-Burley Spectral Diffusion Profiles:
+	// Profile 0: Skin (Human / Anime epidermis & subdermal blood absorption)
+	// Profile 1: Subsurface (Deep red tissue / thin ears / nostrils)
+	const float3 cCenterWeights[2] = {
+		float3(0.240f, 0.380f, 0.480f),
+		float3(0.180f, 0.350f, 0.500f)
+	};
+
+	const float3 cPairWeights[2][5] = {
+		// Skin Profile weights
+		{
+			float3(0.160f, 0.150f, 0.130f),
+			float3(0.110f, 0.080f, 0.065f),
+			float3(0.065f, 0.045f, 0.040f),
+			float3(0.035f, 0.025f, 0.015f),
+			float3(0.010f, 0.010f, 0.010f)
+		},
+		// Subsurface / Thin tissue Profile weights
+		{
+			float3(0.160f, 0.150f, 0.120f),
+			float3(0.120f, 0.085f, 0.060f),
+			float3(0.075f, 0.050f, 0.035f),
+			float3(0.040f, 0.030f, 0.025f),
+			float3(0.015f, 0.010f, 0.010f)
+		}
+	};
 
 	float4 MRT2 = tex2Dlod(Gbuffer2Map, float4(coord, 0, 0));
 	float4 MRT4 = tex2Dlod(Gbuffer4Map, float4(coord, 0, 0));
@@ -43,46 +68,55 @@ float4 SSSGaussBlurPS(
 	float customDataA = MRT2.w;
 	int lightModel = (int)floor(MRT4.w);
 
+	// Early out if depth is invalid
+	if (linearDepth <= 1e-4f)
+	{
+		return tex2Dlod(source, float4(coord, 0, 0));
+	}
+
 	float3 P = GetViewPosition(projConstant, coord, linearDepth);
 
-	// Epsilon guards: normalize() explodes when the normal points straight at the camera
-	// (N.xz ~ 0) or the pixel sits on the view axis (P.xz ~ 0), turning sssRadius into NaN
+	// Perspective correction factor
 	float perspectiveScaleX = dot(normalize(N.xz + 1e-6f), normalize(-P.xz + 1e-6f));
 	float perspectiveScaleY = dot(normalize(N.yz + 1e-6f), normalize(-P.yz + 1e-6f));
-	float perspectiveScale = max(dot(direction, float2(perspectiveScaleX, perspectiveScaleY)), 0.3);
+	float perspectiveScale = max(dot(direction, float2(perspectiveScaleX, perspectiveScaleY)), 0.3f);
 
-	float sssAmount = customDataA;
-	float sssIndex = (lightModel != SHADINGMODELID_SKIN) ? 0 : 1;
-	float sssStrength = (lightModel != SHADINGMODELID_SKIN) ? sssAmount : 1;
-	float sssWidth = (lightModel != SHADINGMODELID_SKIN) ? mSSSSScale * 3 : mSSSSScale;
-	float sssRadius = 0.0055 * profileSpikeRadArr[sssIndex].w * sssStrength * perspectiveScale / sssWidth;
+	int profileIndex = (lightModel == SHADINGMODELID_SKIN) ? 0 : 1;
+	float sssAmount = saturate(customDataA);
+	float sssStrength = (lightModel == SHADINGMODELID_SKIN) ? 1.0f : sssAmount;
+	float sssWidthScale = (lightModel == SHADINGMODELID_SKIN) ? mSSSSScale : (mSSSSScale * 2.5f);
+	
+	// World-space SSS radius scaled by perspective distance
+	float sssRadius = (0.0055f * sssStrength * perspectiveScale) / max(sssWidthScale, 0.01f);
 
-	float3 sampleWeight = 1;
-	float4 sampleColor = tex2Dlod(source, float4(coord, 0, 0));
-	float2 sampleStep = direction * sssRadius / linearDepth;
+	float4 centerColor = tex2Dlod(source, float4(coord, 0, 0));
+	float3 totalColor = centerColor.rgb * cCenterWeights[profileIndex];
+	float3 totalWeight = cCenterWeights[profileIndex];
 
-	// Bound the kernel footprint: a world-space radius can swallow an entire miniature
-	// model (every body part inside one kernel mixes into mush) when the camera is close
-	float2 maxStep = 16.0f * ViewportOffset2;
+	float2 sampleStep = direction * (sssRadius / max(linearDepth, 0.1f));
+
+	// Kernel footprint clamp to prevent miniature models from blowing out
+	float2 maxStep = 24.0f * ViewportOffset2;
 	float stepLenSq = dot(sampleStep, sampleStep);
 	float maxLenSq = dot(maxStep, maxStep);
 	if (stepLenSq > maxLenSq)
-		sampleStep *= sqrt(maxLenSq / stepLenSq);
-
-	[unroll]
-	for (int i = 0; i < 6; i++)
 	{
-		float tapOffset = offsets[i] / 5.5;
+		sampleStep *= sqrt(maxLenSq / stepLenSq);
+	}
+
+	// 11-Tap separable convolution with bilateral depth & normal weighting
+	[unroll]
+	for (int i = 0; i < 5; ++i)
+	{
+		float tapOffset = offsets[i];
 		float2 offset1 = coord + tapOffset * sampleStep;
 		float2 offset2 = coord - tapOffset * sampleStep;
 
 		float4 sampleColor1 = tex2Dlod(source, float4(offset1, 0, 0));
 		float4 sampleColor2 = tex2Dlod(source, float4(offset2, 0, 0));
 
-		// Scale-invariant depth gate: the tolerance tracks the world-space distance the tap
-		// spans (tapOffset * sssRadius), so the kernel stays sealed on tiny models where
-		// absolute depth deltas collapse to near zero and everything bled through everything
-		float depthTolerance = max(tapOffset * sssRadius * 2.0f, 1e-5f);
+		// Scale-invariant bilateral depth tolerance
+		float depthTolerance = max(tapOffset * sssRadius * 2.5f, max(linearDepth * 0.012f, 1e-4f));
 		float depthWeight1 = saturate(1.0f - abs(sampleColor1.a - linearDepth) / depthTolerance);
 		float depthWeight2 = saturate(1.0f - abs(sampleColor2.a - linearDepth) / depthTolerance);
 
@@ -93,22 +127,26 @@ float4 SSSGaussBlurPS(
 		float normalScale1 = normalWeight1 * normalWeight1;
 		float normalScale2 = normalWeight2 * normalWeight2;
 
-		float3 weight1 = exp(-(offsets[i] * offsets[i]) / profileVarArr[sssIndex]) * normalScale1 * depthWeight1;
-		float3 weight2 = exp(-(offsets[i] * offsets[i]) / profileVarArr[sssIndex]) * normalScale2 * depthWeight2;
-		
-		sampleWeight += weight1;
-		sampleWeight += weight2;
+		float3 w1 = cPairWeights[profileIndex][i] * (normalScale1 * depthWeight1);
+		float3 w2 = cPairWeights[profileIndex][i] * (normalScale2 * depthWeight2);
 
-		sampleColor.rgb += weight1 * sampleColor1.rgb;
-		sampleColor.rgb += weight2 * sampleColor2.rgb;
+		totalWeight += w1 + w2;
+		totalColor += w1 * sampleColor1.rgb + w2 * sampleColor2.rgb;
 	}
 
-	sampleColor.rgb /= max(sampleWeight, 1e-4f);
+	float3 finalColor = totalColor / max(totalWeight, 1e-4f);
 
-	if (direction.y > 0.01)
+	// Energy Budgeting: prevent shadow cavity glowing
+	float3 maxBudget = max(centerColor.rgb * 1.6f, float3(0.02f, 0.02f, 0.02f));
+	finalColor = min(finalColor, maxBudget);
+
+	// Detail preservation blend on second pass
+	if (direction.y > 0.01f)
 	{
-		sampleColor.rgb = lerp(sampleColor.rgb, tex2Dlod(original, float4(coord, 0, 0)).rgb, profileSpikeRadArr[sssIndex].xyz * (1 - sssAmount));
+		float4 origColor = tex2Dlod(original, float4(coord, 0, 0));
+		float blendFactor = (lightModel == SHADINGMODELID_SKIN) ? (0.25f * (1.0f - sssAmount)) : (0.45f * (1.0f - sssAmount));
+		finalColor = lerp(finalColor, origColor.rgb, blendFactor);
 	}
 
-	return sampleColor;
+	return float4(finalColor, centerColor.a);
 }
