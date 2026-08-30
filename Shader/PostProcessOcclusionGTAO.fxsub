@@ -208,6 +208,7 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 	float4 occlusion;
 	occlusion.xyz = bentNormalAcc * 0.5f + 0.5f;
 	occlusion.w = lerp(1.0f, pow(totalAO, max(mSSAOScale, 1e-3f)), step(1e-4f, mSSAOScale));
+	occlusion.w *= tex2Dlod(SSAOMapSamp, float4(uv.xy, 0, 0)).a;
 
 	return occlusion;
 }
