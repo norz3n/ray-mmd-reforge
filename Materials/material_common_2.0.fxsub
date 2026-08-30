@@ -716,6 +716,32 @@ float2 ParallaxOcclusionMap(sampler heightMap, float2 coord, float3 V, int numSt
 
 	return curTexcoord;
 }
+
+float ParallaxSelfShadow(sampler heightMap, float2 coord, float3 L, float initialHeight, float parallaxScale, int numShadowSteps = 8)
+{
+	if (L.z <= 0.0f) return 0.0f;
+	float step = (1.0f - initialHeight) / (float)numShadowSteps;
+	float2 delta = parallaxScale * L.xy / (max(L.z, 0.05f) * (float)numShadowSteps);
+
+	float curLayerHeight = initialHeight + step * 0.5f;
+	float2 curTexcoord = coord + delta * 0.5f;
+	float shadow = 1.0f;
+
+	[loop]
+	for (int i = 0; i < numShadowSteps; i++)
+	{
+		float h = GetParallaxOcclusionHeight(heightMap, curTexcoord);
+		if (h > curLayerHeight)
+		{
+			float occlusion = (h - curLayerHeight) * (1.0f - float(i) / (float)numShadowSteps);
+			shadow = min(shadow, saturate(1.0f - occlusion * 4.0f));
+			if (shadow <= 0.01f) break;
+		}
+		curLayerHeight += step;
+		curTexcoord += delta;
+	}
+	return shadow;
+}
 #endif
 
 float SmoothnessToRoughness(float smoothness)
@@ -1672,10 +1698,16 @@ GbufferParam MaterialPS(
 		coord0.y = 1 - coord0.y;
 	#endif
 	float3 viewdir = ParallaxOcclusionDirection(normal, worldPos.xyz, coord0 * parallaxMapLoopNum);
-	coord0 = ParallaxOcclusionMap(ParallaxMapSamp, coord0 * parallaxMapLoopNum, viewdir, 15, parallaxMapScale);
+	float2 pomCoord = ParallaxOcclusionMap(ParallaxMapSamp, coord0 * parallaxMapLoopNum, viewdir, 15, parallaxMapScale);
+	float pomHeight = GetParallaxOcclusionHeight(ParallaxMapSamp, pomCoord);
+	float3 lightDirTangent = ParallaxOcclusionDirection(normal, worldPos.xyz + float3(0.0f, 10.0f, 0.0f), coord0 * parallaxMapLoopNum);
+	float pomShadow = ParallaxSelfShadow(ParallaxMapSamp, pomCoord, normalize(lightDirTangent), pomHeight, parallaxMapScale, 6);
+	coord0 = pomCoord;
 	#if PARALLAX_MAP_UV_FLIP
 		coord0.y = 1 - coord0.y;
 	#endif
+#else
+	float pomShadow = 1.0f;
 #endif
 
 	MaterialParam material;
@@ -1699,9 +1731,9 @@ GbufferParam MaterialPS(
 	material.emissive = GetEmissiveColor(coord0);
 	material.emissiveIntensity = GetEmissiveIntensity();
 #if OCCLUSION_MAP_TYPE == 2 || OCCLUSION_MAP_TYPE == 3
-	material.visibility = GetOcclusion(coord1);
+	material.visibility = GetOcclusion(coord1) * pomShadow;
 #else
-	material.visibility = GetOcclusion(coord0);
+	material.visibility = GetOcclusion(coord0) * pomShadow;
 #endif
 	material.lightModel = GetLightMode(material);
 	material.alpha = 1;
@@ -1729,13 +1761,20 @@ GbufferParam Material2PS(
 	#endif
 	float3 viewdir = ParallaxOcclusionDirection(normal, worldPos.xyz, coord0);
 #if PARALLAX_MAP_TYPE
-	coord0 = ParallaxOcclusionMap(ParallaxMapSamp, coord0 * parallaxMapLoopNum, viewdir, 15, parallaxMapScale);
+	float2 pomCoord2 = ParallaxOcclusionMap(ParallaxMapSamp, coord0 * parallaxMapLoopNum, viewdir, 15, parallaxMapScale);
+	float pomHeight2 = GetParallaxOcclusionHeight(ParallaxMapSamp, pomCoord2);
+	float3 lightDirTangent2 = ParallaxOcclusionDirection(normal, worldPos.xyz + float3(0.0f, 10.0f, 0.0f), coord0 * parallaxMapLoopNum);
+	float pomShadow2 = ParallaxSelfShadow(ParallaxMapSamp, pomCoord2, normalize(lightDirTangent2), pomHeight2, parallaxMapScale, 6);
+	coord0 = pomCoord2;
 #else
 	coord0 *= parallaxMapLoopNum;
+	float pomShadow2 = 1.0f;
 #endif
 	#if PARALLAX_MAP_UV_FLIP
 		coord0.y = 1 - coord0.y;
 	#endif
+#else
+	float pomShadow2 = 1.0f;
 #endif
 
 	MaterialParam material;
@@ -1759,9 +1798,9 @@ GbufferParam Material2PS(
 	material.emissive = GetEmissiveColor(coord0);
 	material.emissiveIntensity = GetEmissiveIntensity();
 #if OCCLUSION_MAP_TYPE == 2 || OCCLUSION_MAP_TYPE == 3
-	material.visibility = GetOcclusion(coord1);
+	material.visibility = GetOcclusion(coord1) * pomShadow2;
 #else
-	material.visibility = GetOcclusion(coord0);
+	material.visibility = GetOcclusion(coord0) * pomShadow2;
 #endif
 	material.lightModel = GetLightMode(material);
 #if ALPHA_MAP_FROM == 2
