@@ -87,7 +87,8 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 	float3 viewNormal = GetNormal(uv.xy);
 	float3 viewDir = normalize(-vPos);
 
-	float radius = lerp(lerp(20.0f, 60.0f, mSSAORadiusP), 2.0f, mSSAORadiusM);
+	// Calibrated radius scale for MMD unit dimensions (~10-15 units character height)
+	float radius = lerp(lerp(6.0f, 20.0f, mSSAORadiusP), 0.8f, mSSAORadiusM);
 	float thickness = 0.5f;
 
 	float projScale = ViewportSize.y * 0.5f * matProject._m11;

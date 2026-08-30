@@ -75,7 +75,15 @@ void ShadingImageBasedLighting(sampler source, MaterialParam material, float4 sc
 	ssao = min(ssao, material.visibility);
 	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
 	float skinAO = lerp(1.0f, ssao, SKIN_AO_STRENGTH);
-	diffuse *= isSkin ? skinAO : (isEmissiveOrGlass ? 1.0f : ssao);
+
+	// Jimenez Multi-Bounce inter-reflection color preservation
+	float3 aBounce = 2.0404f * material.albedo - 0.3324f;
+	float3 bBounce = -4.7951f * material.albedo + 0.6417f;
+	float3 cBounce = 2.7552f * material.albedo + 0.6903f;
+	float effectiveAOValue = isSkin ? skinAO : ssao;
+	float3 coloredAO = max(effectiveAOValue, ((effectiveAOValue * aBounce + bBounce) * effectiveAOValue + cBounce) * effectiveAOValue);
+
+	diffuse *= isEmissiveOrGlass ? 1.0f : coloredAO;
 
 	float3 bentNormal = normalize(ssdoData.xyz * 2.0f - 1.0f);
 	float3 R = EnvironmentReflect(material.normal, V);
