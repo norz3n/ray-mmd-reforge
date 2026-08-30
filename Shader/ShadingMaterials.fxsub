@@ -92,9 +92,9 @@ void ShadingImageBasedLighting(sampler source, MaterialParam material, float4 sc
 	float baseSpecOcc = ComputeSpecularOcclusion(NdotV, isSkin ? skinAO : ssao, material.smoothness);
 	float dirSpecOcc = ComputeDirectionalSpecularOcclusion(R, bentNormal, isSkin ? skinAO : ssao, roughness);
 	
-	// Jimenez / Heitz Ground-Truth Specular Occlusion (GTSO)
+	// Jimenez / Frostbite Ground-Truth Specular Occlusion (GTSO)
 	float effectiveAO = isSkin ? skinAO : ssao;
-	float gtso = saturate((effectiveAO - (1.0f - material.smoothness)) / max(1.0f - (1.0f - material.smoothness) * effectiveAO, 1e-4f));
+	float gtso = saturate(pow(NdotV + effectiveAO, roughness * roughness) - 1.0f + effectiveAO);
 	float specOcc = min(lerp(baseSpecOcc, max(baseSpecOcc * 0.5f, dirSpecOcc), saturate(roughness * 2.5f)), gtso);
 	specular *= isSkin ? lerp(1.0f, specOcc, SKIN_AO_STRENGTH) : specOcc;
 #else

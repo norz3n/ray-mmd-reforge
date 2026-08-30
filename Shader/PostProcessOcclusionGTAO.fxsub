@@ -195,7 +195,11 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 		// Analytical cosine-weighted visibility integral per slice [Jimenez 2016 / XeGTAO]
 		float arc0 = (cos_n + 2.0f * h0 * sin(n) - cos(2.0f * h0 - n)) * 0.25f;
 		float arc1 = (cos_n + 2.0f * h1 * sin(n) - cos(2.0f * h1 - n)) * 0.25f;
-		totalAO += projLength * (arc0 + arc1);
+		
+		// Normalize by the theoretical unoccluded horizon integral of this slice
+		float maxSliceArc = max((cos_n + n * sin(n)) * 0.5f, 1e-4f);
+		float sliceVisibility = saturate((arc0 + arc1) / maxSliceArc);
+		totalAO += sliceVisibility;
 	}
 
 	bentNormalAcc = normalize(normalize(bentNormalAcc) + viewNormal * 0.1f);
@@ -203,7 +207,7 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 
 	float4 occlusion;
 	occlusion.xyz = bentNormalAcc * 0.5f + 0.5f;
-	occlusion.w = pow(totalAO, mSSAOScale);
+	occlusion.w = lerp(1.0f, pow(totalAO, max(mSSAOScale, 1e-3f)), step(1e-4f, mSSAOScale));
 
 	return occlusion;
 }
