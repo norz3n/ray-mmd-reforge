@@ -83,7 +83,11 @@ void ShadingImageBasedLighting(sampler source, MaterialParam material, float4 sc
 	float NdotV = abs(dot(material.normal, V)) + 1e-5f;
 	float baseSpecOcc = ComputeSpecularOcclusion(NdotV, isSkin ? skinAO : ssao, material.smoothness);
 	float dirSpecOcc = ComputeDirectionalSpecularOcclusion(R, bentNormal, isSkin ? skinAO : ssao, roughness);
-	float specOcc = lerp(baseSpecOcc, max(baseSpecOcc * 0.5f, dirSpecOcc), saturate(roughness * 2.5f));
+	
+	// Jimenez / Heitz Ground-Truth Specular Occlusion (GTSO)
+	float effectiveAO = isSkin ? skinAO : ssao;
+	float gtso = saturate((effectiveAO - (1.0f - material.smoothness)) / max(1.0f - (1.0f - material.smoothness) * effectiveAO, 1e-4f));
+	float specOcc = min(lerp(baseSpecOcc, max(baseSpecOcc * 0.5f, dirSpecOcc), saturate(roughness * 2.5f)), gtso);
 	specular *= isSkin ? lerp(1.0f, specOcc, SKIN_AO_STRENGTH) : specOcc;
 #else
 	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
@@ -98,16 +102,13 @@ void ShadingImageBasedLighting(sampler source, MaterialParam material, float4 sc
 #if SUN_LIGHT_ENABLE && SUN_SHADOW_QUALITY
 	float shadowDepth = tex2Dlod(ShadowMapSamp, float4(coord, 0, 0)).r;
 	shadowDepth = min(shadowDepth, saturate(dot(material.normal, L) * 3));
-	shadow = lerp(shadow, shadowDepth, envShadow);
+	shadow = lerp(shadowDepth, 1, envShadow);
 #endif
 
-	diffuse *= shadow;
-	specular *= shadow * shadow * shadow;
+	diffuse *= (material.lightModel == SHADINGMODELID_CEL || material.lightModel == SHADINGMODELID_TONEBASED) ? 1.0f : shadow;
+	specular *= shadow;
 
 #if TOON_ENABLE
-	// Match the stepped GI response (SSGI_Resolve): quantize the ambient luma
-	// so the smooth IBL gradient doesn't break the cel bands on the shadow side.
-	// 2 steps keeps the shadow fill flat - crisp cel, not painterly
 	if (material.lightModel == SHADINGMODELID_CEL || material.lightModel == SHADINGMODELID_TONEBASED)
 	{
 		float luma = dot(diffuse, float3(0.299f, 0.587f, 0.114f));
@@ -124,12 +125,13 @@ void ShadingOpacityPS(
 	out float4 oColor0 : COLOR0,
 	out float4 oColor1 : COLOR1)
 {
-	float4 MRT4 = tex2Dlod(Gbuffer4Map, float4(coord, 0, 0));
-	clip(MRT4.x - 1e-5);
+	float4 MRT8 = tex2Dlod(Gbuffer8Map, float4(coord, 0, 0));
+	clip(MRT8.x - 1e-5);
 
 	float4 MRT1 = tex2Dlod(Gbuffer1Map, float4(coord, 0, 0));
 	float4 MRT2 = tex2Dlod(Gbuffer2Map, float4(coord, 0, 0));
 	float4 MRT3 = tex2Dlod(Gbuffer3Map, float4(coord, 0, 0));
+	float4 MRT4 = tex2Dlod(Gbuffer4Map, float4(coord, 0, 0));
 
 	MaterialParam material;
 	DecodeGbuffer(MRT1, MRT2, MRT3, MRT4, material);
@@ -137,10 +139,12 @@ void ShadingOpacityPS(
 	float3 V = normalize(viewdir);
 	float3 L = mul(-SunDirection, (float3x3)matView);
 
-	float3 diffuse = 0, specular = 0;
+	float3 diffuse = 0;
+	float3 specular = 0;
 
 #if MULTI_LIGHT_ENABLE
-	diffuse += tex2Dlod(LightMapSamp, float4(coord, 0, 0)).rgb;
+	float4 light = tex2Dlod(LightMapSamp, float4(coord, 0, 0));
+	diffuse += light.rgb;
 	specular += tex2Dlod(LightSpecMapSamp, float4(coord, 0, 0)).rgb;
 #endif
 
@@ -231,6 +235,7 @@ float4 ShadingTransparentPS(
 
 	if (material.lightModel == SHADINGMODELID_GLASS)
 	{
+		float glassRoughness = saturate(1.0f - material.smoothness);
 		float2 iorR = ior * 0.90f;
 		float2 iorG = ior * 1.00f;
 		float2 iorB = ior * 1.10f;
@@ -244,6 +249,20 @@ float4 ShadingTransparentPS(
 		bgB = any(bgB) ? bgB : srgb2linear(tex2Dlod(ScnSamp, float4(coord + iorB, 0, 0)).rgb);
 
 		prefilteredRefract = float3(bgR.r, bgG.g, bgB.b);
+
+		// Rough glass transmittance multi-tap diffusion blur
+		if (glassRoughness > 0.01f)
+		{
+			float blurRadius = glassRoughness * 0.018f;
+			float2 o1 = float2(0.7071f, 0.7071f) * blurRadius;
+			float2 o2 = float2(-0.7071f, 0.7071f) * blurRadius;
+			float3 blurBg = prefilteredRefract * 0.36f;
+			blurBg += tex2Dlod(ShadingMapTempPointSamp, float4(coord + ior + o1, 0, 0)).rgb * 0.16f;
+			blurBg += tex2Dlod(ShadingMapTempPointSamp, float4(coord + ior - o1, 0, 0)).rgb * 0.16f;
+			blurBg += tex2Dlod(ShadingMapTempPointSamp, float4(coord + ior + o2, 0, 0)).rgb * 0.16f;
+			blurBg += tex2Dlod(ShadingMapTempPointSamp, float4(coord + ior - o2, 0, 0)).rgb * 0.16f;
+			prefilteredRefract = blurBg;
+		}
 
 #if GLASS_REFRACTION
 		// Hi-Z traced refraction: march the refracted ray to the true background surface point.
@@ -260,7 +279,7 @@ float4 ShadingTransparentPS(
 			{
 				float3 tracedBg = tex2Dlod(ShadingMapTempPointSamp, float4(hitUV, 0, 0)).rgb;
 				if (any(tracedBg))
-					prefilteredRefract = tracedBg;
+					prefilteredRefract = lerp(tracedBg, prefilteredRefract, glassRoughness * 0.5f);
 			}
 		}
 #endif
