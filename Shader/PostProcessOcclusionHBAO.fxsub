@@ -319,7 +319,7 @@ HBAOTemporalOutput SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0)
 	}
 
 	float prevDepth = linearizeDepth(prevUV);
-	if (abs(prevDepth - curDepth) > max(0.15f, curDepth * 0.04f))
+	if (abs(prevDepth - curDepth) > max(0.10f, curDepth * 0.03f))
 	{
 		output.color0 = curAO;
 		output.color1 = curAO;
@@ -328,7 +328,7 @@ HBAOTemporalOutput SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0)
 
 	float4 historyAO = tex2Dlod(SSDOMapHistorySamp, float4(prevUV, 0, 0));
 
-	// 3x3 Neighborhood Box Clamping
+	// Strict 3x3 Neighborhood Box Clamping
 	float2 texelSize = ViewportOffset2;
 	float4 minAO = curAO;
 	float4 maxAO = curAO;
@@ -348,8 +348,7 @@ HBAOTemporalOutput SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0)
 		}
 	}
 
-	float4 boxMargin = (maxAO - minAO) * 0.25f;
-	historyAO = clamp(historyAO, minAO - boxMargin, maxAO + boxMargin);
+	historyAO = clamp(historyAO, minAO, maxAO);
 
 	float4 denoised = lerp(curAO, historyAO, 0.85f);
 	output.color0 = denoised;

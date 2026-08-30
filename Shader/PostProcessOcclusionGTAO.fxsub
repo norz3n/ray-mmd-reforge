@@ -150,18 +150,27 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 		float2 omega = float2(cosPhi, -sinPhi) * screenspaceRadius;
 		float3 directionVec = float3(cosPhi, sinPhi, 0.0f);
 
-		// XeGTAO slice plane projection (orthoDirectionVec & axisVec)
+		// XeGTAO slice plane projection (orthoDirectionVec & axisVec) with zero-length singularity guards
 		float3 orthoDirectionVec = directionVec - dot(directionVec, viewVec) * viewVec;
-		float3 axisVec = normalize(cross(orthoDirectionVec, viewVec));
-		float3 projectedNormalVec = viewNormal - axisVec * dot(viewNormal, axisVec);
+		float orthoLen = length(orthoDirectionVec);
+		if (orthoLen < 1e-4f)
+			continue;
+		orthoDirectionVec /= orthoLen;
 
+		float3 axisVec = cross(orthoDirectionVec, viewVec);
+		float axisLen = length(axisVec);
+		if (axisLen < 1e-4f)
+			continue;
+		axisVec /= axisLen;
+
+		float3 projectedNormalVec = viewNormal - axisVec * dot(viewNormal, axisVec);
 		float projLength = length(projectedNormalVec);
 		if (projLength < 1e-4f)
 			continue;
 
 		float dotOrtho = dot(orthoDirectionVec, projectedNormalVec);
 		float signNorm = (abs(dotOrtho) > 1e-4f) ? sign(dotOrtho) : 0.0f;
-		float cosNorm = saturate(dot(projectedNormalVec, viewVec) / projLength);
+		float cosNorm = clamp(dot(projectedNormalVec, viewVec) / projLength, -1.0f, 1.0f);
 		float n = signNorm * acos(cosNorm);
 
 		// Tangent plane lower horizon cosine bounds (zero occlusion)
@@ -250,40 +259,48 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 		float h0 = -acos(horizonCos1);
 		float h1 =  acos(horizonCos0);
 
-		// Clamp horizon angles to tangent plane to prevent overshoot
-		h0 = n + clamp(h0 - n, -HALF_PI, HALF_PI);
-		h1 = n + clamp(h1 - n, -HALF_PI, HALF_PI);
-
 		// XeGTAO / Jimenez analytical slice visibility integral
 		float iarc0 = (cosNorm + 2.0f * h0 * sin(n) - cos(2.0f * h0 - n)) * 0.25f;
 		float iarc1 = (cosNorm + 2.0f * h1 * sin(n) - cos(2.0f * h1 - n)) * 0.25f;
-		float localVisibility = projLength * (iarc0 + iarc1);
-		totalVisibility += localVisibility;
+		float localVisibility = max(0.0f, projLength * (iarc0 + iarc1));
+		if (!isnan(localVisibility) && !isinf(localVisibility))
+		{
+			totalVisibility += localVisibility;
+		}
 
-		// Exact analytical bent normal integral [Jimenez 2016 / XeGTAO Algorithm 2]
-		float t0 = (6.0f * sin(h0 - n) - sin(3.0f * h0 - n) + 6.0f * sin(h1 - n) - sin(3.0f * h1 - n) + 16.0f * sin(n) - 3.0f * (sin(h0 + n) + sin(h1 + n))) * (1.0f / 12.0f);
-		float t1 = (-cos(3.0f * h0 - n) - cos(3.0f * h1 - n) + 8.0f * cos(n) - 3.0f * (cos(h0 + n) + cos(h1 + n))) * (1.0f / 12.0f);
-		float3 localBentNormal = float3(directionVec.x * t0, directionVec.y * t0, -t1);
-
-		float3x3 rotMat = XeGTAO_RotFromToMatrix(float3(0.0f, 0.0f, -1.0f), viewVec);
-		bentNormalAcc += mul(rotMat, localBentNormal) * projLength;
+		// Robust view-space bent normal accumulation
+		float3 tangent = cross(viewVec, axisVec);
+		float bentAngle = (h0 + h1) * 0.5f;
+		float3 sliceBentNormal = projLength * (viewVec * cos(bentAngle) - tangent * sin(bentAngle));
+		if (!any(isnan(sliceBentNormal)) && !any(isinf(sliceBentNormal)))
+		{
+			bentNormalAcc += sliceBentNormal;
+		}
 	}
 
 	totalVisibility /= (float)GTAO_SLICE_COUNT;
-	totalVisibility = clamp(totalVisibility, 0.03f, 1.0f);
+	if (isnan(totalVisibility) || isinf(totalVisibility))
+	{
+		totalVisibility = 1.0f;
+	}
+	totalVisibility = clamp(totalVisibility, 0.05f, 1.0f);
 
-	if (length(bentNormalAcc) > 1e-4f)
-		bentNormalAcc = normalize(bentNormalAcc);
-	else
+	if (any(isnan(bentNormalAcc)) || any(isinf(bentNormalAcc)) || length(bentNormalAcc) < 1e-4f)
 		bentNormalAcc = viewNormal;
+	else
+		bentNormalAcc = normalize(bentNormalAcc);
 
 	// Modulate AO by material-level SSAOVisibility mask: 0.0 means 0% AO (100% visible)
 	float ssaoMask = tex2Dlod(SSAOMapSamp, float4(uv.xy, 0, 0)).a;
 	totalVisibility = lerp(1.0f, totalVisibility, ssaoMask);
 
+	// Natural AO power curve without harsh crevice crushing
+	float aoPower = lerp(1.0f, 2.5f, mSSAOP) * (1.0f - mSSAOM);
+	float finalVisibility = pow(saturate(totalVisibility), max(aoPower, 0.01f));
+
 	float4 occlusion;
 	occlusion.xyz = bentNormalAcc * 0.5f + 0.5f;
-	occlusion.w = lerp(1.0f, pow(totalVisibility, max(mSSAOScale, 1e-3f)), step(1e-4f, mSSAOScale));
+	occlusion.w = lerp(1.0f, finalVisibility, step(1e-4f, mSSAOScale));
 
 	return occlusion;
 }
@@ -393,7 +410,7 @@ SSDOTemporalOutput SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0)
 	}
 
 	float prevDepth = linearizeDepth(prevUV);
-	if (abs(prevDepth - curDepth) > max(0.15f, curDepth * 0.04f))
+	if (abs(prevDepth - curDepth) > max(0.10f, curDepth * 0.03f))
 	{
 		output.color0 = curAO;
 		output.color1 = curAO;
@@ -402,7 +419,7 @@ SSDOTemporalOutput SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0)
 
 	float4 historyAO = tex2Dlod(SSDOMapHistorySamp, float4(prevUV, 0, 0));
 
-	// 3x3 Neighborhood Box Clamping
+	// Strict 3x3 Neighborhood Box Clamping: history is strictly bounded by current neighborhood to prevent temporal dark bleeding
 	float2 texelSize = ViewportOffset2;
 	float4 minAO = curAO;
 	float4 maxAO = curAO;
@@ -422,8 +439,7 @@ SSDOTemporalOutput SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0)
 		}
 	}
 
-	float4 boxMargin = (maxAO - minAO) * 0.25f;
-	historyAO = clamp(historyAO, minAO - boxMargin, maxAO + boxMargin);
+	historyAO = clamp(historyAO, minAO, maxAO);
 
 	float4 denoised = lerp(curAO, historyAO, 0.85f);
 	output.color0 = denoised;
