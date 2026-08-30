@@ -284,37 +284,75 @@ float3 DualLobeSkinSpecular(float nh, float nl, float vh, float nv, float roughn
 
 float3 SpecularBRDF_GGXAniso(float3 N, float3 H, float nh, float nl, float vh, float nv, float3 specular, float3 albedo, float roughness, float anisotropic, float3 shift, float NormalizationFactor)
 {
-	// World-up tangent frame; fall back to X axis near hair whorl/crown where cross(N, up) degenerates
+	// World-up tangent frame; fall back to X axis near poles
 	float3 up = (abs(N.y) > 0.99f) ? float3(1, 0, 0) : float3(0, 1, 0);
-	float3 T = normalize(cross(N, up) + N * shift.r);
+	float3 T = normalize(cross(N, up));
 	float3 B = normalize(cross(N, T));
 
-	float aspect = rsqrt(1.0f - anisotropic * 0.9f);
-	float ax = 1.0f / (roughness * aspect);
-	float ay = aspect / roughness;
+	// Tangent rotation via shift.r (angle in turns / radians)
+	if (abs(shift.r) > 1e-4f)
+	{
+		float angle = shift.r * 6.2831853f;
+		float sinA, cosA;
+		sincos(angle, sinA, cosA);
+		float3 rotatedT = T * cosA + B * sinA;
+		B = -T * sinA + B * cosA;
+		T = rotatedT;
+	}
 
-	// Primary highlight (R lobe - shifted towards root)
-	float3 H_shift1 = normalize(H + N * (shift.g * 0.1f));
-	float spec1 = pow2(dot(T, H_shift1) * ax) + pow2(dot(B, H_shift1) * ay) + nh * nh;
-	spec1 = (ax * ay) / (spec1 * spec1) * NormalizationFactor;
+	float aspect = sqrt(max(1.0f - anisotropic * 0.9f, 0.01f));
+	float ax = max(roughness / aspect, 0.001f);
+	float ay = max(roughness * aspect, 0.001f);
 
-	// Secondary highlight (TRT lobe - transmission bounce shifted towards tip, tinted by hair albedo)
-	float3 H_shift2 = normalize(H - N * (shift.b * 0.15f + 0.08f));
-	float r2 = saturate(roughness * 1.4f + 0.1f);
-	float ax2 = 1.0f / (r2 * aspect);
-	float ay2 = aspect / r2;
-	float spec2 = pow2(dot(T, H_shift2) * ax2) + pow2(dot(B, H_shift2) * ay2) + nh * nh;
-	spec2 = (ax2 * ay2) / (spec2 * spec2) * NormalizationFactor;
+	bool isHair = any(shift.gb > 0.001f);
 
-	float k = 1.0f - roughness;
-	float G = 0.5f / (nl * (nv * k + roughness) + nv * (nl * k + roughness));
-	spec1 *= G;
-	spec2 *= G;
+	if (isHair)
+	{
+		// Primary highlight (R lobe - shifted towards root)
+		float3 H_shift1 = normalize(H + N * (shift.g * 0.1f));
+		float d1 = pow2(dot(T, H_shift1) / ax) + pow2(dot(B, H_shift1) / ay) + nh * nh;
+		float spec1 = (1.0f / (ax * ay * max(d1 * d1, 1e-6f))) * NormalizationFactor;
 
-	float3 f0 = specular;
-	float3 fresnel = fresnelSchlick(f0, 1.0f, vh);
+		// Secondary highlight (TRT lobe - transmission bounce shifted towards tip, tinted by hair albedo)
+		float3 H_shift2 = normalize(H - N * (shift.b * 0.15f + 0.08f));
+		float r2 = saturate(roughness * 1.4f + 0.1f);
+		float ax2 = max(r2 / aspect, 0.001f);
+		float ay2 = max(r2 * aspect, 0.001f);
+		float d2 = pow2(dot(T, H_shift2) / ax2) + pow2(dot(B, H_shift2) / ay2) + nh * nh;
+		float spec2 = (1.0f / (ax2 * ay2 * max(d2 * d2, 1e-6f))) * NormalizationFactor;
 
-	return (spec1 * fresnel) + (spec2 * albedo * 0.45f * fresnel);
+		float k = 1.0f - roughness;
+		float G = 0.5f / (nl * (nv * k + roughness) + nv * (nl * k + roughness));
+		spec1 *= G;
+		spec2 *= G;
+
+		float3 f0 = specular;
+		float3 fresnel = fresnelSchlick(f0, 1.0f, vh);
+
+		return (spec1 * fresnel) + (spec2 * albedo * 0.45f * fresnel);
+	}
+	else
+	{
+		// Standard Heitz / Burley Anisotropic GGX microfacet distribution
+		float dotTH = dot(T, H);
+		float dotBH = dot(B, H);
+		float d = pow2(dotTH / ax) + pow2(dotBH / ay) + nh * nh;
+		float D = (1.0f / (PI * ax * ay * max(d * d, 1e-6f))) * NormalizationFactor;
+
+		// Smith anisotropic separable visibility function: V = G / (4 * nl * nv)
+		float lambdaV = nl * length(float3(ax * dot(T, H), ay * dot(B, H), nv));
+		float lambdaL = nv * length(float3(ax * dot(T, H), ay * dot(B, H), nl));
+		float V = 0.5f / max(lambdaV + lambdaL, 1e-5f);
+
+		float3 f0 = specular;
+		float3 f90 = ComputeSpecularMicroOcclusion(f0);
+		float3 fresnel = fresnelSchlick(f0, f90, vh);
+
+		// Multi-scattering energy compensation for anisotropic surfaces
+		float3 energyCompensation = 1.0f + f0 * (roughness * (1.0f - roughness) * 0.65f);
+
+		return D * V * fresnel * energyCompensation;
+	}
 }
 
 #define pow2(x) ((x) * (x))
