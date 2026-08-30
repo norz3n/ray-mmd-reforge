@@ -122,15 +122,19 @@ float4 AtmosphericFogMieBlurPS(in float4 coord : TEXCOORD0, float4 illuminationP
 	float2 sampleDecay = float2(1.0, 0.96);
 	float2 sampleDelta = (coord.xy - illuminationPosition.xy) / FOG_WITH_GODRAY_SAMPLES * FogSampleLength;
 	float2 sampleCoord = coord.xy - sampleDelta * jitter;
+	float totalWeight = 0.0001f;
 
 	for (int i = 0; i < FOG_WITH_GODRAY_SAMPLES; i++)
 	{
-		sampleColor += tex2Dlod(FogMapSamp, float4(sampleCoord, 0, 0)).rgb * sampleDecay.x;
+		float tapDepth = tex2Dlod(Gbuffer8Map, float4(sampleCoord, 0, 0)).r;
+		float occlusion = (tapDepth > 1e-4f && tapDepth < 50.0f) ? 0.25f : 1.0f;
+		sampleColor += tex2Dlod(FogMapSamp, float4(sampleCoord, 0, 0)).rgb * (sampleDecay.x * occlusion);
+		totalWeight += sampleDecay.x;
 		sampleCoord -= sampleDelta;
 		sampleDecay.x *= sampleDecay.y;
 	}
 
-	sampleColor /= FOG_WITH_GODRAY_SAMPLES;
+	sampleColor /= totalWeight;
 
 	return float4(sampleColor, 0);
 }
