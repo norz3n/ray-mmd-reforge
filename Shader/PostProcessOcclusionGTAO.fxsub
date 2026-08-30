@@ -114,30 +114,6 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 		float3 sliceDir = float3(cos(angle), sin(angle), 0.0f);
 		float2 sliceDirUV = sliceDir.xy * ViewportOffset2;
 
-		float2 h = -1.0f;
-
-		[unroll]
-		for (int j = 0; j < GTAO_STEPS_PER_SLICE; ++j)
-		{
-			float2 uvOffset = sliceDirUV * max(stepRadius * (float(j) + initialRayStep), 1.0f + float(j));
-			float4 uvSlice = uv.xyxy + float4(uvOffset, -uvOffset);
-
-			float depthS = linearizeDepth(uvSlice.xy);
-			float depthT = linearizeDepth(uvSlice.zw);
-
-			float3 ds = (depthS > 1e-4f) ? (GetViewPosition(projConstant, uvSlice.xy, depthS) - vPos) : float3(0, 0, 999);
-			float3 dt = (depthT > 1e-4f) ? (GetViewPosition(projConstant, uvSlice.zw, depthT) - vPos) : float3(0, 0, 999);
-
-			float2 dsdtSq = float2(dot(ds, ds), dot(dt, dt));
-			float2 dsdtInvLen = rsqrt(max(dsdtSq, 1e-6f));
-
-			float2 falloff = saturate(dsdtSq * (2.0f / max(radius * radius, 1e-4f)));
-			float2 H = float2(dot(ds, viewDir), dot(dt, viewDir)) * dsdtInvLen;
-
-			h.x = (H.x > h.x) ? lerp(H.x, h.x, falloff.x) : lerp(H.x, h.x, thickness);
-			h.y = (H.y > h.y) ? lerp(H.y, h.y, falloff.y) : lerp(H.y, h.y, thickness);
-		}
-
 		float3 planeNormal = normalize(cross(sliceDir, viewDir));
 		float3 tangent = cross(viewDir, planeNormal);
 		float3 projectedNormal = viewNormal - planeNormal * dot(viewNormal, planeNormal);
@@ -149,17 +125,76 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 		float cos_n = clamp(dot(projectedNormal / projLength, viewDir), -1.0f, 1.0f);
 		float n = -sign(dot(projectedNormal, tangent)) * acos(cos_n);
 
-		float2 clampedH = acos(clamp(h, -1.0f, 1.0f));
-		clampedH.x = n + max(-clampedH.x - n, -HALF_PI);
-		clampedH.y = n + min(clampedH.y - n,  HALF_PI);
+		// Tangent plane lower horizon cosine bounds (zero occlusion)
+		float lowHorizonCos0 = cos(n + HALF_PI);
+		float lowHorizonCos1 = cos(n - HALF_PI);
 
-		float bentAngle = (clampedH.x + clampedH.y) * 0.5f;
+		float horizonCos0 = lowHorizonCos0;
+		float horizonCos1 = lowHorizonCos1;
+
+		[unroll]
+		for (int j = 0; j < GTAO_STEPS_PER_SLICE; ++j)
+		{
+			float stepScale = pow((float(j) + initialRayStep) / (float)GTAO_STEPS_PER_SLICE, 1.25f);
+			float2 uvOffset = sliceDirUV * max(stepRadius * stepScale * (float)GTAO_STEPS_PER_SLICE, 1.0f + float(j));
+			float4 uvSlice = uv.xyxy + float4(uvOffset, -uvOffset);
+
+			float depthS = linearizeDepth(uvSlice.xy);
+			float depthT = linearizeDepth(uvSlice.zw);
+
+			// Positive direction (+dir)
+			if (depthS > 1e-4f)
+			{
+				float3 ds = GetViewPosition(projConstant, uvSlice.xy, depthS) - vPos;
+				float dsDist = length(ds);
+				if (dsDist < radius && dsDist > 1e-4f)
+				{
+					float3 sampleDirS = ds / dsDist;
+					float shc0 = dot(sampleDirS, viewDir);
+
+					// XeGTAO depth-aware falloff with thickness compensation
+					float falloffDist0 = length(float3(ds.xy, ds.z * 2.5f));
+					float weight0 = saturate(1.0f - falloffDist0 / radius);
+
+					shc0 = lerp(lowHorizonCos0, shc0, weight0);
+					horizonCos0 = max(horizonCos0, shc0);
+				}
+			}
+
+			// Negative direction (-dir)
+			if (depthT > 1e-4f)
+			{
+				float3 dt = GetViewPosition(projConstant, uvSlice.zw, depthT) - vPos;
+				float dtDist = length(dt);
+				if (dtDist < radius && dtDist > 1e-4f)
+				{
+					float3 sampleDirT = dt / dtDist;
+					float shc1 = dot(sampleDirT, viewDir);
+
+					// XeGTAO depth-aware falloff with thickness compensation
+					float falloffDist1 = length(float3(dt.xy, dt.z * 2.5f));
+					float weight1 = saturate(1.0f - falloffDist1 / radius);
+
+					shc1 = lerp(lowHorizonCos1, shc1, weight1);
+					horizonCos1 = max(horizonCos1, shc1);
+				}
+			}
+		}
+
+		float h0 = -acos(clamp(horizonCos1, -1.0f, 1.0f));
+		float h1 =  acos(clamp(horizonCos0, -1.0f, 1.0f));
+
+		// Clamp horizon angles to tangent plane
+		h0 = n + clamp(h0 - n, -HALF_PI, HALF_PI);
+		h1 = n + clamp(h1 - n, -HALF_PI, HALF_PI);
+
+		float bentAngle = (h0 + h1) * 0.5f;
 		bentNormalAcc += viewDir * cos(bentAngle) - tangent * sin(bentAngle);
 
-		// Analytical cosine-weighted visibility integral per slice [Jimenez 2016]
-		float arc0 = -cos(2.0f * clampedH.x - n) + cos(n) + 2.0f * clampedH.x * sin(n);
-		float arc1 = -cos(2.0f * clampedH.y - n) + cos(n) + 2.0f * clampedH.y * sin(n);
-		totalAO += projLength * (arc0 + arc1) * 0.25f;
+		// Analytical cosine-weighted visibility integral per slice [Jimenez 2016 / XeGTAO]
+		float arc0 = (cos_n + 2.0f * h0 * sin(n) - cos(2.0f * h0 - n)) * 0.25f;
+		float arc1 = (cos_n + 2.0f * h1 * sin(n) - cos(2.0f * h1 - n)) * 0.25f;
+		totalAO += projLength * (arc0 + arc1);
 	}
 
 	bentNormalAcc = normalize(normalize(bentNormalAcc) + viewNormal * 0.1f);
