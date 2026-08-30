@@ -130,8 +130,8 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 		float gamma = acos(cosGamma) * (dot(projN, sliceDirVS) < 0.0f ? -1.0f : 1.0f);
 
 		// Initialize horizon cos angles clamped to tangent plane
-		float cosH1 = -1.0f;
-		float cosH2 = -1.0f;
+		float h1 = gamma - HALF_PI;
+		float h2 = gamma + HALF_PI;
 
 		// March both positive and negative directions along slice
 		[unroll]
@@ -149,9 +149,11 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 				float lenSqP = dot(diffP, diffP);
 				if (lenSqP < maxRadius * maxRadius)
 				{
-					float cosAngle = dot(normalize(diffP), viewDir);
-					float falloff = GTAOFalloff(lenSqP, maxRadius);
-					cosH1 = max(cosH1, lerp(-1.0f, cosAngle, falloff));
+					float3 sampleDirP = normalize(diffP);
+					float angleP = acos(clamp(dot(sampleDirP, viewDir), -1.0f, 1.0f));
+					float falloffP = GTAOFalloff(lenSqP, maxRadius);
+					float sampleH2 = lerp(gamma + HALF_PI, angleP, falloffP);
+					h2 = min(h2, sampleH2);
 				}
 			}
 
@@ -165,22 +167,21 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 				float lenSqM = dot(diffM, diffM);
 				if (lenSqM < maxRadius * maxRadius)
 				{
-					float cosAngle = dot(normalize(diffM), viewDir);
-					float falloff = GTAOFalloff(lenSqM, maxRadius);
-					cosH2 = max(cosH2, lerp(-1.0f, cosAngle, falloff));
+					float3 sampleDirM = normalize(diffM);
+					float angleM = -acos(clamp(dot(sampleDirM, viewDir), -1.0f, 1.0f));
+					float falloffM = GTAOFalloff(lenSqM, maxRadius);
+					float sampleH1 = lerp(gamma - HALF_PI, angleM, falloffM);
+					h1 = max(h1, sampleH1);
 				}
 			}
 		}
 
-		float h1 = -acos(clamp(cosH1, -1.0f, 1.0f));
-		float h2 =  acos(clamp(cosH2, -1.0f, 1.0f));
+		// Clamp horizon to tangent plane
+		h1 = clamp(h1, gamma - HALF_PI, gamma + HALF_PI);
+		h2 = clamp(h2, gamma - HALF_PI, gamma + HALF_PI);
 
-		// Clamp horizon angles to tangent plane
-		h1 = gamma + max(h1 - gamma, -HALF_PI);
-		h2 = gamma + min(h2 - gamma,  HALF_PI);
-
-		// Integrate visibility arc
-		float arcAO = projNLen * (GTAO_IntegrateArc(h1, gamma) + GTAO_IntegrateArc(h2, gamma));
+		// Integrate visibility arc: F(h2) - F(h1)
+		float arcAO = projNLen * max(0.0f, GTAO_IntegrateArc(h2, gamma) - GTAO_IntegrateArc(h1, gamma));
 		totalAO += arcAO;
 
 		// Bent normal accumulation
@@ -194,8 +195,7 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 
 	float4 occlusion;
 	occlusion.xyz = bentNormalAcc * 0.5f + 0.5f;
-	occlusion.w = 1.0f - totalAO;
-	occlusion.w = pow(saturate(occlusion.w), mSSAOScale);
+	occlusion.w = pow(saturate(totalAO), mSSAOScale);
 
 	return occlusion;
 }
