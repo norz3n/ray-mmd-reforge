@@ -161,7 +161,7 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 	float3 sampleNormal = GetNormal(uv.xy);
 	float3 samplePosition = GetViewPosition(projConstant, samplePixel, centerDepth);
 
-#if AA_QUALITY == 6 || HBAO_TEMPORAL_DENOISE
+#if AA_QUALITY == 6 || AO_TEMPORAL_DENOISE
 	int frameCounter = (int)fmod(time * 60.0, 16.0);
 #else
 	int frameCounter = 0;
@@ -275,7 +275,7 @@ float4 ScreenSpaceDirOccBlurPS(
 	return total_c / total_w;
 }
 
-#if HBAO_TEMPORAL_DENOISE
+#if AO_TEMPORAL_DENOISE
 float4 SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0) : COLOR
 {
 	float curDepth = linearizeDepth(uv);

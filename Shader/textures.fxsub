@@ -500,7 +500,7 @@ sampler SSDOMapSampTemp = sampler_state {
 	AddressU = CLAMP;  AddressV = CLAMP;
 };
 
-#if HBAO_TEMPORAL_DENOISE
+#if AO_TEMPORAL_DENOISE
 texture SSDOMapHistory : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0, 1.0};
 	bool AntiAlias = false;
