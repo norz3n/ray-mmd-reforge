@@ -83,12 +83,17 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 	}
 
 	float4 projConstant = GetProjConstant();
-	float maxRadius = lerp(lerp(20.0f, 60.0f, mSSAORadiusP), 2.0f, mSSAORadiusM);
-
-	float2 samplePixel = uv.xy;
+	float3 vPos = GetViewPosition(projConstant, uv.xy, centerDepth);
 	float3 viewNormal = GetNormal(uv.xy);
-	float3 viewPosition = GetViewPosition(projConstant, samplePixel, centerDepth);
-	float3 viewDir = normalize(-viewPosition);
+	float3 viewDir = normalize(-vPos);
+
+	float radius = lerp(lerp(20.0f, 60.0f, mSSAORadiusP), 2.0f, mSSAORadiusM);
+	float thickness = 0.5f;
+
+	float projScale = ViewportSize.y * 0.5f * matProject._m11;
+	float maxRadiusPixels = mAmbientOcclusionMaxRadiusPixelPercentage * ViewportSize.y;
+	float stepRadius = max(min((radius * projScale) / max(centerDepth, 0.1f), maxRadiusPixels), (float)GTAO_STEPS_PER_SLICE);
+	stepRadius /= ((float)GTAO_STEPS_PER_SLICE + 1.0f);
 
 #if AA_QUALITY == 6 || HBAO_TEMPORAL_DENOISE
 	int frameCounter = (int)fmod(time * 60.0f, 16.0f);
@@ -96,106 +101,73 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 	int frameCounter = 0;
 #endif
 	float2 sampleRandom = float2(InterleavedGradientNoise(screen, frameCounter), PseudoRandom(screen + frameCounter));
+	float initialRayStep = frac(sampleRandom.y);
 
-	float projScale = ViewportSize.y * 0.5f * matProject._m11;
-	float maxRadiusPixels = mAmbientOcclusionMaxRadiusPixelPercentage * ViewportSize.y;
-	float radiusPixels = clamp((maxRadius * projScale) / max(viewPosition.z, 0.1f), (float)GTAO_STEPS_PER_SLICE, maxRadiusPixels);
-
-	float stepPixel = radiusPixels / (float)GTAO_STEPS_PER_SLICE;
 	float totalAO = 0.0f;
 	float3 bentNormalAcc = 0.0f;
-
 	float sliceAngleStep = PI / (float)GTAO_SLICE_COUNT;
 
 	[loop]
-	for (int slice = 0; slice < GTAO_SLICE_COUNT; ++slice)
+	for (int i = 0; i < GTAO_SLICE_COUNT; ++i)
 	{
-		float phi = (float(slice) + sampleRandom.x) * sliceAngleStep;
-		float2 dir2D = float2(cos(phi), sin(phi));
-		float2 stepUV = dir2D * (stepPixel * ViewportOffset2);
+		float angle = (float(i) + sampleRandom.x) * sliceAngleStep;
+		float3 sliceDir = float3(cos(angle), sin(angle), 0.0f);
+		float2 sliceDirUV = sliceDir.xy * ViewportOffset2;
 
-		// Project normal into current slice plane
-		float3 sliceDirVS = normalize(float3(dir2D.x, dir2D.y, 0.0f));
-		float3 sliceNormal = cross(sliceDirVS, viewDir);
-		float3 projN = viewNormal - sliceNormal * dot(viewNormal, sliceNormal);
-		float projNLen = length(projN);
+		float2 h = -1.0f;
 
-		if (projNLen < 1e-4f)
-			continue;
-
-		projN /= projNLen;
-
-		// Angle gamma between projected normal and view direction in slice plane
-		float cosGamma = clamp(dot(projN, viewDir), -1.0f, 1.0f);
-		float gamma = acos(cosGamma) * (dot(projN, sliceDirVS) < 0.0f ? -1.0f : 1.0f);
-
-		// Initialize horizon cos angles clamped to tangent plane
-		float h1 = gamma - HALF_PI;
-		float h2 = gamma + HALF_PI;
-
-		// March both positive and negative directions along slice
 		[unroll]
-		for (int s = 1; s <= GTAO_STEPS_PER_SLICE; ++s)
+		for (int j = 0; j < GTAO_STEPS_PER_SLICE; ++j)
 		{
-			float stepDist = (float(s) - 0.5f + sampleRandom.y * 0.5f);
-			
-			// Positive direction (+dir)
-			float2 uvP = samplePixel + stepUV * stepDist;
-			float depthP = linearizeDepth(uvP);
-			if (depthP > 1e-4f)
-			{
-				float3 posP = GetViewPosition(projConstant, uvP, depthP);
-				float3 diffP = posP - viewPosition;
-				float lenSqP = dot(diffP, diffP);
-				if (lenSqP < maxRadius * maxRadius)
-				{
-					float3 sampleDirP = normalize(diffP);
-					float angleP = acos(clamp(dot(sampleDirP, viewDir), -1.0f, 1.0f));
-					float falloffP = GTAOFalloff(lenSqP, maxRadius);
-					float sampleH2 = lerp(gamma + HALF_PI, angleP, falloffP);
-					h2 = min(h2, sampleH2);
-				}
-			}
+			float2 uvOffset = sliceDirUV * max(stepRadius * (float(j) + initialRayStep), 1.0f + float(j));
+			float4 uvSlice = uv.xyxy + float4(uvOffset, -uvOffset);
 
-			// Negative direction (-dir)
-			float2 uvM = samplePixel - stepUV * stepDist;
-			float depthM = linearizeDepth(uvM);
-			if (depthM > 1e-4f)
-			{
-				float3 posM = GetViewPosition(projConstant, uvM, depthM);
-				float3 diffM = posM - viewPosition;
-				float lenSqM = dot(diffM, diffM);
-				if (lenSqM < maxRadius * maxRadius)
-				{
-					float3 sampleDirM = normalize(diffM);
-					float angleM = -acos(clamp(dot(sampleDirM, viewDir), -1.0f, 1.0f));
-					float falloffM = GTAOFalloff(lenSqM, maxRadius);
-					float sampleH1 = lerp(gamma - HALF_PI, angleM, falloffM);
-					h1 = max(h1, sampleH1);
-				}
-			}
+			float depthS = linearizeDepth(uvSlice.xy);
+			float depthT = linearizeDepth(uvSlice.zw);
+
+			float3 ds = (depthS > 1e-4f) ? (GetViewPosition(projConstant, uvSlice.xy, depthS) - vPos) : float3(0, 0, 999);
+			float3 dt = (depthT > 1e-4f) ? (GetViewPosition(projConstant, uvSlice.zw, depthT) - vPos) : float3(0, 0, 999);
+
+			float2 dsdtSq = float2(dot(ds, ds), dot(dt, dt));
+			float2 dsdtInvLen = rsqrt(max(dsdtSq, 1e-6f));
+
+			float2 falloff = saturate(dsdtSq * (2.0f / max(radius * radius, 1e-4f)));
+			float2 H = float2(dot(ds, viewDir), dot(dt, viewDir)) * dsdtInvLen;
+
+			h.x = (H.x > h.x) ? lerp(H.x, h.x, falloff.x) : lerp(H.x, h.x, thickness);
+			h.y = (H.y > h.y) ? lerp(H.y, h.y, falloff.y) : lerp(H.y, h.y, thickness);
 		}
 
-		// Clamp horizon to tangent plane
-		h1 = clamp(h1, gamma - HALF_PI, gamma + HALF_PI);
-		h2 = clamp(h2, gamma - HALF_PI, gamma + HALF_PI);
+		float3 planeNormal = normalize(cross(sliceDir, viewDir));
+		float3 tangent = cross(viewDir, planeNormal);
+		float3 projectedNormal = viewNormal - planeNormal * dot(viewNormal, planeNormal);
+		float projLength = length(projectedNormal);
 
-		// Integrate visibility arc: F(h2) - F(h1)
-		float arcAO = projNLen * max(0.0f, GTAO_IntegrateArc(h2, gamma) - GTAO_IntegrateArc(h1, gamma));
-		totalAO += arcAO;
+		if (projLength < 1e-4f)
+			continue;
 
-		// Bent normal accumulation
-		float midAngle = (h1 + h2) * 0.5f;
-		float3 sliceBent = normalize(viewDir * cos(midAngle) + sliceDirVS * sin(midAngle));
-		bentNormalAcc += sliceBent * arcAO;
+		float cos_n = clamp(dot(projectedNormal / projLength, viewDir), -1.0f, 1.0f);
+		float n = -sign(dot(projectedNormal, tangent)) * acos(cos_n);
+
+		float2 clampedH = acos(clamp(h, -1.0f, 1.0f));
+		clampedH.x = n + max(-clampedH.x - n, -HALF_PI);
+		clampedH.y = n + min(clampedH.y - n,  HALF_PI);
+
+		float bentAngle = (clampedH.x + clampedH.y) * 0.5f;
+		bentNormalAcc += viewDir * cos(bentAngle) - tangent * sin(bentAngle);
+
+		// Analytical cosine-weighted visibility integral per slice [Jimenez 2016]
+		float arc0 = -cos(2.0f * clampedH.x - n) + cos(n) + 2.0f * clampedH.x * sin(n);
+		float arc1 = -cos(2.0f * clampedH.y - n) + cos(n) + 2.0f * clampedH.y * sin(n);
+		totalAO += projLength * (arc0 + arc1) * 0.25f;
 	}
 
+	bentNormalAcc = normalize(normalize(bentNormalAcc) + viewNormal * 0.1f);
 	totalAO = saturate(totalAO / (float)GTAO_SLICE_COUNT);
-	bentNormalAcc = normalize(bentNormalAcc + viewNormal * 0.1f);
 
 	float4 occlusion;
 	occlusion.xyz = bentNormalAcc * 0.5f + 0.5f;
-	occlusion.w = pow(saturate(totalAO), mSSAOScale);
+	occlusion.w = pow(totalAO, mSSAOScale);
 
 	return occlusion;
 }
