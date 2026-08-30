@@ -102,17 +102,17 @@ void ShadingImageBasedLighting(sampler source, MaterialParam material, float4 sc
 #if SUN_LIGHT_ENABLE && SUN_SHADOW_QUALITY
 	float shadowDepth = tex2Dlod(ShadowMapSamp, float4(coord, 0, 0)).r;
 	shadowDepth = min(shadowDepth, saturate(dot(material.normal, L) * 3));
-	shadow = lerp(shadowDepth, 1, envShadow);
+	shadow = lerp(shadow, shadowDepth, envShadow);
 #endif
 
-	diffuse *= (material.lightModel == SHADINGMODELID_CEL || material.lightModel == SHADINGMODELID_TONEBASED) ? 1.0f : shadow;
-	specular *= shadow;
+	diffuse *= shadow;
+	specular *= shadow * shadow * shadow;
 
 #if TOON_ENABLE
 	if (material.lightModel == SHADINGMODELID_CEL || material.lightModel == SHADINGMODELID_TONEBASED)
 	{
 		float luma = dot(diffuse, float3(0.299f, 0.587f, 0.114f));
-		diffuse = (luma > 1e-4f) ? diffuse * ((floor(luma * 2.0f + 0.5f) / 2.0f) / max(luma, 1e-4f)) : diffuse;
+		diffuse *= floor(luma * 2.0f + 0.5f) / max(luma * 2.0f, 1e-4f);
 	}
 #endif
 #endif
@@ -125,13 +125,12 @@ void ShadingOpacityPS(
 	out float4 oColor0 : COLOR0,
 	out float4 oColor1 : COLOR1)
 {
-	float4 MRT8 = tex2Dlod(Gbuffer8Map, float4(coord, 0, 0));
-	clip(MRT8.x - 1e-5);
+	float4 MRT4 = tex2Dlod(Gbuffer4Map, float4(coord, 0, 0));
+	clip(MRT4.x - 1e-5);
 
 	float4 MRT1 = tex2Dlod(Gbuffer1Map, float4(coord, 0, 0));
 	float4 MRT2 = tex2Dlod(Gbuffer2Map, float4(coord, 0, 0));
 	float4 MRT3 = tex2Dlod(Gbuffer3Map, float4(coord, 0, 0));
-	float4 MRT4 = tex2Dlod(Gbuffer4Map, float4(coord, 0, 0));
 
 	MaterialParam material;
 	DecodeGbuffer(MRT1, MRT2, MRT3, MRT4, material);
@@ -163,7 +162,7 @@ void ShadingOpacityPS(
 #endif
 
 #if SSSS_QUALITY // Fix white edge
-	float lightModel = DecodeLightModel(tex2Dlod(Gbuffer8Map, float4(coord, 0, 0)));
+	float lightModel = DecodeLightModel(MRT4);
 	material.linearDepth *= any(lightModel == SHADINGMODELID_SKIN || lightModel == SHADINGMODELID_SUBSURFACE);
 
 	oColor0 = float4(diffuse, material.linearDepth);
