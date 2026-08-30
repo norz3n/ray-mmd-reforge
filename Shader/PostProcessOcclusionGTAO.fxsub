@@ -1,44 +1,53 @@
 /*
- * PostProcessOcclusionGTAO.fxsub - Ground-Truth Ambient Occlusion (GTAO)
+ * PostProcessOcclusionGTAO.fxsub - Ground-Truth Ambient Occlusion (XeGTAO)
  *
- * Based on Jorge Jimenez / Activision GTAO (Practical Real-Time Strategies for Accurate Ambient Occlusion).
- * Computes exact cosine-weighted horizon integrals per slice with projective normal weighting,
- * directional bent normal accumulation, and normal-plane bilateral filtering.
+ * Based on Intel XeGTAO / Jorge Jimenez (Activision) Ground-Truth Ambient Occlusion.
+ * Features:
+ * - Cosine-weighted analytical horizon integration per slice with projective normal weighting
+ * - Exact directional bent normal accumulation (Jimenez 2016 / XeGTAO Algorithm 2)
+ * - Depth-aware thickness heuristic falloff preventing character silhouette halos
+ * - Slope-compensated bilateral cross-filtering with scale-invariant depth & normal rejection
+ * - Temporal reprojection denoiser with neighborhood box clamping
  */
 
 #if SSDO_QUALITY == 1
 #	define GTAO_SLICE_COUNT 2
 #	define GTAO_STEPS_PER_SLICE 4
-#	define SSDO_BLUR_RADIUS 6
+#	define SSDO_BLUR_RADIUS 4
 #elif SSDO_QUALITY == 2
 #	define GTAO_SLICE_COUNT 3
-#	define GTAO_STEPS_PER_SLICE 6
+#	define GTAO_STEPS_PER_SLICE 4
 #	define SSDO_BLUR_RADIUS 6
 #elif SSDO_QUALITY == 3
 #	define GTAO_SLICE_COUNT 4
-#	define GTAO_STEPS_PER_SLICE 8
+#	define GTAO_STEPS_PER_SLICE 6
 #	define SSDO_BLUR_RADIUS 6
 #elif SSDO_QUALITY == 4
 #	define GTAO_SLICE_COUNT 6
-#	define GTAO_STEPS_PER_SLICE 8
+#	define GTAO_STEPS_PER_SLICE 6
 #	define SSDO_BLUR_RADIUS 6
 #elif SSDO_QUALITY == 5
 #	define GTAO_SLICE_COUNT 8
-#	define GTAO_STEPS_PER_SLICE 10
+#	define GTAO_STEPS_PER_SLICE 8
 #	define SSDO_BLUR_RADIUS 6
 #elif SSDO_QUALITY == 6
 #	define GTAO_SLICE_COUNT 12
-#	define GTAO_STEPS_PER_SLICE 12
+#	define GTAO_STEPS_PER_SLICE 8
 #	define SSDO_BLUR_RADIUS 6
 #else
-#	define GTAO_SLICE_COUNT 4
-#	define GTAO_STEPS_PER_SLICE 6
+#	define GTAO_SLICE_COUNT 3
+#	define GTAO_STEPS_PER_SLICE 4
 #	define SSDO_BLUR_RADIUS 6
 #endif
 
 #ifndef HALF_PI
 #	define HALF_PI 1.57079632679f
 #endif
+
+#define XE_GTAO_DEFAULT_RADIUS_MULTIPLIER          1.457f
+#define XE_GTAO_DEFAULT_FALLOFF_RANGE              0.615f
+#define XE_GTAO_DEFAULT_SAMPLE_DISTRIBUTION_POWER  2.0f
+#define XE_GTAO_DEFAULT_THIN_OCCLUDER_COMPENSATION 0.35f
 
 float linearizeDepth(float2 uv)
 {
@@ -51,15 +60,28 @@ float3 GetNormal(float2 uv)
 	return DecodeGBufferNormal(MRT6);
 }
 
-float GTAOFalloff(float distSq, float maxRadius)
+// Builds rotation matrix from (0,0,-1) to viewVec [Jimenez 2016 / XeGTAO]
+float3x3 XeGTAO_RotFromToMatrix(float3 from, float3 to)
 {
-	return saturate(1.0f - distSq / max(maxRadius * maxRadius, 1e-4f));
-}
+	float e = dot(from, to);
+	float f = abs(e);
+	if (f > 0.9997f)
+	{
+		return float3x3(1, 0, 0, 0, 1, 0, 0, 0, 1);
+	}
+	float3 v = cross(from, to);
+	float h = 1.0f / (1.0f + e);
+	float hvx = h * v.x;
+	float hvz = h * v.z;
+	float hvxy = hvx * v.y;
+	float hvxz = hvx * v.z;
+	float hvyz = hvz * v.y;
 
-// Exact analytical cosine-weighted horizon integral for a single side [Jimenez 2016]
-float GTAO_IntegrateArc(float h, float gamma)
-{
-	return 0.25f * (-cos(2.0f * h - gamma) + cos(gamma) + 2.0f * h * sin(gamma));
+	float3x3 mtx;
+	mtx[0] = float3(e + hvx * v.x, hvxy - v.z, hvxz + v.y);
+	mtx[1] = float3(hvxy + v.z, e + h * v.y * v.y, hvyz - v.x);
+	mtx[2] = float3(hvxz - v.y, hvyz + v.x, e + hvz * v.z);
+	return mtx;
 }
 
 float4 ScreenSpaceDirOccPassVS(
@@ -85,16 +107,22 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 	float4 projConstant = GetProjConstant();
 	float3 vPos = GetViewPosition(projConstant, uv.xy, centerDepth);
 	float3 viewNormal = GetNormal(uv.xy);
-	float3 viewDir = normalize(-vPos);
+	float3 viewVec = normalize(-vPos);
 
-	// Calibrated radius scale for MMD unit dimensions (~10-15 units character height)
-	float radius = lerp(lerp(6.0f, 20.0f, mSSAORadiusP), 0.8f, mSSAORadiusM);
-	float thickness = 0.5f;
+	// Stabilize silhouette grazing-angle normals to prevent sign-flipping and terminator black speckles
+	viewNormal = normalize(viewNormal + max(0.0f, 0.08f - dot(viewNormal, viewVec)) * viewVec);
+
+	// Calibrated world-space radius for MMD scale (character height ~15-20 units)
+	float baseRadius = lerp(lerp(1.5f, 3.5f, mSSAORadiusP), 0.5f, mSSAORadiusM);
+	float effectRadius = baseRadius;
 
 	float projScale = ViewportSize.y * 0.5f * matProject._m11;
 	float maxRadiusPixels = mAmbientOcclusionMaxRadiusPixelPercentage * ViewportSize.y;
-	float stepRadius = max(min((radius * projScale) / max(centerDepth, 0.1f), maxRadiusPixels), (float)GTAO_STEPS_PER_SLICE);
-	stepRadius /= ((float)GTAO_STEPS_PER_SLICE + 1.0f);
+	float screenspaceRadius = clamp((effectRadius * projScale) / max(centerDepth, 0.1f), (float)GTAO_STEPS_PER_SLICE, maxRadiusPixels);
+
+	// Avoid sampling center pixel / acne
+	const float pixelTooCloseThreshold = 1.3f;
+	float minS = pixelTooCloseThreshold / max(screenspaceRadius, 1e-4f);
 
 #if AA_QUALITY == 6 || AO_TEMPORAL_DENOISE
 	int frameCounter = (int)fmod(time * 60.0f, 16.0f);
@@ -102,29 +130,39 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 	int frameCounter = 0;
 #endif
 	float2 sampleRandom = float2(InterleavedGradientNoise(screen, frameCounter), PseudoRandom(screen + frameCounter));
-	float initialRayStep = frac(sampleRandom.y);
+	float noiseSlice = sampleRandom.x;
+	float noiseSample = sampleRandom.y;
 
-	float totalAO = 0.0f;
+	float totalVisibility = 0.0f;
 	float3 bentNormalAcc = 0.0f;
 	float sliceAngleStep = PI / (float)GTAO_SLICE_COUNT;
+
+	float maxThickness = max(0.35f, effectRadius * 0.25f);
+	float maxBehind = effectRadius * 0.75f;
 
 	[loop]
 	for (int i = 0; i < GTAO_SLICE_COUNT; ++i)
 	{
-		float angle = (float(i) + sampleRandom.x) * sliceAngleStep;
-		float3 sliceDir = float3(cos(angle), sin(angle), 0.0f);
-		float2 sliceDirUV = sliceDir.xy * ViewportOffset2;
+		float phi = (float(i) + noiseSlice) * sliceAngleStep;
+		float cosPhi = cos(phi);
+		float sinPhi = sin(phi);
 
-		float3 planeNormal = normalize(cross(sliceDir, viewDir));
-		float3 tangent = cross(viewDir, planeNormal);
-		float3 projectedNormal = viewNormal - planeNormal * dot(viewNormal, planeNormal);
-		float projLength = length(projectedNormal);
+		float2 omega = float2(cosPhi, -sinPhi) * screenspaceRadius;
+		float3 directionVec = float3(cosPhi, sinPhi, 0.0f);
 
+		// XeGTAO slice plane projection (orthoDirectionVec & axisVec)
+		float3 orthoDirectionVec = directionVec - dot(directionVec, viewVec) * viewVec;
+		float3 axisVec = normalize(cross(orthoDirectionVec, viewVec));
+		float3 projectedNormalVec = viewNormal - axisVec * dot(viewNormal, axisVec);
+
+		float projLength = length(projectedNormalVec);
 		if (projLength < 1e-4f)
 			continue;
 
-		float cos_n = clamp(dot(projectedNormal / projLength, viewDir), -1.0f, 1.0f);
-		float n = -sign(dot(projectedNormal, tangent)) * acos(cos_n);
+		float dotOrtho = dot(orthoDirectionVec, projectedNormalVec);
+		float signNorm = (abs(dotOrtho) > 1e-4f) ? sign(dotOrtho) : 0.0f;
+		float cosNorm = saturate(dot(projectedNormalVec, viewVec) / projLength);
+		float n = signNorm * acos(cosNorm);
 
 		// Tangent plane lower horizon cosine bounds (zero occlusion)
 		float lowHorizonCos0 = cos(n + HALF_PI);
@@ -136,82 +174,116 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 		[unroll]
 		for (int j = 0; j < GTAO_STEPS_PER_SLICE; ++j)
 		{
-			float stepScale = pow((float(j) + initialRayStep) / (float)GTAO_STEPS_PER_SLICE, 1.25f);
-			float2 uvOffset = sliceDirUV * max(stepRadius * stepScale * (float)GTAO_STEPS_PER_SLICE, 1.0f + float(j));
-			float4 uvSlice = uv.xyxy + float4(uvOffset, -uvOffset);
+			// Low-discrepancy R1 sequence noise per step
+			float stepBaseNoise = float(i + j * GTAO_STEPS_PER_SLICE) * 0.6180339887498948482f;
+			float stepNoise = frac(noiseSample + stepBaseNoise);
 
-			float depthS = linearizeDepth(uvSlice.xy);
-			float depthT = linearizeDepth(uvSlice.zw);
+			float s = (float(j) + stepNoise) / (float)GTAO_STEPS_PER_SLICE;
+			s = pow(s, XE_GTAO_DEFAULT_SAMPLE_DISTRIBUTION_POWER) + minS;
+
+			float2 sampleOffset = s * omega * ViewportOffset2;
+			float2 sampleScreenPos0 = uv.xy + sampleOffset;
+			float2 sampleScreenPos1 = uv.xy - sampleOffset;
+
+			float depth0 = linearizeDepth(sampleScreenPos0);
+			float depth1 = linearizeDepth(sampleScreenPos1);
 
 			// Positive direction (+dir)
-			if (depthS > 1e-4f)
+			if (depth0 > 1e-4f)
 			{
-				float3 ds = GetViewPosition(projConstant, uvSlice.xy, depthS) - vPos;
-				float dsDist = length(ds);
-				if (dsDist < radius && dsDist > 1e-4f)
+				float3 samplePos0 = GetViewPosition(projConstant, sampleScreenPos0, depth0);
+				float3 sampleDelta0 = samplePos0 - vPos;
+				float sampleDist0 = length(sampleDelta0);
+
+				if (sampleDist0 > 1e-4f && sampleDist0 < effectRadius)
 				{
-					float3 sampleDirS = ds / dsDist;
-					float shc0 = dot(sampleDirS, viewDir);
+					float3 sampleHorizonVec0 = sampleDelta0 / sampleDist0;
+					float falloffWeight0 = saturate(1.0f - (sampleDist0 / effectRadius) * (sampleDist0 / effectRadius));
 
-					// XeGTAO depth-aware falloff with thickness compensation
-					float falloffDist0 = length(float3(ds.xy, ds.z * 2.5f));
-					float weight0 = saturate(1.0f - falloffDist0 / radius);
+					// Strict thickness heuristic: ignore foreground/background objects separated in depth (eliminates dark halos)
+					float distInFront0 = max(0.0f, -sampleDelta0.z);
+					float thicknessWeight0 = saturate(1.0f - max(0.0f, distInFront0 - maxThickness * 0.2f) / maxThickness);
+					float distBehind0 = max(0.0f, sampleDelta0.z);
+					float behindWeight0 = saturate(1.0f - distBehind0 / maxBehind);
 
+					float weight0 = falloffWeight0 * thicknessWeight0 * behindWeight0;
+
+					float shc0 = dot(sampleHorizonVec0, viewVec);
 					shc0 = lerp(lowHorizonCos0, shc0, weight0);
 					horizonCos0 = max(horizonCos0, shc0);
 				}
 			}
 
 			// Negative direction (-dir)
-			if (depthT > 1e-4f)
+			if (depth1 > 1e-4f)
 			{
-				float3 dt = GetViewPosition(projConstant, uvSlice.zw, depthT) - vPos;
-				float dtDist = length(dt);
-				if (dtDist < radius && dtDist > 1e-4f)
+				float3 samplePos1 = GetViewPosition(projConstant, sampleScreenPos1, depth1);
+				float3 sampleDelta1 = samplePos1 - vPos;
+				float sampleDist1 = length(sampleDelta1);
+
+				if (sampleDist1 > 1e-4f && sampleDist1 < effectRadius)
 				{
-					float3 sampleDirT = dt / dtDist;
-					float shc1 = dot(sampleDirT, viewDir);
+					float3 sampleHorizonVec1 = sampleDelta1 / sampleDist1;
+					float falloffWeight1 = saturate(1.0f - (sampleDist1 / effectRadius) * (sampleDist1 / effectRadius));
 
-					// XeGTAO depth-aware falloff with thickness compensation
-					float falloffDist1 = length(float3(dt.xy, dt.z * 2.5f));
-					float weight1 = saturate(1.0f - falloffDist1 / radius);
+					// Strict thickness heuristic: ignore foreground/background objects separated in depth (eliminates dark halos)
+					float distInFront1 = max(0.0f, -sampleDelta1.z);
+					float thicknessWeight1 = saturate(1.0f - max(0.0f, distInFront1 - maxThickness * 0.2f) / maxThickness);
+					float distBehind1 = max(0.0f, sampleDelta1.z);
+					float behindWeight1 = saturate(1.0f - distBehind1 / maxBehind);
 
+					float weight1 = falloffWeight1 * thicknessWeight1 * behindWeight1;
+
+					float shc1 = dot(sampleHorizonVec1, viewVec);
 					shc1 = lerp(lowHorizonCos1, shc1, weight1);
 					horizonCos1 = max(horizonCos1, shc1);
 				}
 			}
 		}
 
-		float h0 = -acos(clamp(horizonCos1, -1.0f, 1.0f));
-		float h1 =  acos(clamp(horizonCos0, -1.0f, 1.0f));
+		// Grazing angle over-darkening compensation fudge [XeGTAO]
+		projLength = lerp(projLength, 1.0f, 0.05f);
 
-		// Clamp horizon angles to tangent plane
+		horizonCos0 = clamp(horizonCos0, -1.0f, 1.0f);
+		horizonCos1 = clamp(horizonCos1, -1.0f, 1.0f);
+
+		float h0 = -acos(horizonCos1);
+		float h1 =  acos(horizonCos0);
+
+		// Clamp horizon angles to tangent plane to prevent overshoot
 		h0 = n + clamp(h0 - n, -HALF_PI, HALF_PI);
 		h1 = n + clamp(h1 - n, -HALF_PI, HALF_PI);
 
-		float bentAngle = (h0 + h1) * 0.5f;
-		bentNormalAcc += viewDir * cos(bentAngle) - tangent * sin(bentAngle);
+		// XeGTAO / Jimenez analytical slice visibility integral
+		float iarc0 = (cosNorm + 2.0f * h0 * sin(n) - cos(2.0f * h0 - n)) * 0.25f;
+		float iarc1 = (cosNorm + 2.0f * h1 * sin(n) - cos(2.0f * h1 - n)) * 0.25f;
+		float localVisibility = projLength * (iarc0 + iarc1);
+		totalVisibility += localVisibility;
 
-		// Analytical cosine-weighted visibility integral per slice [Jimenez 2016 / XeGTAO]
-		float arc0 = (cos_n + 2.0f * h0 * sin(n) - cos(2.0f * h0 - n)) * 0.25f;
-		float arc1 = (cos_n + 2.0f * h1 * sin(n) - cos(2.0f * h1 - n)) * 0.25f;
-		
-		// Normalize by the theoretical unoccluded horizon integral of this slice
-		float maxSliceArc = max((cos_n + n * sin(n)) * 0.5f, 1e-4f);
-		float sliceVisibility = saturate((arc0 + arc1) / maxSliceArc);
-		totalAO += sliceVisibility;
+		// Exact analytical bent normal integral [Jimenez 2016 / XeGTAO Algorithm 2]
+		float t0 = (6.0f * sin(h0 - n) - sin(3.0f * h0 - n) + 6.0f * sin(h1 - n) - sin(3.0f * h1 - n) + 16.0f * sin(n) - 3.0f * (sin(h0 + n) + sin(h1 + n))) * (1.0f / 12.0f);
+		float t1 = (-cos(3.0f * h0 - n) - cos(3.0f * h1 - n) + 8.0f * cos(n) - 3.0f * (cos(h0 + n) + cos(h1 + n))) * (1.0f / 12.0f);
+		float3 localBentNormal = float3(directionVec.x * t0, directionVec.y * t0, -t1);
+
+		float3x3 rotMat = XeGTAO_RotFromToMatrix(float3(0.0f, 0.0f, -1.0f), viewVec);
+		bentNormalAcc += mul(rotMat, localBentNormal) * projLength;
 	}
 
-	bentNormalAcc = normalize(normalize(bentNormalAcc) + viewNormal * 0.1f);
-	totalAO = saturate(totalAO / (float)GTAO_SLICE_COUNT);
+	totalVisibility /= (float)GTAO_SLICE_COUNT;
+	totalVisibility = clamp(totalVisibility, 0.03f, 1.0f);
+
+	if (length(bentNormalAcc) > 1e-4f)
+		bentNormalAcc = normalize(bentNormalAcc);
+	else
+		bentNormalAcc = viewNormal;
 
 	// Modulate AO by material-level SSAOVisibility mask: 0.0 means 0% AO (100% visible)
 	float ssaoMask = tex2Dlod(SSAOMapSamp, float4(uv.xy, 0, 0)).a;
-	totalAO = lerp(1.0f, totalAO, ssaoMask);
+	totalVisibility = lerp(1.0f, totalVisibility, ssaoMask);
 
 	float4 occlusion;
 	occlusion.xyz = bentNormalAcc * 0.5f + 0.5f;
-	occlusion.w = lerp(1.0f, pow(totalAO, max(mSSAOScale, 1e-3f)), step(1e-4f, mSSAOScale));
+	occlusion.w = lerp(1.0f, pow(totalVisibility, max(mSSAOScale, 1e-3f)), step(1e-4f, mSSAOScale));
 
 	return occlusion;
 }
@@ -222,69 +294,87 @@ float4 ScreenSpaceDirOccBlurPS(
 	uniform sampler source,
 	uniform float2 offset) : COLOR
 {
-	float center_d = linearizeDepth(uv);
-	if (center_d <= 1e-4f)
+	float centerDepth = linearizeDepth(uv);
+	if (centerDepth <= 1e-4f)
 	{
 		return float4(0.5f, 0.5f, 0.5f, 1.0f);
 	}
 
 	float4 projConstant = GetProjConstant();
-	float total_w = 1.0f;
-	float4 total_c = tex2Dlod(source, float4(uv, 0, 0));
+	float3 centerNormal = GetNormal(uv);
+	float4 centerColor = tex2Dlod(source, float4(uv, 0, 0));
+	float totalWeight = 1.0f;
+	float4 totalColor = centerColor;
 
-	float3 normal = GetNormal(uv);
-	float3 center_pos = GetViewPosition(projConstant, uv, center_d);
+	// Scale-invariant depth tolerance for smooth surface reconstruction without edge bleeding
+	float depthTolerance = max(centerDepth * 0.035f, 0.015f);
 
 	float blurSigma = SSDO_BLUR_RADIUS * 0.5f;
-	float blurFalloff = 1.0f / (2.0f * blurSigma * blurSigma);
+	float spatialFalloff = 1.0f / (2.0f * blurSigma * blurSigma);
 
 	[unroll]
 	for (int r = 1; r <= SSDO_BLUR_RADIUS; ++r)
 	{
-		float2 uv_offset = offset * (float)r;
-		float spatial_w = exp(-float(r * r) * blurFalloff);
+		float spatialWeight = exp(-float(r * r) * spatialFalloff);
+		float2 uvOffset = offset * (float)r;
 
-		// Forward tap
-		float2 uv_p = uv + uv_offset;
-		float depth_p = linearizeDepth(uv_p);
-		if (depth_p > 1e-4f)
+		// --- Forward tap (+r) ---
+		float2 uvP = uv + uvOffset;
+		float depthP = linearizeDepth(uvP);
+		if (depthP > 1e-4f)
 		{
-			float3 pos_p = GetViewPosition(projConstant, uv_p, depth_p);
-			float3 diff = pos_p - center_pos;
-			float planeDist = dot(normal, diff);
-			float range_w = exp(-planeDist * planeDist * 20.0f) * saturate(dot(normal, GetNormal(uv_p)));
-			float w = spatial_w * range_w;
-			total_c += tex2Dlod(source, float4(uv_p, 0, 0)) * w;
-			total_w += w;
+			float3 normP = GetNormal(uvP);
+			float depthDeltaP = abs(depthP - centerDepth);
+			float depthWeightP = exp(-pow2(depthDeltaP / depthTolerance));
+			float normalWeightP = saturate(dot(centerNormal, normP));
+
+			float wP = spatialWeight * depthWeightP * normalWeightP;
+			totalColor += tex2Dlod(source, float4(uvP, 0, 0)) * wP;
+			totalWeight += wP;
 		}
 
-		// Backward tap
-		float2 uv_m = uv - uv_offset;
-		float depth_m = linearizeDepth(uv_m);
-		if (depth_m > 1e-4f)
+		// --- Backward tap (-r) ---
+		float2 uvM = uv - uvOffset;
+		float depthM = linearizeDepth(uvM);
+		if (depthM > 1e-4f)
 		{
-			float3 pos_m = GetViewPosition(projConstant, uv_m, depth_m);
-			float3 diff = pos_m - center_pos;
-			float planeDist = dot(normal, diff);
-			float range_w = exp(-planeDist * planeDist * 20.0f) * saturate(dot(normal, GetNormal(uv_m)));
-			float w = spatial_w * range_w;
-			total_c += tex2Dlod(source, float4(uv_m, 0, 0)) * w;
-			total_w += w;
+			float3 normM = GetNormal(uvM);
+			float depthDeltaM = abs(depthM - centerDepth);
+			float depthWeightM = exp(-pow2(depthDeltaM / depthTolerance));
+			float normalWeightM = saturate(dot(centerNormal, normM));
+
+			float wM = spatialWeight * depthWeightM * normalWeightM;
+			totalColor += tex2Dlod(source, float4(uvM, 0, 0)) * wM;
+			totalWeight += wM;
 		}
 	}
 
-	return total_c / total_w;
+	float4 blurred = totalColor / totalWeight;
+	if (length(blurred.xyz * 2.0f - 1.0f) > 1e-4f)
+	{
+		blurred.xyz = normalize(blurred.xyz * 2.0f - 1.0f) * 0.5f + 0.5f;
+	}
+	return blurred;
 }
 
 #if AO_TEMPORAL_DENOISE
-float4 SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0) : COLOR
+struct SSDOTemporalOutput
 {
+	float4 color0 : COLOR0;
+	float4 color1 : COLOR1;
+};
+
+SSDOTemporalOutput SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0)
+{
+	SSDOTemporalOutput output;
 	float curDepth = linearizeDepth(uv);
 	float4 curAO = tex2Dlod(SSDOMapSamp, float4(uv, 0, 0));
 
 	if (curDepth > 999.0f || curDepth <= 1e-4f)
 	{
-		return curAO;
+		output.color0 = curAO;
+		output.color1 = curAO;
+		return output;
 	}
 
 	float4 projInfo = GetProjConstant();
@@ -297,13 +387,17 @@ float4 SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0) : COLOR
 
 	if (any(prevUV < 0.0f) || any(prevUV > 1.0f))
 	{
-		return curAO;
+		output.color0 = curAO;
+		output.color1 = curAO;
+		return output;
 	}
 
 	float prevDepth = linearizeDepth(prevUV);
-	if (abs(prevDepth - curDepth) > max(0.2f, curDepth * 0.06f))
+	if (abs(prevDepth - curDepth) > max(0.15f, curDepth * 0.04f))
 	{
-		return curAO;
+		output.color0 = curAO;
+		output.color1 = curAO;
+		return output;
 	}
 
 	float4 historyAO = tex2Dlod(SSDOMapHistorySamp, float4(prevUV, 0, 0));
@@ -331,7 +425,10 @@ float4 SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0) : COLOR
 	float4 boxMargin = (maxAO - minAO) * 0.25f;
 	historyAO = clamp(historyAO, minAO - boxMargin, maxAO + boxMargin);
 
-	return lerp(curAO, historyAO, 0.85f);
+	float4 denoised = lerp(curAO, historyAO, 0.85f);
+	output.color0 = denoised;
+	output.color1 = denoised;
+	return output;
 }
 
 float4 SSDOCopyTemporalPS(in float2 uv : TEXCOORD0) : COLOR
@@ -339,3 +436,4 @@ float4 SSDOCopyTemporalPS(in float2 uv : TEXCOORD0) : COLOR
 	return tex2Dlod(SSDOMapSampTemp, float4(uv, 0, 0));
 }
 #endif
+

@@ -234,7 +234,7 @@ float4 ScreenSpaceDirOccBlurPS(
 	float4 total_c = tex2Dlod(source, float4(uv, 0, 0));
 
 	float3 normal = GetNormal(uv);
-	float3 center_pos = GetViewPosition(projConstant, uv, center_d);
+	float depthTolerance = max(center_d * 0.035f, 0.015f);
 
 	float blurSigma = SSDO_BLUR_RADIUS * 0.5f;
 	float blurFalloff = 1.0f / (2.0f * blurSigma * blurSigma);
@@ -245,45 +245,62 @@ float4 ScreenSpaceDirOccBlurPS(
 	[unroll]
 	for (int r = 1; r < SSDO_BLUR_RADIUS; ++r)
 	{
-		float2 depth = float2(linearizeDepth(offset1), linearizeDepth(offset2));
-		float3 pos1 = GetViewPosition(projConstant, offset1, depth.x);
-		float3 pos2 = GetViewPosition(projConstant, offset2, depth.y);
+		float spatialWeight = exp(-float(r * r) * blurFalloff);
+		float depth1 = linearizeDepth(offset1);
+		float depth2 = linearizeDepth(offset2);
 
-		float planeDist1 = abs(dot(normal, pos1 - center_pos));
-		float planeDist2 = abs(dot(normal, pos2 - center_pos));
+		if (depth1 > 1e-4f)
+		{
+			float depthDelta1 = abs(depth1 - center_d);
+			float depthWeight1 = exp(-pow2(depthDelta1 / depthTolerance));
+			float normalWeight1 = saturate(dot(GetNormal(offset1), normal));
+			float w1 = spatialWeight * depthWeight1 * normalWeight1;
 
-		// Bilateral weight combining Gaussian spatial falloff and normal-plane distance
-		float2 weight = exp2(-r * r * (blurFalloff * 1.442695f) - pow2(float2(planeDist1, planeDist2) * mAmbientOcclusionBilateralSharpness));
+			total_c += tex2Dlod(source, float4(offset1, 0, 0)) * w1;
+			total_w += w1;
+		}
 
-		weight.x *= saturate(dot(GetNormal(offset1), normal));
-		weight.y *= saturate(dot(GetNormal(offset2), normal));
+		if (depth2 > 1e-4f)
+		{
+			float depthDelta2 = abs(depth2 - center_d);
+			float depthWeight2 = exp(-pow2(depthDelta2 / depthTolerance));
+			float normalWeight2 = saturate(dot(GetNormal(offset2), normal));
+			float w2 = spatialWeight * depthWeight2 * normalWeight2;
 
-		// Reject background/sky pixels (depth == 0) — they have SSDO.w = 1.0
-		// and bleed into object edges, causing a bright halo visible in SSR.
-		weight.x *= (depth.x > 1e-4f) ? 1.0f : 0.0f;
-		weight.y *= (depth.y > 1e-4f) ? 1.0f : 0.0f;
-
-		total_c += tex2Dlod(source, float4(offset1, 0, 0)) * weight.x;
-		total_c += tex2Dlod(source, float4(offset2, 0, 0)) * weight.y;
-
-		total_w += sum(weight);
+			total_c += tex2Dlod(source, float4(offset2, 0, 0)) * w2;
+			total_w += w2;
+		}
 
 		offset1 += offset;
 		offset2 -= offset;
 	}
 
-	return total_c / total_w;
+	float4 blurred = total_c / total_w;
+	if (length(blurred.xyz * 2.0f - 1.0f) > 1e-4f)
+	{
+		blurred.xyz = normalize(blurred.xyz * 2.0f - 1.0f) * 0.5f + 0.5f;
+	}
+	return blurred;
 }
 
 #if AO_TEMPORAL_DENOISE
-float4 SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0) : COLOR
+struct HBAOTemporalOutput
 {
+	float4 color0 : COLOR0;
+	float4 color1 : COLOR1;
+};
+
+HBAOTemporalOutput SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0)
+{
+	HBAOTemporalOutput output;
 	float curDepth = linearizeDepth(uv);
 	float4 curAO = tex2Dlod(SSDOMapSamp, float4(uv, 0, 0));
 
 	if (curDepth > 999.0f || curDepth <= 1e-4f)
 	{
-		return curAO;
+		output.color0 = curAO;
+		output.color1 = curAO;
+		return output;
 	}
 
 	float4 projInfo = GetProjConstant();
@@ -296,13 +313,17 @@ float4 SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0) : COLOR
 
 	if (any(prevUV < 0.0f) || any(prevUV > 1.0f))
 	{
-		return curAO;
+		output.color0 = curAO;
+		output.color1 = curAO;
+		return output;
 	}
 
 	float prevDepth = linearizeDepth(prevUV);
-	if (abs(prevDepth - curDepth) > max(0.2f, curDepth * 0.06f))
+	if (abs(prevDepth - curDepth) > max(0.15f, curDepth * 0.04f))
 	{
-		return curAO;
+		output.color0 = curAO;
+		output.color1 = curAO;
+		return output;
 	}
 
 	float4 historyAO = tex2Dlod(SSDOMapHistorySamp, float4(prevUV, 0, 0));
@@ -330,7 +351,10 @@ float4 SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0) : COLOR
 	float4 boxMargin = (maxAO - minAO) * 0.25f;
 	historyAO = clamp(historyAO, minAO - boxMargin, maxAO + boxMargin);
 
-	return lerp(curAO, historyAO, 0.85f);
+	float4 denoised = lerp(curAO, historyAO, 0.85f);
+	output.color0 = denoised;
+	output.color1 = denoised;
+	return output;
 }
 
 float4 SSDOCopyTemporalPS(in float2 uv : TEXCOORD0) : COLOR
