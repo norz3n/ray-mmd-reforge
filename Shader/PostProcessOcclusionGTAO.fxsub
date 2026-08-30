@@ -1,0 +1,257 @@
+/*
+ * PostProcessOcclusionGTAO.fxsub - Ground-Truth Ambient Occlusion (GTAO)
+ *
+ * Based on Jorge Jimenez / Activision GTAO (Practical Real-Time Strategies for Accurate Ambient Occlusion).
+ * Computes exact cosine-weighted horizon integrals per slice with projective normal weighting,
+ * directional bent normal accumulation, and normal-plane bilateral filtering.
+ */
+
+#if SSDO_QUALITY == 1
+#	define GTAO_SLICE_COUNT 2
+#	define GTAO_STEPS_PER_SLICE 4
+#	define SSDO_BLUR_RADIUS 6
+#elif SSDO_QUALITY == 2
+#	define GTAO_SLICE_COUNT 3
+#	define GTAO_STEPS_PER_SLICE 6
+#	define SSDO_BLUR_RADIUS 6
+#elif SSDO_QUALITY == 3
+#	define GTAO_SLICE_COUNT 4
+#	define GTAO_STEPS_PER_SLICE 8
+#	define SSDO_BLUR_RADIUS 6
+#elif SSDO_QUALITY == 4
+#	define GTAO_SLICE_COUNT 6
+#	define GTAO_STEPS_PER_SLICE 8
+#	define SSDO_BLUR_RADIUS 6
+#elif SSDO_QUALITY == 5
+#	define GTAO_SLICE_COUNT 8
+#	define GTAO_STEPS_PER_SLICE 10
+#	define SSDO_BLUR_RADIUS 6
+#elif SSDO_QUALITY == 6
+#	define GTAO_SLICE_COUNT 12
+#	define GTAO_STEPS_PER_SLICE 12
+#	define SSDO_BLUR_RADIUS 6
+#else
+#	define GTAO_SLICE_COUNT 4
+#	define GTAO_STEPS_PER_SLICE 6
+#	define SSDO_BLUR_RADIUS 6
+#endif
+
+float linearizeDepth(float2 uv)
+{
+	return tex2Dlod(Gbuffer8Map, float4(uv, 0, 0)).r;
+}
+
+float3 GetNormal(float2 uv)
+{
+	float4 MRT6 = tex2Dlod(Gbuffer6Map, float4(uv, 0, 0));
+	return DecodeGBufferNormal(MRT6);
+}
+
+float GTAOFalloff(float distSq, float maxRadius)
+{
+	return saturate(1.0f - distSq / max(maxRadius * maxRadius, 1e-4f));
+}
+
+// Exact analytical cosine-weighted horizon integral for a single side [Jimenez 2016]
+float GTAO_IntegrateArc(float h, float gamma)
+{
+	return 0.25f * (-cos(2.0f * h - gamma) + cos(gamma) + 2.0f * h * sin(gamma));
+}
+
+float4 ScreenSpaceDirOccPassVS(
+	in float4 Position : POSITION,
+	in float4 Texcoord : TEXCOORD,
+	out float4 oTexcoord0 : TEXCOORD0) : POSITION
+{
+	oTexcoord0.xy = Texcoord.xy + ViewportOffset;
+	oTexcoord0.zw = Texcoord.xy * ViewportSize;
+	return Position;
+}
+
+float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_POSITION) : COLOR
+{
+	float centerDepth = linearizeDepth(uv.xy);
+
+	// Early out for background/sky pixels
+	if (centerDepth <= 1e-4f)
+	{
+		return float4(0.5f, 0.5f, 0.5f, 1.0f);
+	}
+
+	float4 projConstant = GetProjConstant();
+	float maxRadius = lerp(lerp(20.0f, 60.0f, mSSAORadiusP), 2.0f, mSSAORadiusM);
+
+	float2 samplePixel = uv.xy;
+	float3 viewNormal = GetNormal(uv.xy);
+	float3 viewPosition = GetViewPosition(projConstant, samplePixel, centerDepth);
+	float3 viewDir = normalize(-viewPosition);
+
+#if AA_QUALITY == 6 || HBAO_TEMPORAL_DENOISE
+	int frameCounter = (int)fmod(time * 60.0f, 16.0f);
+#else
+	int frameCounter = 0;
+#endif
+	float2 sampleRandom = float2(InterleavedGradientNoise(screen, frameCounter), PseudoRandom(screen + frameCounter));
+
+	float projScale = ViewportSize.y * 0.5f * matProject._m11;
+	float maxRadiusPixels = mAmbientOcclusionMaxRadiusPixelPercentage * ViewportSize.y;
+	float radiusPixels = clamp((maxRadius * projScale) / max(viewPosition.z, 0.1f), (float)GTAO_STEPS_PER_SLICE, maxRadiusPixels);
+
+	float stepPixel = radiusPixels / (float)GTAO_STEPS_PER_SLICE;
+	float totalAO = 0.0f;
+	float3 bentNormalAcc = 0.0f;
+
+	float sliceAngleStep = PI / (float)GTAO_SLICE_COUNT;
+
+	[loop]
+	for (int slice = 0; slice < GTAO_SLICE_COUNT; ++slice)
+	{
+		float phi = (float(slice) + sampleRandom.x) * sliceAngleStep;
+		float2 dir2D = float2(cos(phi), sin(phi));
+		float2 stepUV = dir2D * (stepPixel * ViewportOffset2);
+
+		// Project normal into current slice plane
+		float3 sliceDirVS = normalize(float3(dir2D.x, dir2D.y, 0.0f));
+		float3 sliceNormal = cross(sliceDirVS, viewDir);
+		float3 projN = viewNormal - sliceNormal * dot(viewNormal, sliceNormal);
+		float projNLen = length(projN);
+
+		if (projNLen < 1e-4f)
+			continue;
+
+		projN /= projNLen;
+
+		// Angle gamma between projected normal and view direction in slice plane
+		float cosGamma = clamp(dot(projN, viewDir), -1.0f, 1.0f);
+		float gamma = acos(cosGamma) * (dot(projN, sliceDirVS) < 0.0f ? -1.0f : 1.0f);
+
+		// Initialize horizon cos angles clamped to tangent plane
+		float cosH1 = -1.0f;
+		float cosH2 = -1.0f;
+
+		// March both positive and negative directions along slice
+		[unroll]
+		for (int s = 1; s <= GTAO_STEPS_PER_SLICE; ++s)
+		{
+			float stepDist = (float(s) - 0.5f + sampleRandom.y * 0.5f);
+			
+			// Positive direction (+dir)
+			float2 uvP = samplePixel + stepUV * stepDist;
+			float depthP = linearizeDepth(uvP);
+			if (depthP > 1e-4f)
+			{
+				float3 posP = GetViewPosition(projConstant, uvP, depthP);
+				float3 diffP = posP - viewPosition;
+				float lenSqP = dot(diffP, diffP);
+				if (lenSqP < maxRadius * maxRadius)
+				{
+					float cosAngle = dot(normalize(diffP), viewDir);
+					float falloff = GTAOFalloff(lenSqP, maxRadius);
+					cosH1 = max(cosH1, lerp(-1.0f, cosAngle, falloff));
+				}
+			}
+
+			// Negative direction (-dir)
+			float2 uvM = samplePixel - stepUV * stepDist;
+			float depthM = linearizeDepth(uvM);
+			if (depthM > 1e-4f)
+			{
+				float3 posM = GetViewPosition(projConstant, uvM, depthM);
+				float3 diffM = posM - viewPosition;
+				float lenSqM = dot(diffM, diffM);
+				if (lenSqM < maxRadius * maxRadius)
+				{
+					float cosAngle = dot(normalize(diffM), viewDir);
+					float falloff = GTAOFalloff(lenSqM, maxRadius);
+					cosH2 = max(cosH2, lerp(-1.0f, cosAngle, falloff));
+				}
+			}
+		}
+
+		float h1 = -acos(clamp(cosH1, -1.0f, 1.0f));
+		float h2 =  acos(clamp(cosH2, -1.0f, 1.0f));
+
+		// Clamp horizon angles to tangent plane
+		h1 = gamma + max(h1 - gamma, -HALF_PI);
+		h2 = gamma + min(h2 - gamma,  HALF_PI);
+
+		// Integrate visibility arc
+		float arcAO = projNLen * (GTAO_IntegrateArc(h1, gamma) + GTAO_IntegrateArc(h2, gamma));
+		totalAO += arcAO;
+
+		// Bent normal accumulation
+		float midAngle = (h1 + h2) * 0.5f;
+		float3 sliceBent = normalize(viewDir * cos(midAngle) + sliceDirVS * sin(midAngle));
+		bentNormalAcc += sliceBent * arcAO;
+	}
+
+	totalAO = saturate(totalAO / (float)GTAO_SLICE_COUNT);
+	bentNormalAcc = normalize(bentNormalAcc + viewNormal * 0.1f);
+
+	float4 occlusion;
+	occlusion.xyz = bentNormalAcc * 0.5f + 0.5f;
+	occlusion.w = 1.0f - totalAO;
+	occlusion.w = pow(saturate(occlusion.w), mSSAOScale);
+
+	return occlusion;
+}
+
+float4 ScreenSpaceDirOccBlurPS(
+	in float2 uv : TEXCOORD0,
+	in float3 viewdir : TEXCOORD1,
+	uniform sampler source,
+	uniform float2 offset) : COLOR
+{
+	float center_d = linearizeDepth(uv);
+	if (center_d <= 1e-4f)
+	{
+		return float4(0.5f, 0.5f, 0.5f, 1.0f);
+	}
+
+	float4 projConstant = GetProjConstant();
+	float total_w = 1.0f;
+	float4 total_c = tex2Dlod(source, float4(uv, 0, 0));
+
+	float3 normal = GetNormal(uv);
+	float3 center_pos = GetViewPosition(projConstant, uv, center_d);
+
+	float blurSigma = SSDO_BLUR_RADIUS * 0.5f;
+	float blurFalloff = 1.0f / (2.0f * blurSigma * blurSigma);
+
+	[unroll]
+	for (int r = 1; r <= SSDO_BLUR_RADIUS; ++r)
+	{
+		float2 uv_offset = offset * (float)r;
+		float spatial_w = exp(-float(r * r) * blurFalloff);
+
+		// Forward tap
+		float2 uv_p = uv + uv_offset;
+		float depth_p = linearizeDepth(uv_p);
+		if (depth_p > 1e-4f)
+		{
+			float3 pos_p = GetViewPosition(projConstant, uv_p, depth_p);
+			float3 diff = pos_p - center_pos;
+			float planeDist = dot(normal, diff);
+			float range_w = exp(-planeDist * planeDist * 20.0f) * saturate(dot(normal, GetNormal(uv_p)));
+			float w = spatial_w * range_w;
+			total_c += tex2Dlod(source, float4(uv_p, 0, 0)) * w;
+			total_w += w;
+		}
+
+		// Backward tap
+		float2 uv_m = uv - uv_offset;
+		float depth_m = linearizeDepth(uv_m);
+		if (depth_m > 1e-4f)
+		{
+			float3 pos_m = GetViewPosition(projConstant, uv_m, depth_m);
+			float3 diff = pos_m - center_pos;
+			float planeDist = dot(normal, diff);
+			float range_w = exp(-planeDist * planeDist * 20.0f) * saturate(dot(normal, GetNormal(uv_m)));
+			float w = spatial_w * range_w;
+			total_c += tex2Dlod(source, float4(uv_m, 0, 0)) * w;
+			total_w += w;
+		}
+	}
+
+	return total_c / total_w;
+}

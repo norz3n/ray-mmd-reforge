@@ -131,6 +131,8 @@ static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceB
 #	include "shader/PostProcessOcclusion.fxsub"
 #elif SSAO_TYPE == 1
 #	include "shader/PostProcessOcclusionHBAO.fxsub"
+#elif SSAO_TYPE == 2
+#	include "shader/PostProcessOcclusionGTAO.fxsub"
 #endif
 #endif
 
