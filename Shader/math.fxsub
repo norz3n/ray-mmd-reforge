@@ -6,6 +6,7 @@
 
 #define PI 3.1415926535f
 #define PI_2 (3.1415926535f * 2.0)
+#define HALF_PI (3.1415926535f * 0.5f)
 
 #define ALN2I 1.442695022
 
