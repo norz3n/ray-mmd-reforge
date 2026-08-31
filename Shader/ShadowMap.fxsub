@@ -12,33 +12,177 @@ static float4x4 matLightViewFromCameraView = mul(matViewInverse, matLightView);
 static float4x4 matLightProjectFromCameraView = mul(matViewInverse, matLightViewProject);
 static float4x4 lightCropParams = CreateLightCropParams(matLightViewFromCameraView, SHADOW_MAP_SIZE);
 
-static const float3 kVogelDisk[25] = {
-	float3(0.1414214f, 0.0000000f, 0.8585786f),
-	float3(-0.1806177f, 0.1654607f, 0.7550510f),
-	float3(0.0276464f, -0.3150169f, 0.6837722f),
-	float3(0.2276570f, 0.2969382f, 0.6258343f),
-	float3(-0.4177786f, -0.0738991f, 0.5757359f),
-	float3(0.3957563f, -0.2517478f, 0.5309584f),
-	float3(-0.1323727f, 0.4924200f, 0.4900980f),
-	float3(-0.2524493f, -0.4860755f, 0.4522774f),
-	float3(0.5477138f, 0.2000240f, 0.4169048f),
-	float3(-0.5698048f, 0.2352073f, 0.3835586f),
-	float3(0.2746834f, -0.5869830f, 0.3519259f),
-	float3(0.2029844f, 0.6471455f, 0.3217670f),
-	float3(-0.6117968f, -0.3545485f, 0.2928932f),
-	float3(0.7177071f, -0.1577862f, 0.2651531f),
-	float3(-0.4380053f, 0.6230180f, 0.2384227f),
-	float3(-0.1011898f, -0.7808717f, 0.2125992f),
-	float3(0.6212040f, 0.5235509f, 0.1875962f),
-	float3(-0.8359455f, 0.0345694f, 0.1633400f),
-	float3(0.6097578f, -0.6067911f, 0.1397675f),
-	float3(-0.0407947f, 0.8822334f, 0.1168239f),
-	float3(-0.5801872f, -0.6952574f, 0.0944615f),
-	float3(0.9190800f, 0.1236603f, 0.0726382f),
-	float3(-0.7787342f, 0.5418238f, 0.0513167f),
-	float3(0.2127944f, -0.9458956f, 0.0304640f),
-	float3(0.4921846f, 0.8589263f, 0.0100505f),
+#if SUN_SHADOW_PCSS_ENABLE == 1
+#	define SUN_BLOCKER_SAMPLES 12
+#	define SUN_FILTER_SAMPLES  16
+#	define kVogelBlockerDisk   kVogelDisk12
+#	define kVogelFilterDisk    kVogelDisk16
+#elif SUN_SHADOW_PCSS_ENABLE == 2
+#	define SUN_BLOCKER_SAMPLES 16
+#	define SUN_FILTER_SAMPLES  25
+#	define kVogelBlockerDisk   kVogelDisk16
+#	define kVogelFilterDisk    kVogelDisk25
+#elif SUN_SHADOW_PCSS_ENABLE == 3
+#	define SUN_BLOCKER_SAMPLES 25
+#	define SUN_FILTER_SAMPLES  32
+#	define kVogelBlockerDisk   kVogelDisk25
+#	define kVogelFilterDisk    kVogelDisk32
+#elif SUN_SHADOW_PCSS_ENABLE == 4
+#	define SUN_BLOCKER_SAMPLES 32
+#	define SUN_FILTER_SAMPLES  48
+#	define kVogelBlockerDisk   kVogelDisk32
+#	define kVogelFilterDisk    kVogelDisk48
+#endif
+
+// Vogel Disk Tables (optimal Fermat spiral distribution with center weighting)
+static const float3 kVogelDisk12[12] = {
+	float3(  0.2041241f,   0.0000000f,   0.8979379f),
+	float3( -0.2606993f,   0.2388219f,   0.8232233f),
+	float3(  0.0399042f,  -0.4546878f,   0.7717823f),
+	float3(  0.3285945f,   0.4285934f,   0.7299691f),
+	float3( -0.6030114f,  -0.1066642f,   0.6938138f),
+	float3(  0.5712250f,  -0.3633666f,   0.6614984f),
+	float3( -0.1910636f,   0.7107471f,   0.6320100f),
+	float3( -0.3643790f,  -0.7015896f,   0.6047153f),
+	float3(  0.7905567f,   0.2887100f,   0.5791873f),
+	float3( -0.8224425f,   0.3394923f,   0.5551217f),
+	float3(  0.3964716f,  -0.8472368f,   0.5322928f),
+	float3(  0.2929824f,   0.9340742f,   0.5105275f),
 };
+
+static const float3 kVogelDisk16[16] = {
+	float3(  0.1767767f,   0.0000000f,   0.9116117f),
+	float3( -0.2257722f,   0.2068258f,   0.8469069f),
+	float3(  0.0345581f,  -0.3937712f,   0.8023576f),
+	float3(  0.2845712f,   0.3711728f,   0.7661464f),
+	float3( -0.5222232f,  -0.0923739f,   0.7348350f),
+	float3(  0.4946954f,  -0.3146847f,   0.7068490f),
+	float3( -0.1654659f,   0.6155250f,   0.6813113f),
+	float3( -0.3155615f,  -0.6075944f,   0.6576734f),
+	float3(  0.6846422f,   0.2500302f,   0.6355655f),
+	float3( -0.7122561f,   0.2940090f,   0.6147241f),
+	float3(  0.3433545f,  -0.7337286f,   0.5949537f),
+	float3(  0.2537302f,   0.8089320f,   0.5761044f),
+	float3( -0.7647459f,  -0.4431859f,   0.5580583f),
+	float3(  0.8971340f,  -0.1972324f,   0.5407207f),
+	float3( -0.5475069f,   0.7787722f,   0.5240142f),
+	float3( -0.1264868f,  -0.9760897f,   0.5078745f),
+};
+
+static const float3 kVogelDisk25[25] = {
+	float3(  0.1414214f,   0.0000000f,   0.9292893f),
+	float3( -0.1806178f,   0.1654607f,   0.8775255f),
+	float3(  0.0276464f,  -0.3150169f,   0.8418861f),
+	float3(  0.2276570f,   0.2969382f,   0.8129171f),
+	float3( -0.4177785f,  -0.0738991f,   0.7878680f),
+	float3(  0.3957563f,  -0.2517478f,   0.7654792f),
+	float3( -0.1323727f,   0.4924200f,   0.7450490f),
+	float3( -0.2524492f,  -0.4860755f,   0.7261387f),
+	float3(  0.5477137f,   0.2000242f,   0.7084524f),
+	float3( -0.5698049f,   0.2352072f,   0.6917793f),
+	float3(  0.2746836f,  -0.5869829f,   0.6759630f),
+	float3(  0.2029842f,   0.6471456f,   0.6608835f),
+	float3( -0.6117967f,  -0.3545487f,   0.6464466f),
+	float3(  0.7177072f,  -0.1577859f,   0.6325765f),
+	float3( -0.4380055f,   0.6230178f,   0.6192113f),
+	float3( -0.1011894f,  -0.7808718f,   0.6062996f),
+	float3(  0.6212038f,   0.5235512f,   0.5937981f),
+	float3( -0.8359456f,   0.0345690f,   0.5816700f),
+	float3(  0.6097581f,  -0.6067908f,   0.5698837f),
+	float3( -0.0407952f,   0.8822334f,   0.5584120f),
+	float3( -0.5801868f,  -0.6952577f,   0.5472307f),
+	float3(  0.9190800f,   0.1236609f,   0.5363191f),
+	float3( -0.7787346f,   0.5418232f,   0.5256584f),
+	float3(  0.2127951f,  -0.9458955f,   0.5152320f),
+	float3(  0.4921840f,   0.8589266f,   0.5050253f),
+};
+
+static const float3 kVogelDisk32[32] = {
+	float3(  0.1250000f,   0.0000000f,   0.9375000f),
+	float3( -0.1596450f,   0.1462479f,   0.8917468f),
+	float3(  0.0244362f,  -0.2784383f,   0.8602458f),
+	float3(  0.2012222f,   0.2624588f,   0.8346405f),
+	float3( -0.3692676f,  -0.0653182f,   0.8125000f),
+	float3(  0.3498025f,  -0.2225157f,   0.7927110f),
+	float3( -0.1170021f,   0.4352419f,   0.7746530f),
+	float3( -0.2231357f,  -0.4296341f,   0.7579385f),
+	float3(  0.4841151f,   0.1767981f,   0.7423059f),
+	float3( -0.5036411f,   0.2078957f,   0.7275688f),
+	float3(  0.2427883f,  -0.5188245f,   0.7135890f),
+	float3(  0.1794144f,   0.5720013f,   0.7002605f),
+	float3( -0.5407570f,  -0.3133797f,   0.6875000f),
+	float3(  0.6343695f,  -0.1394644f,   0.6752405f),
+	float3( -0.3871458f,   0.5506751f,   0.6634272f),
+	float3( -0.0894397f,  -0.6901996f,   0.6520147f),
+	float3(  0.5490718f,   0.4627583f,   0.6409648f),
+	float3( -0.7388785f,   0.0305549f,   0.6302450f),
+	float3(  0.5389551f,  -0.5363323f,   0.6198273f),
+	float3( -0.0360582f,   0.7797915f,   0.6096876f),
+	float3( -0.5128175f,  -0.6145268f,   0.5998047f),
+	float3(  0.8123596f,   0.1093018f,   0.5901601f),
+	float3( -0.6883106f,   0.4789086f,   0.5807373f),
+	float3(  0.1880861f,  -0.8360614f,   0.5715216f),
+	float3(  0.4350333f,   0.7591911f,   0.5625000f),
+	float3( -0.8504484f,  -0.2713162f,   0.5536607f),
+	float3(  0.8261024f,  -0.3816803f,   0.5449931f),
+	float3( -0.3578882f,   0.8551556f,   0.5364876f),
+	float3( -0.3194073f,  -0.8880338f,   0.5281353f),
+	float3(  0.8499086f,   0.4466882f,   0.5199284f),
+	float3( -0.9440346f,   0.2488445f,   0.5118594f),
+	float3(  0.5365958f,  -0.8345298f,   0.5039216f),
+};
+
+static const float3 kVogelDisk48[48] = {
+	float3(  0.1020621f,   0.0000000f,   0.9489690f),
+	float3( -0.1303496f,   0.1194109f,   0.9116117f),
+	float3(  0.0199521f,  -0.2273439f,   0.8858911f),
+	float3(  0.1642973f,   0.2142967f,   0.8649846f),
+	float3( -0.3015057f,  -0.0533321f,   0.8469069f),
+	float3(  0.2856125f,  -0.1816833f,   0.8307492f),
+	float3( -0.0955318f,   0.3553735f,   0.8160050f),
+	float3( -0.1821895f,  -0.3507948f,   0.8023576f),
+	float3(  0.3952783f,   0.1443550f,   0.7895936f),
+	float3( -0.4112212f,   0.1697462f,   0.7775609f),
+	float3(  0.1982358f,  -0.4236184f,   0.7661464f),
+	float3(  0.1464912f,   0.4670371f,   0.7552637f),
+	float3( -0.4415262f,  -0.2558735f,   0.7448448f),
+	float3(  0.5179605f,  -0.1138722f,   0.7348350f),
+	float3( -0.3161033f,   0.4496244f,   0.7251895f),
+	float3( -0.0730272f,  -0.5635456f,   0.7158712f),
+	float3(  0.4483152f,   0.3778405f,   0.7068490f),
+	float3( -0.6032917f,   0.0249480f,   0.6980963f),
+	float3(  0.4400550f,  -0.4379135f,   0.6895903f),
+	float3( -0.0294414f,   0.6366971f,   0.6813113f),
+	float3( -0.4187138f,  -0.5017590f,   0.6732419f),
+	float3(  0.6632888f,   0.0892446f,   0.6653671f),
+	float3( -0.5620033f,   0.3910272f,   0.6576734f),
+	float3(  0.1535716f,  -0.6826413f,   0.6501488f),
+	float3(  0.3552032f,   0.6198769f,   0.6427827f),
+	float3( -0.6943882f,  -0.2215288f,   0.6355655f),
+	float3(  0.6745098f,  -0.3116406f,   0.6284884f),
+	float3( -0.2922145f,   0.6982316f,   0.6215437f),
+	float3( -0.2607950f,  -0.7250765f,   0.6147241f),
+	float3(  0.6939475f,   0.3647194f,   0.6080232f),
+	float3( -0.7708011f,   0.2031807f,   0.6014349f),
+	float3(  0.4381286f,  -0.6813907f,   0.5949537f),
+	float3(  0.1393713f,   0.8109618f,   0.5885746f),
+	float3( -0.6604977f,  -0.5115266f,   0.5822930f),
+	float3(  0.8448966f,  -0.0699980f,   0.5761044f),
+	float3( -0.5840017f,   0.6312887f,   0.5700048f),
+	float3(  0.0042539f,  -0.8720084f,   0.5639906f),
+	float3(  0.5938682f,   0.6546530f,   0.5580583f),
+	float3( -0.8917693f,  -0.0826490f,   0.5522045f),
+	float3(  0.7225969f,  -0.5484253f,   0.5464262f),
+	float3( -0.1644069f,   0.9037258f,   0.5407207f),
+	float3( -0.4952325f,  -0.7869740f,   0.5350851f),
+	float3(  0.9075024f,   0.2487088f,   0.5295171f),
+	float3( -0.8469561f,   0.4346439f,   0.5240142f),
+	float3(  0.3347034f,  -0.9028050f,   0.5185742f),
+	float3(  0.3670925f,   0.9017537f,   0.5131949f),
+	float3( -0.8894242f,  -0.4215147f,   0.5078745f),
+	float3(  0.9506226f,  -0.2930871f,   0.5026110f),
+};
+
 static const float kInvWeightSum[4] = {
 	0.1201636f, // 25 samples (cascade 0)
 	0.1341286f, // 16 samples (cascade 1)
@@ -46,6 +190,17 @@ static const float kInvWeightSum[4] = {
 	0.3420866f  // 4 samples  (cascade 3)
 };
 
+/**
+ * Standard uniform PCF shadow filtering for legacy/fallback mode.
+ *
+ * @param source Shadow map texture sampler.
+ * @param coord UV coordinate in shadow map.
+ * @param radius Base filter radius in UV space.
+ * @param receiverDepth Linear light-space depth of receiver surface.
+ * @param noise Screen-space pseudo-random noise for sample jittering.
+ * @param cascadeIndex Index of active cascade (0 to 3).
+ * @return Shadow factor (0 = occluded, 1 = unoccluded).
+ */
 float ShadowPCF(sampler source, float2 coord, float radius, float receiverDepth, float noise, int cascadeIndex)
 {
 	float shadow = 0.0;
@@ -63,18 +218,148 @@ float ShadowPCF(sampler source, float2 coord, float radius, float receiverDepth,
 	[loop]
 	for (int i = 0; i < sampleCount; i++)
 	{
-		float2 vogel = mul(kVogelDisk[i].xy, rotMat);
+		float2 vogel = mul(kVogelDisk25[i].xy, rotMat);
 		float2 pos = coord + vogel * finalRadius;
 		
 		float zMap = tex2Dlod(source, float4(pos, 0, 0)).r;
-		float diff = receiverDepth - zMap;
-		float sampleShadow = (diff <= 0.0f) ? 1.0f : saturate(exp(-20.0f * diff));
+		float sampleShadow = 1.0f;
+		[flatten]
+		if (zMap > 1e-5)
+		{
+			float diff = receiverDepth - zMap;
+			sampleShadow = (diff <= 0.0f) ? 1.0f : saturate(exp(-20.0f * diff));
+		}
 		
-		shadow += sampleShadow * kVogelDisk[i].z;
+		shadow += sampleShadow * kVogelDisk25[i].z;
 	}
 	
 	return shadow * kInvWeightSum[cascadeIndex];
 }
+
+#if SUN_SHADOW_PCSS_ENABLE
+/**
+ * Searches the shadow map around the receiver UV for occluding geometry.
+ *
+ * @param source Shadow map texture sampler.
+ * @param coord UV coordinate in shadow map.
+ * @param searchRadius UV radius to search for blockers.
+ * @param receiverDepth Linear light-space depth of the receiver surface.
+ * @param rotMat 2D rotation matrix for jittering sample offsets.
+ * @param blockerSamples Number of samples to evaluate.
+ * @return float2(averageBlockerDepth, blockerCount).
+ */
+float2 FindBlocker(sampler source, float2 coord, float searchRadius, float receiverDepth, float2x2 rotMat, int blockerSamples)
+{
+	float blockerSum = 0.0f;
+	float blockerCount = 0.0f;
+	float blockerBias = 0.02f + receiverDepth * 0.0003f;
+
+	[loop]
+	for (int i = 0; i < blockerSamples; i++)
+	{
+		float2 offset = mul(kVogelBlockerDisk[i].xy, rotMat) * searchRadius;
+		float2 sampleCoord = coord + offset;
+		float sampleDepth = tex2Dlod(source, float4(sampleCoord, 0, 0)).r;
+
+		[flatten]
+		if (sampleDepth > 1e-5 && sampleDepth < (receiverDepth - blockerBias))
+		{
+			blockerSum += sampleDepth;
+			blockerCount += 1.0f;
+		}
+	}
+
+	return float2(blockerSum / max(1.0f, blockerCount), blockerCount);
+}
+
+/**
+ * Calculates Percentage-Closer Soft Shadows with contact-hardening penumbra.
+ *
+ * @param source Shadow map texture sampler for the active cascade.
+ * @param coord UV coordinate in the shadow map.
+ * @param receiverDepth Linear light-space depth of the receiver surface.
+ * @param noise Screen-space pseudo-random noise for sample jittering.
+ * @param cascadeIndex Index of the active cascade (0 to 3).
+ * @return Filtered shadow visibility factor (0 = full shadow, 1 = fully lit).
+ */
+float ShadowPCSS(sampler source, float2 coord, float receiverDepth, float noise, int cascadeIndex)
+{
+	float2 rot;
+	sincos(noise * PI_2, rot.y, rot.x);
+	float2x2 rotMat = float2x2(rot.x, -rot.y, rot.y, rot.x);
+
+	// Cascade-specific scale: world units to UV space
+	float cascadeCropScale = lightCropParams[cascadeIndex].x * 0.5f;
+
+	// Scale sample counts for distant cascades to maximize performance
+	int blockerSamples = SUN_BLOCKER_SAMPLES;
+	int filterSamples = SUN_FILTER_SAMPLES;
+	if (cascadeIndex == 1)
+	{
+		blockerSamples = min(SUN_BLOCKER_SAMPLES, 16);
+		filterSamples = min(SUN_FILTER_SAMPLES, 25);
+	}
+	else if (cascadeIndex == 2)
+	{
+		blockerSamples = min(SUN_BLOCKER_SAMPLES, 12);
+		filterSamples = min(SUN_FILTER_SAMPLES, 16);
+	}
+	else if (cascadeIndex >= 3)
+	{
+		blockerSamples = min(SUN_BLOCKER_SAMPLES, 8);
+		filterSamples = min(SUN_FILTER_SAMPLES, 12);
+	}
+
+	// STEP 1: Blocker Search
+	float searchRadiusWorld = mSunPCSSBlockerSearchScale * (10.0f * mSunLightSize);
+	float searchRadiusUV = searchRadiusWorld * cascadeCropScale;
+	searchRadiusUV = clamp(searchRadiusUV, 3.0f / float(SHADOW_MAP_SIZE), 0.08f);
+
+	float2 blocker = FindBlocker(source, coord, searchRadiusUV, receiverDepth, rotMat, blockerSamples);
+	float avgBlockerDepth = blocker.x;
+	float blockerCount = blocker.y;
+
+	[branch]
+	if (blockerCount < 0.5f)
+	{
+		return 1.0f; // No occluders in search area -> fully lit early exit
+	}
+
+	// STEP 2: Penumbra Size Estimation
+	float blockerDistance = max(0.0f, receiverDepth - avgBlockerDepth);
+	float penumbraWorld = blockerDistance * mSunLightSize;
+	float filterRadiusUV = penumbraWorld * cascadeCropScale;
+
+	float minFilterUV = mSunPCSSMinFilterRadius / float(SHADOW_MAP_SIZE);
+	float maxFilterUV = (mSunPCSSMaxFilterRadius / float(SHADOW_MAP_SIZE)) * (1.0f / (1.0f + cascadeIndex * 0.25f));
+	filterRadiusUV = clamp(filterRadiusUV, minFilterUV, maxFilterUV);
+
+	// STEP 3: Percentage-Closer Filtering (PCF)
+	float shadow = 0.0f;
+	float totalWeight = 0.0f;
+
+	[loop]
+	for (int i = 0; i < filterSamples; i++)
+	{
+		float2 vogel = mul(kVogelFilterDisk[i].xy, rotMat);
+		float2 pos = coord + vogel * filterRadiusUV;
+
+		float zMap = tex2Dlod(source, float4(pos, 0, 0)).r;
+		float sampleShadow = 1.0f;
+		[flatten]
+		if (zMap > 1e-5)
+		{
+			float diff = receiverDepth - zMap;
+			sampleShadow = (diff <= 0.0f) ? 1.0f : saturate(exp(-20.0f * diff));
+		}
+
+		shadow += sampleShadow * kVogelFilterDisk[i].z;
+		totalWeight += kVogelFilterDisk[i].z;
+	}
+
+	return shadow / totalWeight;
+}
+#endif
 
 float ShadingShadow(MaterialParam material, float3 viewPosition)
 {
@@ -103,9 +388,32 @@ float ShadingShadow(MaterialParam material, float3 viewPosition)
 	coord.xy += 0.5 / float(SHADOW_MAP_SIZE);
 
 	float shadow = 0;
-	float radius = 3.0 / float(SHADOW_MAP_SIZE);
 	float noise = InterleavedGradientNoise(coord.xy * SHADOW_MAP_SIZE);
 
+#if SUN_SHADOW_PCSS_ENABLE
+	[branch]
+	if (coord.w == 0)
+	{
+		clip(tex2Dlod(PSSM1Samp, float4(coord.xy, 0, 0)).r - 1e-5);
+		shadow = ShadowPCSS(PSSM1Samp, coord.xy, receiverDepth, noise, 0);
+	}
+	else if (coord.w == 1)
+	{
+		clip(tex2Dlod(PSSM2Samp, float4(coord.xy, 0, 0)).r - 1e-5);
+		shadow = ShadowPCSS(PSSM2Samp, coord.xy, receiverDepth, noise, 1);
+	}
+	else if (coord.w == 2)
+	{
+		clip(tex2Dlod(PSSM3Samp, float4(coord.xy, 0, 0)).r - 1e-5);
+		shadow = ShadowPCSS(PSSM3Samp, coord.xy, receiverDepth, noise, 2);
+	}
+	else
+	{
+		clip(tex2Dlod(PSSM4Samp, float4(coord.xy, 0, 0)).r - 1e-5);
+		shadow = ShadowPCSS(PSSM4Samp, coord.xy, receiverDepth, noise, 3);
+	}
+#else
+	float radius = 3.0 / float(SHADOW_MAP_SIZE);
 	[branch]
 	if (coord.w == 0)
 	{
@@ -127,6 +435,7 @@ float ShadingShadow(MaterialParam material, float3 viewPosition)
 		clip(tex2Dlod(PSSM4Samp, float4(coord.xy, 0, 0)).r - 1e-5);
 		shadow = ShadowPCF(PSSM4Samp, coord.xy, radius, receiverDepth, noise, 3);
 	}
+#endif
 
 	return shadow;
 }
