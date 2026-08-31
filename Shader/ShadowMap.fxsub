@@ -245,14 +245,14 @@ float ShadowPCF(sampler source, float2 coord, float radius, float receiverDepth,
  * @param searchRadius UV radius to search for blockers.
  * @param receiverDepth Linear light-space depth of the receiver surface.
  * @param rotMat 2D rotation matrix for jittering sample offsets.
+ * @param minBlockerDist Minimum distance to consider a sample a distinct occluder (rejects self-curvature).
  * @param blockerSamples Number of samples to evaluate.
  * @return float2(averageBlockerDepth, blockerCount).
  */
-float2 FindBlocker(sampler source, float2 coord, float searchRadius, float receiverDepth, float2x2 rotMat, int blockerSamples)
+float2 FindBlocker(sampler source, float2 coord, float searchRadius, float receiverDepth, float2x2 rotMat, float minBlockerDist, int blockerSamples)
 {
 	float blockerSum = 0.0f;
 	float blockerCount = 0.0f;
-	float blockerBias = 0.02f + receiverDepth * 0.0003f;
 
 	[loop]
 	for (int i = 0; i < blockerSamples; i++)
@@ -262,10 +262,15 @@ float2 FindBlocker(sampler source, float2 coord, float searchRadius, float recei
 		float sampleDepth = tex2Dlod(source, float4(sampleCoord, 0, 0)).r;
 
 		[flatten]
-		if (sampleDepth > 1e-5 && sampleDepth < (receiverDepth - blockerBias))
+		if (sampleDepth > 1e-5)
 		{
-			blockerSum += sampleDepth;
-			blockerCount += 1.0f;
+			float dist = receiverDepth - sampleDepth;
+			[flatten]
+			if (dist > minBlockerDist)
+			{
+				blockerSum += sampleDepth;
+				blockerCount += 1.0f;
+			}
 		}
 	}
 
@@ -279,10 +284,12 @@ float2 FindBlocker(sampler source, float2 coord, float searchRadius, float recei
  * @param coord UV coordinate in the shadow map.
  * @param receiverDepth Linear light-space depth of the receiver surface.
  * @param noise Screen-space pseudo-random noise for sample jittering.
+ * @param minBlockerDist Minimum distance threshold to filter self-samples.
+ * @param normalBias Surface normal bias (1.0 at grazing angle, 0.0 facing sun).
  * @param cascadeIndex Index of the active cascade (0 to 3).
  * @return Filtered shadow visibility factor (0 = full shadow, 1 = fully lit).
  */
-float ShadowPCSS(sampler source, float2 coord, float receiverDepth, float noise, int cascadeIndex)
+float ShadowPCSS(sampler source, float2 coord, float receiverDepth, float noise, float minBlockerDist, float normalBias, int cascadeIndex)
 {
 	float2 rot;
 	sincos(noise * PI_2, rot.y, rot.x);
@@ -310,12 +317,16 @@ float ShadowPCSS(sampler source, float2 coord, float receiverDepth, float noise,
 		filterSamples = min(SUN_FILTER_SAMPLES, 12);
 	}
 
+	// Graze angle mitigation: shrink search/filter radius to avoid sampling background and causing light leaks (ESM noise)
+	float grazeScale = saturate(1.0f - normalBias * normalBias);
+
 	// STEP 1: Blocker Search
 	float searchRadiusWorld = mSunPCSSBlockerSearchScale * (10.0f * mSunLightSize);
 	float searchRadiusUV = searchRadiusWorld * cascadeCropScale;
 	searchRadiusUV = clamp(searchRadiusUV, 3.0f / float(SHADOW_MAP_SIZE), 0.08f);
+	searchRadiusUV *= max(grazeScale, 0.2f); // Keep a small minimum search radius
 
-	float2 blocker = FindBlocker(source, coord, searchRadiusUV, receiverDepth, rotMat, blockerSamples);
+	float2 blocker = FindBlocker(source, coord, searchRadiusUV, receiverDepth, rotMat, minBlockerDist, blockerSamples);
 	float avgBlockerDepth = blocker.x;
 	float blockerCount = blocker.y;
 
@@ -333,6 +344,7 @@ float ShadowPCSS(sampler source, float2 coord, float receiverDepth, float noise,
 	float minFilterUV = mSunPCSSMinFilterRadius / float(SHADOW_MAP_SIZE);
 	float maxFilterUV = (mSunPCSSMaxFilterRadius / float(SHADOW_MAP_SIZE)) * (1.0f / (1.0f + cascadeIndex * 0.25f));
 	filterRadiusUV = clamp(filterRadiusUV, minFilterUV, maxFilterUV);
+	filterRadiusUV *= grazeScale; // Shrink penumbra at grazing angles
 
 	// STEP 3: Percentage-Closer Filtering (PCF)
 	float shadow = 0.0f;
@@ -341,8 +353,8 @@ float ShadowPCSS(sampler source, float2 coord, float receiverDepth, float noise,
 	[loop]
 	for (int i = 0; i < filterSamples; i++)
 	{
-		float2 vogel = mul(kVogelFilterDisk[i].xy, rotMat);
-		float2 pos = coord + vogel * filterRadiusUV;
+		float2 offset = mul(kVogelFilterDisk[i].xy, rotMat) * filterRadiusUV;
+		float2 pos = coord + offset;
 
 		float zMap = tex2Dlod(source, float4(pos, 0, 0)).r;
 		float sampleShadow = 1.0f;
@@ -363,6 +375,19 @@ float ShadowPCSS(sampler source, float2 coord, float receiverDepth, float noise,
 
 float ShadingShadow(MaterialParam material, float3 viewPosition)
 {
+	float3 L = mul(-SunDirection, (float3x3)matView);
+	float cosTheta = dot(material.normal, L);
+
+	// Terminator cutoff: surfaces facing away from sunlight are in full self-shadow
+	float terminator = saturate(cosTheta * 12.0f);
+	[branch]
+	if (terminator <= 0.0f)
+	{
+		return 0.0f;
+	}
+
+	float normalBias = saturate(1.0f - saturate(cosTheta));
+
 	float4 proj = mul(float4(viewPosition, 1), matLightProjectFromCameraView);
 
 	float4 lightPPos01 = proj.xyxy * float4(lightCropParams[0].xy, lightCropParams[1].xy) + float4(lightCropParams[0].zw, lightCropParams[1].zw);
@@ -382,8 +407,10 @@ float ShadingShadow(MaterialParam material, float3 viewPosition)
 	if (lightPPos0.z > 0) { coord = lightPPos0; }
 	clip(coord.z);
 
+	float depthSlope = ShadowSlopeScaledBias(proj.z / mPSSMDepthZMax) * mPSSMDepthZMax;
 	float receiverDepth = dot(float4(viewPosition, 1), matLightViewFromCameraView._13_23_33_43);
-	receiverDepth -= material.linearDepth * 0.0035 + max(0, material.linearDepth - 100) * 0.007;
+	float baseBias = (material.linearDepth + depthSlope * (1.0f + normalBias * 2.0f)) * 0.0035f + max(0.0f, material.linearDepth - 100.0f) * 0.007f;
+	receiverDepth -= baseBias;
 
 	coord.xy += 0.5 / float(SHADOW_MAP_SIZE);
 
@@ -391,26 +418,30 @@ float ShadingShadow(MaterialParam material, float3 viewPosition)
 	float noise = InterleavedGradientNoise(coord.xy * SHADOW_MAP_SIZE);
 
 #if SUN_SHADOW_PCSS_ENABLE
+	// receiverDepth is already biased by baseBias to account for surface curvature/slope,
+	// so any sample closer to the light (dist > 0) is a genuine occluder.
+	float minBlockerDist = 0.0f;
+
 	[branch]
 	if (coord.w == 0)
 	{
 		clip(tex2Dlod(PSSM1Samp, float4(coord.xy, 0, 0)).r - 1e-5);
-		shadow = ShadowPCSS(PSSM1Samp, coord.xy, receiverDepth, noise, 0);
+		shadow = ShadowPCSS(PSSM1Samp, coord.xy, receiverDepth, noise, minBlockerDist, normalBias, 0);
 	}
 	else if (coord.w == 1)
 	{
 		clip(tex2Dlod(PSSM2Samp, float4(coord.xy, 0, 0)).r - 1e-5);
-		shadow = ShadowPCSS(PSSM2Samp, coord.xy, receiverDepth, noise, 1);
+		shadow = ShadowPCSS(PSSM2Samp, coord.xy, receiverDepth, noise, minBlockerDist, normalBias, 1);
 	}
 	else if (coord.w == 2)
 	{
 		clip(tex2Dlod(PSSM3Samp, float4(coord.xy, 0, 0)).r - 1e-5);
-		shadow = ShadowPCSS(PSSM3Samp, coord.xy, receiverDepth, noise, 2);
+		shadow = ShadowPCSS(PSSM3Samp, coord.xy, receiverDepth, noise, minBlockerDist, normalBias, 2);
 	}
 	else
 	{
 		clip(tex2Dlod(PSSM4Samp, float4(coord.xy, 0, 0)).r - 1e-5);
-		shadow = ShadowPCSS(PSSM4Samp, coord.xy, receiverDepth, noise, 3);
+		shadow = ShadowPCSS(PSSM4Samp, coord.xy, receiverDepth, noise, minBlockerDist, normalBias, 3);
 	}
 #else
 	float radius = 3.0 / float(SHADOW_MAP_SIZE);
@@ -437,7 +468,7 @@ float ShadingShadow(MaterialParam material, float3 viewPosition)
 	}
 #endif
 
-	return shadow;
+	return shadow * terminator;
 }
 
 float4 ShadowMapGenPS(
@@ -453,13 +484,14 @@ float4 ShadowMapGenPS(
 
 	clip(any(material.visibility) - 1e-5);
 
+	float4 MRT6 = tex2Dlod(Gbuffer6Map, float4(coord, 0, 0));
+	material.normal = DecodeNormal(MRT6.xyz);
+
 	float3 viewPosition = viewdir * (material.linearDepth / viewdir.z);
 
 	float shadow = ShadingShadow(material, viewPosition);
 
 #if CONTACT_SHADOW_QUALITY >= 1
-	float4 MRT6 = tex2Dlod(Gbuffer6Map, float4(coord, 0, 0));
-	material.normal = DecodeNormal(MRT6.xyz);
 	float3 L = mul(-SunDirection, (float3x3)matView);
 	float contactShadow = GetContactShadow(viewPosition, material.normal, L, coord, material.linearDepth);
 	shadow *= contactShadow;
@@ -467,8 +499,6 @@ float4 ShadowMapGenPS(
 	shadow *= GetGlobalShadow(viewPosition, material.normal, L, coord);
 #endif
 #elif SSGS_QUALITY >= 1
-	float4 MRT6_ssgs = tex2Dlod(Gbuffer6Map, float4(coord, 0, 0));
-	material.normal = DecodeNormal(MRT6_ssgs.xyz);
 	float3 L_ssgs = mul(-SunDirection, (float3x3)matView);
 	shadow *= GetGlobalShadow(viewPosition, material.normal, L_ssgs, coord);
 #endif
