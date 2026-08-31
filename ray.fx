@@ -196,6 +196,10 @@ static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceB
 #	include "shader/TAA.fxsub"
 #endif
 
+#if AA_QUALITY == 7
+#	include "shader/DLAA.fxsub"
+#endif
+
 #if POST_MOTION_BLUR_ENABLE
 #	include "shader/PostProcessMotionBlur.fxsub"
 #endif
@@ -460,11 +464,11 @@ technique DeferredLighting<
 	"RenderColorTarget=SMAAEdgeMap;  Clear=Color; Pass=SMAAEdgeDetection;"
 	"RenderColorTarget=SMAABlendMap; Clear=Color; Pass=SMAABlendingWeightCalculation;"
 #if POST_MOTION_BLUR_ENABLE && POST_SHARPEN_ENABLE
-	"RenderColorTarget=ShadingMapTemp2; Pass=SMAANeighborhoodBlendingFinal;"
+	"RenderColorTarget=ShadingMapTemp2; Pass=SMAANeighborhoodBlending;"
 #elif POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
-	"RenderColorTarget=ShadingMapTemp; Pass=SMAANeighborhoodBlendingFinal;"
+	"RenderColorTarget=ShadingMapTemp; Pass=SMAANeighborhoodBlending;"
 #else
-	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=SMAANeighborhoodBlendingFinal;"
+	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=SMAANeighborhoodBlending;"
 #endif
 #endif
 
@@ -493,6 +497,16 @@ technique DeferredLighting<
 	"RenderColorTarget=ShadingMapTemp; Pass=TAAFinal;"
 #else
 	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=TAAFinal;"
+#endif
+#endif
+
+#if AA_QUALITY == 7
+#if POST_MOTION_BLUR_ENABLE && POST_SHARPEN_ENABLE
+	"RenderColorTarget=ShadingMapTemp2; Pass=GDLAAPass;"
+#elif POST_MOTION_BLUR_ENABLE || POST_SHARPEN_ENABLE
+	"RenderColorTarget=ShadingMapTemp; Pass=GDLAAPass;"
+#else
+	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=GDLAAPass;"
 #endif
 #endif
 
@@ -1322,6 +1336,14 @@ technique DeferredLighting<
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
 		PixelShader  = compile ps_3_0 TAAFinalPS();
+	}
+#endif
+#if AA_QUALITY == 7
+	pass GDLAAPass<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 GDLAA_PS(ShadingMapTempSamp, ViewportOffset2);
 	}
 #endif
 #if POST_SHARPEN_ENABLE

@@ -1,0 +1,165 @@
+/**
+ * G-DLAA (Hybrid Geometric & Directional Light-weight Anti-Aliasing)
+ *
+ * Combines G-Buffer Normal/Depth geometry analysis with Dmitry Andreev's Directional
+ * Light-weight Anti-Aliasing (DLAA). Protects flat textured surfaces (eyes, fabric patterns,
+ * text) from blurring while providing crisp subpixel anti-aliasing on 3D geometric silhouettes,
+ * anime character outlines, specular highlights, and harsh shadow boundaries.
+ *
+ * Designed for DirectX 9 / Shader Model 3.0 in ray-mmd deferred pipeline.
+ */
+
+#ifndef GDLAA_EDGE_THRESHOLD
+#	define GDLAA_EDGE_THRESHOLD 0.075f
+#endif
+
+#ifndef GDLAA_GEOM_DEPTH_SCALE
+#	define GDLAA_GEOM_DEPTH_SCALE 8.0f
+#endif
+
+#ifndef GDLAA_GEOM_NORMAL_SCALE
+#	define GDLAA_GEOM_NORMAL_SCALE 3.0f
+#endif
+
+#ifndef GDLAA_LONG_EDGE_WEIGHT
+#	define GDLAA_LONG_EDGE_WEIGHT 1.5f
+#endif
+
+#ifndef GDLAA_SUBPIXEL_STRENGTH
+#	define GDLAA_SUBPIXEL_STRENGTH 0.5f
+#endif
+
+/**
+ * Computes geometric edge strength and screen-space normal from G-Buffer depth and normal maps.
+ *
+ * @param coord Screen-space texture coordinates [0, 1].
+ * @param offset Texel offset (1.0 / ViewportSize).
+ * @param outGeomNormal Screen-space 2D gradient vector of the geometric edge.
+ * @return Scalar geometric discontinuity factor in [0, 1].
+ */
+float GDLAA_ComputeGeometricEdge(float2 coord, float2 offset, out float2 outGeomNormal)
+{
+	// Linear view depth 4-tap cross sampling
+	float depthCenter = tex2Dlod(Gbuffer8Map, float4(coord, 0, 0)).r;
+	float depthLeft   = tex2Dlod(Gbuffer8Map, float4(coord + float2(-offset.x, 0), 0, 0)).r;
+	float depthRight  = tex2Dlod(Gbuffer8Map, float4(coord + float2( offset.x, 0), 0, 0)).r;
+	float depthUp     = tex2Dlod(Gbuffer8Map, float4(coord + float2(0, -offset.y), 0, 0)).r;
+	float depthDown   = tex2Dlod(Gbuffer8Map, float4(coord + float2(0,  offset.y), 0, 0)).r;
+
+	float minDepthH = max(min(depthLeft, depthRight), 0.05f);
+	float minDepthV = max(min(depthUp, depthDown), 0.05f);
+
+	float depthGradH = (depthLeft - depthRight) / minDepthH;
+	float depthGradV = (depthUp - depthDown) / minDepthV;
+	float depthEdge = saturate((abs(depthGradH) + abs(depthGradV)) * GDLAA_GEOM_DEPTH_SCALE);
+
+	// World/View normal 4-tap cross sampling
+	float3 normLeft  = DecodeGBufferNormal(tex2Dlod(Gbuffer2Map, float4(coord + float2(-offset.x, 0), 0, 0)));
+	float3 normRight = DecodeGBufferNormal(tex2Dlod(Gbuffer2Map, float4(coord + float2( offset.x, 0), 0, 0)));
+	float3 normUp    = DecodeGBufferNormal(tex2Dlod(Gbuffer2Map, float4(coord + float2(0, -offset.y), 0, 0)));
+	float3 normDown  = DecodeGBufferNormal(tex2Dlod(Gbuffer2Map, float4(coord + float2(0,  offset.y), 0, 0)));
+
+	float normDiffH = 1.0f - saturate(dot(normLeft, normRight));
+	float normDiffV = 1.0f - saturate(dot(normUp, normDown));
+	float normalEdge = saturate((normDiffH + normDiffV) * GDLAA_GEOM_NORMAL_SCALE);
+
+	outGeomNormal = float2(depthGradH + (normLeft.z - normRight.z), depthGradV + (normUp.z - normDown.z));
+	return saturate(depthEdge + normalEdge);
+}
+
+/**
+ * Executes hybrid directional and geometric anti-aliasing reconstruction.
+ *
+ * @param source Sampler containing tonemapped HDR/LDR color in RGB and luminance in Alpha.
+ * @param coord Center screen-space texture coordinates.
+ * @param offset Texel offset (1.0 / ViewportSize).
+ * @return Anti-aliased RGBA color.
+ */
+float4 GDLAA_Filter(sampler2D source, float2 coord, float2 offset)
+{
+	float4 center = tex2Dlod(source, float4(coord, 0, 0));
+
+	// 1. Geometric Discontinuity Evaluation
+	float2 geomNormal = 0;
+	float geomEdge = GDLAA_ComputeGeometricEdge(coord, offset, geomNormal);
+
+	// 2. Optical Luma High-Pass Taps (Horizontal & Vertical 5-tap lines)
+	float4 left1   = tex2Dlod(source, float4(coord + float2(-offset.x, 0), 0, 0));
+	float4 right1  = tex2Dlod(source, float4(coord + float2( offset.x, 0), 0, 0));
+	float4 left2   = tex2Dlod(source, float4(coord + float2(-2.0f * offset.x, 0), 0, 0));
+	float4 right2  = tex2Dlod(source, float4(coord + float2( 2.0f * offset.x, 0), 0, 0));
+
+	float4 up1     = tex2Dlod(source, float4(coord + float2(0, -offset.y), 0, 0));
+	float4 down1   = tex2Dlod(source, float4(coord + float2(0,  offset.y), 0, 0));
+	float4 up2     = tex2Dlod(source, float4(coord + float2(0, -2.0f * offset.y), 0, 0));
+	float4 down2   = tex2Dlod(source, float4(coord + float2(0,  2.0f * offset.y), 0, 0));
+
+	// High-pass difference across center (measures high-frequency edge intensity)
+	float diffH = abs((center.a * 2.0f) - (left1.a + right1.a));
+	float diffV = abs((center.a * 2.0f) - (up1.a + down1.a));
+
+	// Long-edge gradient span
+	float diffH_long = abs(center.a - left2.a) + abs(center.a - right2.a);
+	float diffV_long = abs(center.a - up2.a) + abs(center.a - down2.a);
+
+	float maxLumaDiff = max(diffH, diffV);
+
+	// Early out for flat areas with no geometric edge and below luma edge threshold (protects textures)
+	if (geomEdge < 0.02f && maxLumaDiff < GDLAA_EDGE_THRESHOLD)
+	{
+		return float4(center.rgb, 1.0f);
+	}
+
+	// 3. Directional Edge Orientation (Horizontal vs Vertical dominant)
+	bool isHorz = (diffV + diffV_long * 0.5f) > (diffH + diffH_long * 0.5f);
+
+	float4 filteredResult;
+
+	if (isHorz)
+	{
+		// Horizontal edge: filter along X axis (tangent), subpixel search across Y (normal)
+		float4 blurTangent = (left2 + left1 + center + right1 + right2) * 0.2f;
+
+		float gradUp   = abs(center.a - up1.a);
+		float gradDown = abs(center.a - down1.a);
+		float4 sampleNormal = (gradUp > gradDown) ? up1 : down1;
+		float normalEdgeSharpness = max(gradUp, gradDown);
+
+		float subpixelShift = saturate(diffV / max(normalEdgeSharpness * 2.0f, 1e-4f)) * GDLAA_SUBPIXEL_STRENGTH;
+		float4 shortEdgeResult = lerp(center, sampleNormal, subpixelShift);
+
+		float longEdgeWeight = saturate(diffV_long * GDLAA_LONG_EDGE_WEIGHT);
+		filteredResult = lerp(shortEdgeResult, blurTangent, longEdgeWeight);
+	}
+	else
+	{
+		// Vertical edge: filter along Y axis (tangent), subpixel search across X (normal)
+		float4 blurTangent = (up2 + up1 + center + down1 + down2) * 0.2f;
+
+		float gradLeft  = abs(center.a - left1.a);
+		float gradRight = abs(center.a - right1.a);
+		float4 sampleNormal = (gradLeft > gradRight) ? left1 : right1;
+		float normalEdgeSharpness = max(gradLeft, gradRight);
+
+		float subpixelShift = saturate(diffH / max(normalEdgeSharpness * 2.0f, 1e-4f)) * GDLAA_SUBPIXEL_STRENGTH;
+		float4 shortEdgeResult = lerp(center, sampleNormal, subpixelShift);
+
+		float longEdgeWeight = saturate(diffH_long * GDLAA_LONG_EDGE_WEIGHT);
+		filteredResult = lerp(shortEdgeResult, blurTangent, longEdgeWeight);
+	}
+
+	// 4. Adaptive Blending with Geometric Priority and Texture Protection
+	float lumaEdgeFactor = saturate((maxLumaDiff - GDLAA_EDGE_THRESHOLD) / max(1.0f - GDLAA_EDGE_THRESHOLD, 1e-4f));
+	float totalEdgeWeight = saturate(geomEdge * 1.25f + lumaEdgeFactor);
+
+	float3 antiAliasedColor = lerp(center.rgb, filteredResult.rgb, totalEdgeWeight);
+	return float4(antiAliasedColor, 1.0f);
+}
+
+/**
+ * Pixel shader entry point for G-DLAA Anti-Aliasing pass.
+ */
+float4 GDLAA_PS(in float2 coord : TEXCOORD0, uniform sampler2D source, uniform float2 offset) : COLOR
+{
+	return GDLAA_Filter(source, coord, offset);
+}
