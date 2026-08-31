@@ -207,7 +207,7 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 		);
 	}
 
-	occlusion *= (1.0f / (float)HBAO_DIRECTION_COUNT);
+	occlusion *= (1.0f / max((float)HBAO_DIRECTION_COUNT, 1.0f));
 	occlusion.xyz = mad((occlusion.xyz * 2.2f), 0.5f, 0.5f);
 
 	occlusion.w = occlusion.w * tex2Dlod(SSAOMapSamp, float4(uv.xy, 0, 0)).a;
@@ -243,7 +243,7 @@ float4 ScreenSpaceDirOccBlurPS(
 	float2 offset2 = uv - offset;
 
 	[unroll]
-	for (int r = 1; r < SSDO_BLUR_RADIUS; ++r)
+	for (int r = 1; r <= SSDO_BLUR_RADIUS; ++r)
 	{
 		float spatialWeight = exp(-float(r * r) * blurFalloff);
 		float depth1 = linearizeDepth(offset1);
@@ -351,6 +351,13 @@ HBAOTemporalOutput SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0)
 	historyAO = clamp(historyAO, minAO, maxAO);
 
 	float4 denoised = lerp(curAO, historyAO, 0.85f);
+
+	// Re-normalize bent normal after temporal blending to prevent vector length drift
+	float3 bn = denoised.xyz * 2.0f - 1.0f;
+	float bnLen = length(bn);
+	if (bnLen > 1e-4f)
+		denoised.xyz = (bn / bnLen) * 0.5f + 0.5f;
+
 	output.color0 = denoised;
 	output.color1 = denoised;
 	return output;

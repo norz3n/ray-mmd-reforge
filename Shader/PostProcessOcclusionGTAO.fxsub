@@ -60,6 +60,27 @@ float3 GetNormal(float2 uv)
 	return DecodeGBufferNormal(MRT6);
 }
 
+// Evaluates the clamped horizon cosine for a single sample in one GTAO slice direction.
+// Applies quadratic falloff, thickness heuristic and behind-surface rejection weights.
+// Returns lowHorizonCos unchanged when the sample is out of range or too close.
+float GTAOSampleHorizonCos(
+	float3 sampleDelta, float3 viewVec,
+	float lowHorizonCos, float effectRadius,
+	float maxThickness, float maxBehind)
+{
+	float sampleDist = length(sampleDelta);
+	if (sampleDist < 1e-4f || sampleDist >= effectRadius)
+		return lowHorizonCos;
+
+	float3 hvec       = sampleDelta / sampleDist;
+	float falloff     = saturate(1.0f - (sampleDist / effectRadius) * (sampleDist / effectRadius));
+	float distInFront = max(0.0f, -sampleDelta.z);
+	float thickness   = saturate(1.0f - max(0.0f, distInFront - maxThickness * 0.2f) / maxThickness);
+	float behind      = saturate(1.0f - max(0.0f, sampleDelta.z) / maxBehind);
+	float weight      = falloff * thickness * behind;
+	return lerp(lowHorizonCos, dot(hvec, viewVec), weight);
+}
+
 // Builds rotation matrix from (0,0,-1) to viewVec [Jimenez 2016 / XeGTAO]
 float3x3 XeGTAO_RotFromToMatrix(float3 from, float3 to)
 {
@@ -200,53 +221,15 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 			// Positive direction (+dir)
 			if (depth0 > 1e-4f)
 			{
-				float3 samplePos0 = GetViewPosition(projConstant, sampleScreenPos0, depth0);
-				float3 sampleDelta0 = samplePos0 - vPos;
-				float sampleDist0 = length(sampleDelta0);
-
-				if (sampleDist0 > 1e-4f && sampleDist0 < effectRadius)
-				{
-					float3 sampleHorizonVec0 = sampleDelta0 / sampleDist0;
-					float falloffWeight0 = saturate(1.0f - (sampleDist0 / effectRadius) * (sampleDist0 / effectRadius));
-
-					// Strict thickness heuristic: ignore foreground/background objects separated in depth (eliminates dark halos)
-					float distInFront0 = max(0.0f, -sampleDelta0.z);
-					float thicknessWeight0 = saturate(1.0f - max(0.0f, distInFront0 - maxThickness * 0.2f) / maxThickness);
-					float distBehind0 = max(0.0f, sampleDelta0.z);
-					float behindWeight0 = saturate(1.0f - distBehind0 / maxBehind);
-
-					float weight0 = falloffWeight0 * thicknessWeight0 * behindWeight0;
-
-					float shc0 = dot(sampleHorizonVec0, viewVec);
-					shc0 = lerp(lowHorizonCos0, shc0, weight0);
-					horizonCos0 = max(horizonCos0, shc0);
-				}
+				float3 sampleDelta0 = GetViewPosition(projConstant, sampleScreenPos0, depth0) - vPos;
+				horizonCos0 = max(horizonCos0, GTAOSampleHorizonCos(sampleDelta0, viewVec, lowHorizonCos0, effectRadius, maxThickness, maxBehind));
 			}
 
 			// Negative direction (-dir)
 			if (depth1 > 1e-4f)
 			{
-				float3 samplePos1 = GetViewPosition(projConstant, sampleScreenPos1, depth1);
-				float3 sampleDelta1 = samplePos1 - vPos;
-				float sampleDist1 = length(sampleDelta1);
-
-				if (sampleDist1 > 1e-4f && sampleDist1 < effectRadius)
-				{
-					float3 sampleHorizonVec1 = sampleDelta1 / sampleDist1;
-					float falloffWeight1 = saturate(1.0f - (sampleDist1 / effectRadius) * (sampleDist1 / effectRadius));
-
-					// Strict thickness heuristic: ignore foreground/background objects separated in depth (eliminates dark halos)
-					float distInFront1 = max(0.0f, -sampleDelta1.z);
-					float thicknessWeight1 = saturate(1.0f - max(0.0f, distInFront1 - maxThickness * 0.2f) / maxThickness);
-					float distBehind1 = max(0.0f, sampleDelta1.z);
-					float behindWeight1 = saturate(1.0f - distBehind1 / maxBehind);
-
-					float weight1 = falloffWeight1 * thicknessWeight1 * behindWeight1;
-
-					float shc1 = dot(sampleHorizonVec1, viewVec);
-					shc1 = lerp(lowHorizonCos1, shc1, weight1);
-					horizonCos1 = max(horizonCos1, shc1);
-				}
+				float3 sampleDelta1 = GetViewPosition(projConstant, sampleScreenPos1, depth1) - vPos;
+				horizonCos1 = max(horizonCos1, GTAOSampleHorizonCos(sampleDelta1, viewVec, lowHorizonCos1, effectRadius, maxThickness, maxBehind));
 			}
 		}
 
@@ -283,7 +266,7 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 	{
 		totalVisibility = 1.0f;
 	}
-	totalVisibility = clamp(totalVisibility, 0.05f, 1.0f);
+	totalVisibility = saturate(totalVisibility);
 
 	if (any(isnan(bentNormalAcc)) || any(isinf(bentNormalAcc)) || length(bentNormalAcc) < 1e-4f)
 		bentNormalAcc = viewNormal;
@@ -442,6 +425,13 @@ SSDOTemporalOutput SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0)
 	historyAO = clamp(historyAO, minAO, maxAO);
 
 	float4 denoised = lerp(curAO, historyAO, 0.85f);
+
+	// Re-normalize bent normal after temporal blending to prevent vector length drift
+	float3 bn = denoised.xyz * 2.0f - 1.0f;
+	float bnLen = length(bn);
+	if (bnLen > 1e-4f)
+		denoised.xyz = (bn / bnLen) * 0.5f + 0.5f;
+
 	output.color0 = denoised;
 	output.color1 = denoised;
 	return output;
