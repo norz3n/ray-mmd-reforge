@@ -320,10 +320,16 @@ float ShadowPCSS(sampler source, float2 coord, float receiverDepth, float noise,
 	// Graze angle mitigation: shrink search/filter radius to avoid sampling background and causing light leaks (ESM noise)
 	float grazeScale = saturate(1.0f - normalBias * normalBias);
 
+	// Calculate scale relative to Cascade 0 to keep UV clamp limits physically constant in world space.
+	// This completely eliminates hard seams when shadows transition between cascades.
+	float relativeScale = lightCropParams[cascadeIndex].x / lightCropParams[0].x;
+
 	// STEP 1: Blocker Search
 	float searchRadiusWorld = mSunPCSSBlockerSearchScale * (10.0f * mSunLightSize);
 	float searchRadiusUV = searchRadiusWorld * cascadeCropScale;
-	searchRadiusUV = clamp(searchRadiusUV, 3.0f / float(SHADOW_MAP_SIZE), 0.08f);
+	float minSearchUV = (3.0f / float(SHADOW_MAP_SIZE)) * relativeScale;
+	float maxSearchUV = 0.08f * relativeScale;
+	searchRadiusUV = clamp(searchRadiusUV, minSearchUV, maxSearchUV);
 	searchRadiusUV *= max(grazeScale, 0.2f); // Keep a small minimum search radius
 
 	float2 blocker = FindBlocker(source, coord, searchRadiusUV, receiverDepth, rotMat, minBlockerDist, blockerSamples);
@@ -341,8 +347,8 @@ float ShadowPCSS(sampler source, float2 coord, float receiverDepth, float noise,
 	float penumbraWorld = blockerDistance * mSunLightSize;
 	float filterRadiusUV = penumbraWorld * cascadeCropScale;
 
-	float minFilterUV = mSunPCSSMinFilterRadius / float(SHADOW_MAP_SIZE);
-	float maxFilterUV = (mSunPCSSMaxFilterRadius / float(SHADOW_MAP_SIZE)) * (1.0f / (1.0f + cascadeIndex * 0.25f));
+	float minFilterUV = (mSunPCSSMinFilterRadius / float(SHADOW_MAP_SIZE)) * relativeScale;
+	float maxFilterUV = (mSunPCSSMaxFilterRadius / float(SHADOW_MAP_SIZE)) * relativeScale;
 	filterRadiusUV = clamp(filterRadiusUV, minFilterUV, maxFilterUV);
 	filterRadiusUV *= grazeScale; // Shrink penumbra at grazing angles
 
