@@ -165,13 +165,10 @@ void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 
 			float lightOptical = (density * 0.4f + lightDensity * 0.6f) * (stepLength * 2.5f) * 0.00075f;
 
 			float sunTrans = ComputeBeerPowder(lightOptical, density);
-			// Multiple scattering: forward-peak Silver Lining + isotropic multiple bounce
-			// Ensures clouds stay brightly illuminated from all camera angles, not just when staring at the sun
-			float directPhase = phaseHG * 0.50f + 0.35f;
-			float3 directSun = sunTrans * directPhase * setting.sunRadiance * float3(1.05f, 1.0f, 0.95f);
+			float3 directSun = sunTrans * (phaseHG * 0.25f) * setting.sunRadiance * float3(1.02f, 0.98f, 0.94f);
 
-			// Height-dependent ambient skylight: soft warm tint at base, brilliant cool skylight bounce at top
-			float3 ambientSky = lerp(float3(0.40f, 0.48f, 0.62f), float3(0.88f, 0.94f, 1.05f), cloudHeight) * (setting.sunRadiance * 0.22f);
+			// Height-dependent ambient: warm golden near base, cool blue-white dome on top
+			float3 ambientSky = lerp(float3(0.28f, 0.35f, 0.48f), float3(0.65f, 0.75f, 0.88f), cloudHeight) * (setting.sunRadiance * 0.12f);
 
 			float stepTransmittance = exp(-stepOpticalDepth);
 			accumulatedColor += (directSun + ambientSky) * (transmittance * (1.0f - stepTransmittance));

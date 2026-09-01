@@ -120,7 +120,7 @@ float4 AtmosphericFogMiePS(
 	setting.cloudTop = 5.6 * mUnitDistance;
 	setting.cloudBottom = 5.0 * mUnitDistance;
 	setting.clouddir = float3(1315.7, 0, -3000) * mCloudSpeed;
-	fog *= HitCloudsTest(setting, CameraPosition + float3(0, mEarthPeopleHeight * mUnitDistance, 0), V, SunDirection);
+	fog *= step(0.5, HitCloudsTest(setting, CameraPosition + float3(0, mEarthPeopleHeight * mUnitDistance, 0), V, SunDirection));
 #endif
 
 	return float4(fog, 0);
@@ -206,12 +206,7 @@ float4 AtmosphericScatteringPS(
 #endif
 
 	float3 fogBlur = tex2Dlod(FogBlurMapSamp, float4(coord + ViewportOffset, 0, 0)).rgb;
-	
-	// Ensure background sky and clouds are not washed out by additive fog blanket.
-	// On models/geometry (visibility == 1): full atmospheric fog + godrays.
-	// On skybox (visibility == 0): preserve cloud contrast, softly adding only radiant godray shafts.
-	float3 finalFog = fogAmount * visibility + fogBlur * lerp(0.35f, 1.0f, visibility);
-	return float4(finalFog, luminance(mWaveLength) * material.linearDepth * mFogDensity * visibility);
+	return float4(fogAmount * visibility + fogBlur, luminance(mWaveLength) * material.linearDepth * mFogDensity * visibility);
 }
 
 #endif
