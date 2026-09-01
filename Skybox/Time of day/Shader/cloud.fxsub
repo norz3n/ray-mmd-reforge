@@ -88,6 +88,10 @@ float ComputeCloudDensity(ScatteringParams setting, float3 P, out float cloudHei
 	float2 P1 = sphereUV + setting.clouddir.xz;
 	float2 P2 = sphereUV + setting.clouddir.xz * 0.55f;
 
+	// Macro cloud coverage (large majestic formations spanning tens of kilometers)
+	float macroShape = tex2Dlod(CloudMacroMapSamp, float4(P1 * 0.0000075f, 0, 0)).r;
+	float coverNoise = tex2Dlod(CloudCoverMapSamp, float4(P2 * 0.000014f, 0, 0)).r;
+
 	// Dynamic cloud coverage scaling driven by controller (Cloud- shrinks to clear sky, Cloud+ expands to overcast)
 	float coverageBias = saturate(setting.cloud * 0.35f);
 	float targetCoverage = saturate(macroShape * (0.35f + coverageBias * 0.45f) + coverNoise * (0.20f + coverageBias * 0.30f));
