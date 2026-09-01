@@ -91,8 +91,13 @@ float ComputeCloudDensity(ScatteringParams setting, float3 P, out float cloudHei
 	float atmoHeight = length(P - setting.earthCenter) - setting.earthRadius;
 	cloudHeight = saturate((atmoHeight - setting.cloudBottom) / max(setting.cloudTop - setting.cloudBottom, 1.0f));
 
-	// Natural height profile: flat cloud base, voluminous middle billows, soft wispy top
-	float heightGradient = smoothstep(0.0f, 0.15f, cloudHeight) * smoothstep(1.0f, 0.55f, cloudHeight);
+	// Gaussian height profile: density peaks sharply at cloudHeight=0.45, σ≈0.22.
+	// This ensures only steps near the cloud center have non-zero density,
+	// preventing the "N layers = N raymarching steps" duplication artifact.
+	float heightPeak = 0.45f;
+	float heightGradient = exp(-pow((cloudHeight - heightPeak) * 4.5f, 2.0f));
+	// Hard clamp at slab edges to avoid bleeding outside cloudBottom/cloudTop
+	heightGradient *= smoothstep(0.0f, 0.08f, cloudHeight) * smoothstep(1.0f, 0.92f, cloudHeight);
 	if (heightGradient <= 1e-4f) return 0.0f;
 
 	float3 P1 = P + setting.clouddir;
