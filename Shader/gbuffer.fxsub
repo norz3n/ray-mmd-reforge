@@ -82,6 +82,21 @@ float3 DecodeNormal(float3 enc)
 	return normal;
 }
 
+float3 EncodeNormalOctahedron(float3 normal)
+{
+	float2 enc = EncodeOctahedron(normal);
+	float2 enc255 = enc * 255.0f;
+	float2 residual = floor(frac(enc255) * 16.0f);
+	return float3(floor(enc255), residual.x * 16.0f + residual.y) / 255.0f;
+}
+
+float3 DecodeNormalOctahedron(float3 enc)
+{
+	float nz = floor(enc.z * 255.0f) / 16.0f;
+	enc.xy += float2(floor(nz) / 16.0f, frac(nz)) / 255.0f;
+	return DecodeOctahedron(enc.xy);
+}
+
 float3 EncodeYcbcr(float3 col)
 {
 	col = sqrt(col);

@@ -271,6 +271,52 @@ float RoughnessToSmoothness(float roughness)
 	return 1.0f - sqrt(roughness);
 }
 
+/**
+ * Octahedron normal vector encoding (Meyer et al. 2010 / Cigolle et al. 2014 / Knarkowicz 2014)
+ * Maps a 3D unit normal vector onto an octahedron unwrapped to a 2D square [-1, 1] or [0, 1].
+ */
+float2 OctWrap(float2 v)
+{
+	float sx = v.x >= 0.0f ? 1.0f : -1.0f;
+	float sy = v.y >= 0.0f ? 1.0f : -1.0f;
+	return (1.0f - abs(v.yx)) * float2(sx, sy);
+}
+
+float2 EncodeOctahedron(float3 n)
+{
+	n /= (abs(n.x) + abs(n.y) + abs(n.z) + 1e-6f);
+	n.xy = (n.z >= 0.0f) ? n.xy : OctWrap(n.xy);
+	return n.xy * 0.5f + 0.5f;
+}
+
+float3 DecodeOctahedron(float2 enc)
+{
+	float2 f = enc * 2.0f - 1.0f;
+	float3 n = float3(f.x, f.y, 1.0f - abs(f.x) - abs(f.y));
+	float t = saturate(-n.z);
+	float sx = (n.x >= 0.0f) ? -1.0f : 1.0f;
+	float sy = (n.y >= 0.0f) ? -1.0f : 1.0f;
+	n.xy += t * float2(sx, sy);
+	return normalize(n);
+}
+
+float2 EncodeOctahedronSigned(float3 n)
+{
+	n /= (abs(n.x) + abs(n.y) + abs(n.z) + 1e-6f);
+	n.xy = (n.z >= 0.0f) ? n.xy : OctWrap(n.xy);
+	return n.xy;
+}
+
+float3 DecodeOctahedronSigned(float2 enc)
+{
+	float3 n = float3(enc.x, enc.y, 1.0f - abs(enc.x) - abs(enc.y));
+	float t = saturate(-n.z);
+	float sx = (n.x >= 0.0f) ? -1.0f : 1.0f;
+	float sy = (n.y >= 0.0f) ? -1.0f : 1.0f;
+	n.xy += t * float2(sx, sy);
+	return normalize(n);
+}
+
 float3 ColorBalance(float3 color, float4 balance)
 {
 	float3 lum = luminance(color);
