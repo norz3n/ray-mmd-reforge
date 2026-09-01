@@ -99,13 +99,18 @@ float ComputeCloudDensity(ScatteringParams setting, float3 P, out float cloudHei
 	float cumulusShape = (macro * 0.45f + cover * 0.35f + detail * 0.45f) * 0.85f;
 
 	// STAGE 2: Smooth coverage thresholding (Cloud- / Cloud+)
-	// - At 0.0 (Cloud- max): threshold >= 0.95 -> 0% clouds (clear blue sky)
-	// - At 0.5 (default): threshold ≈ 0.68 -> ~25% coverage (discrete scattered cumulus)
-	// - At 1.0 (Cloud+ max): threshold ≈ 0.42 -> ~55% coverage (lush cloud formations with clear sky valleys)
-	float covThreshold = lerp(0.95f, 0.42f, saturate(setting.cloud));
+	// Piecewise calibration:
+	// - cloud = 0.0 (Cloud- 1.0): threshold = 0.85 -> 0% clouds (full clear sky at end of slider)
+	// - cloud = 0.25 (Cloud- 0.5): threshold ≈ 0.65 -> light scattered clouds (visible across full range)
+	// - cloud = 0.5 (default 0.0): threshold = 0.46 -> lush voluminous cumulus clouds
+	// - cloud = 1.0 (Cloud+ 1.0): threshold = 0.30 -> heavy dramatic formations (~65% coverage with blue sky gaps)
+	float cloudNorm = saturate(setting.cloud);
+	float covThreshold = (cloudNorm < 0.5f)
+		? lerp(0.85f, 0.46f, cloudNorm * 2.0f)
+		: lerp(0.46f, 0.30f, (cloudNorm - 0.5f) * 2.0f);
 
 	// Smooth Hermite transition: silky soft cloud edges without harsh steps or pixel noise
-	float density = smoothstep(covThreshold, covThreshold + 0.26f, cumulusShape);
+	float density = smoothstep(covThreshold, covThreshold + 0.28f, cumulusShape);
 
 	// Apply height envelope
 	return density * heightMask;
