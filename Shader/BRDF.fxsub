@@ -360,6 +360,21 @@ float3 SpecularBRDF_GGXAniso(float3 N, float3 H, float nh, float nl, float vh, f
 
 #define pow2(x) ((x) * (x))
 
+/**
+ * Charlie Sheen BRDF for cloth, fabric, silk, velvet, and microfibers (Estevez & Kulla 2017 / Sony Pictures Imageworks).
+ * Evaluates the Charlie microfacet distribution function D_Charlie with Neubelt shadow-masking term V_Neubelt,
+ * microfiber grazing-angle rim fuzz, and energy-conserving directional albedo scaling.
+ *
+ * @param material Material parameters.
+ * @param nh Dot product of normal and half vector.
+ * @param nl Dot product of normal and light vector.
+ * @param vh Dot product of view and half vector.
+ * @param nv Dot product of normal and view vector.
+ * @param roughness Filtered surface roughness.
+ * @param normalizeFactor Normalization constant.
+ * @param albedoScaling Output diffuse attenuation factor for energy conservation.
+ * @return Evaluated cloth/sheen specular color.
+ */
 float3 ClothShading(MaterialParam material, float nh, float nl, float vh, float nv, float roughness, float normalizeFactor, out float albedoScaling)
 {
 	float clampedSheenRoughness = max(roughness, 1e-4f);
@@ -368,13 +383,15 @@ float3 ClothShading(MaterialParam material, float nh, float nl, float vh, float 
 	float cos2h = nh * nh;
 	float sin2h = max(1.0f - cos2h, 0.0078125f);
 	
-	float D_Charlie = (2.0f + invAlpha) * pow(sin2h, invAlpha * 0.5f) * 0.159154943f;
+	// Charlie distribution: D(h) = (2 + 1/alpha) * sin(h)^(1/alpha) / (2 * PI)
+	float D_Charlie = (2.0f + invAlpha) * pow(sin2h, invAlpha * 0.5f) * InvPIE * 0.5f;
 	
-	// 0.05f epsilon prevents mathematical explosion (singularity) at grazing angles!
+	// Neubelt & Pettineo visibility term with grazing singularity guard
 	float denominator = 4.0f * (nl + nv - nl * nv) + 0.05f;
 	float V_Neubelt = 1.0f / denominator;
 	
-	float3 sheenColor = material.customDataB;
+	// Fallback to albedo-tinted sheen if customDataB is unassigned
+	float3 sheenColor = any(material.customDataB > 1e-4f) ? material.customDataB : lerp(float3(1.0f, 1.0f, 1.0f), material.albedo, 0.45f);
 	float3 sheenTerm = sheenColor * (D_Charlie * V_Neubelt);
 	
 	// Microfiber rim fuzz scattering (for velvet, cotton, wool)
@@ -399,7 +416,7 @@ float3 ClothShading(MaterialParam material, float nh, float nl, float vh, float 
 	float correction = lerp(0.1f * (clampedSheenRoughness - 0.25f), 0.0f, isSmooth);
 	float directionalAlbedo = saturate(exp2(a * nv + b) + correction);
 	
-	float maxSheenColor = max(sheenColor.r, max(sheenColor.g, sheenColor.b));
+	float maxSheenColor = max3(sheenColor);
 	albedoScaling = saturate(1.0f - maxSheenColor * directionalAlbedo);
 	
 	float3 specBase = SpecularBRDF_GGX(nh, nl, vh, nv, roughness, material.specular, normalizeFactor);

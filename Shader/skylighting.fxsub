@@ -119,7 +119,10 @@ void ShadingMaterial(MaterialParam material, float3 worldView, out float3 diffus
 
 	[branch]
 	if (material.lightModel == SHADINGMODELID_CLOTH)
-		fresnel = EnvironmentSpecularCloth(nv, filteredSmoothness, material.customDataB);
+	{
+		float3 sheenTint = any(material.customDataB > 1e-4f) ? material.customDataB : lerp(float3(1.0f, 1.0f, 1.0f), material.albedo, 0.45f);
+		fresnel = EnvironmentSpecularCloth(nv, filteredSmoothness, sheenTint);
+	}
 	else
 		fresnel = EnvironmentSpecularLUT(BRDFSamp, nv, filteredSmoothness, material.specular);
 
