@@ -119,12 +119,16 @@ float ComputeClound(ScatteringParams setting, float3 P)
 
 float HitCloudsTest(ScatteringParams setting, float3 eye, float3 V, float3 L)
 {
-	float2 outer = ComputeRaySphereIntersection(eye, V, setting.earthCenter, setting.earthRadius + setting.cloudTop);
-	float2 inner = ComputeRaySphereIntersection(eye, V, setting.earthCenter, setting.earthRadius + setting.cloudBottom);
-	if (inner.y > 0) outer.x = inner.y;
-	float3 cloudsStart = eye + V * max(0, outer.x);
+	if (setting.cloud <= 0.001f) return 1.0f;
+
+	float tOuter = ComputeRayPlaneIntersection(eye, V, float3(0,-1,0), setting.cloudTop);
+	float tInner = ComputeRayPlaneIntersection(eye, V, float3(0,-1,0), setting.cloudBottom);
+	if (tInner > 0) tOuter = tInner;
+
+	float3 cloudsStart = eye + V * max(0, tOuter);
 	float cloudHeight;
-	return exp(-0.002f * ComputeCloudDensity(setting, cloudsStart, cloudHeight));
+	float d = ComputeCloudDensity(setting, cloudsStart, cloudHeight);
+	return 1.0f - smoothstep(0.02f, 0.45f, d);
 }
 
 /**

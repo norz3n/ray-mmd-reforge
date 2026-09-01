@@ -120,7 +120,7 @@ float4 AtmosphericFogMiePS(
 	setting.cloudTop = 5.6 * mUnitDistance;
 	setting.cloudBottom = 5.0 * mUnitDistance;
 	setting.clouddir = float3(1315.7, 0, -3000) * mCloudSpeed;
-	fog *= step(0.5, HitCloudsTest(setting, CameraPosition + float3(0, mEarthPeopleHeight * mUnitDistance, 0), V, SunDirection));
+	fog *= HitCloudsTest(setting, CameraPosition + float3(0, mEarthPeopleHeight * mUnitDistance, 0), V, SunDirection);
 #endif
 
 	return float4(fog, 0);
