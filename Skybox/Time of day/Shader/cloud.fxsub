@@ -90,22 +90,29 @@ float ComputeCloudDensity(ScatteringParams setting, float3 P, out float cloudHei
 	float3 p1 = P + setting.clouddir * 1.15f;
 	float3 p2 = P + setting.clouddir * 0.25f;
 
-	// STAGE 1: Smooth broad multi-scale cloud structure (no high-frequency noise that causes grain)
-	float macro = tex2Dlod(CloudMacroMapSamp, float4(p2.xz * 0.000005f, 0, 0)).r;
-	float cover = tex2Dlod(CloudCoverMapSamp, float4(p2.xz * 0.000012f, 0, 0)).r;
-	float detail = tex2Dlod(CloudDetailMapSamp, float4(p1.xz * 0.000024f, 0, 0)).r;
+	// STAGE 1: Multi-scale cloud structure with cluster separation channels
+	// Macro clusters form natural convective formations with distinct clear sky valleys.
+	// Even at max density, the valley channels prevent clouds from merging into a flat ceiling.
+	float macro = tex2Dlod(CloudMacroMapSamp, float4(p2.xz * 0.0000045f, 0, 0)).r;
+	float cover = tex2Dlod(CloudCoverMapSamp, float4(p2.xz * 0.000011f, 0, 0)).r;
+	float detail = tex2Dlod(CloudDetailMapSamp, float4(p1.xz * 0.000022f, 0, 0)).r;
 
-	// Weighted multi-scale blend: broad macro clusters + mid-scale billow shapes
-	float cumulusShape = (macro * 0.45f + cover * 0.35f + detail * 0.45f) * 0.85f;
+	// Macro cluster mask: forms distinct cloud islands
+	float macroCluster = smoothstep(0.18f, 0.72f, macro);
+	// Mid-frequency billow lobes
+	float billowShape = cover * 0.45f + detail * 0.55f;
 
-	// STAGE 2: Smooth coverage thresholding (Cloud- / Cloud+)
-	// - At 0.0 (Cloud- max): threshold >= 0.85 -> 0 clouds
-	// - At 0.5 (default): threshold ≈ 0.42 -> natural scattered cumulus
-	// - At 1.0 (Cloud+ max): threshold ≈ 0.05 -> overcast
-	float covThreshold = lerp(0.85f, 0.05f, saturate(setting.cloud));
+	// Blended shape: clusters contain billowy lobes, but valleys between clusters stay clear
+	float cumulusShape = (macroCluster * 0.65f + billowShape * 0.35f) * (0.80f + 0.20f * cloudHeight);
+
+	// STAGE 2: Coverage thresholding with preserved separation
+	// - At 0.0 (Cloud- max): threshold >= 0.78 -> 0 clouds
+	// - At 0.5 (default): threshold ≈ 0.36 -> natural scattered cumulus
+	// - At 1.0 (Cloud+ max): threshold ≈ 0.12 -> massive towering clouds with distinct clear lanes
+	float covThreshold = lerp(0.78f, 0.12f, saturate(setting.cloud));
 
 	// Smooth Hermite transition: silky soft cloud edges without harsh steps or pixel noise
-	float density = smoothstep(covThreshold, covThreshold + 0.32f, cumulusShape);
+	float density = smoothstep(covThreshold, covThreshold + 0.26f, cumulusShape);
 
 	// Apply height envelope
 	return density * heightMask;
@@ -128,7 +135,7 @@ float HitCloudsTest(ScatteringParams setting, float3 eye, float3 V, float3 L)
 }
 
 /**
- * Volumetric raymarching — Beer-Powder law + single-tap sun probe + ambient height gradient.
+ * Volumetric raymarching — Beer-Powder law + adaptive sun/sky lighting + single-tap sun probe.
  */
 void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 end, float3 V, float3 L, inout float opticalDepth, inout float3 insctrMie)
 {
@@ -146,6 +153,18 @@ void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 
 	float cosTheta = dot(V, L);
 	float phaseHG = ComputeCloudPhaseHG(cosTheta);
 	float3 lightStep = L * (stepLength * 2.5f);
+
+	// Adaptive sun spectral transmittance at cloud layer altitude
+	// Real atmospheric absorption: white at zenith, warm golden/crimson at sunset/sunrise, dark at night
+	float3 sunLightColor = GetTransmittance(setting, float3(0, setting.cloudBottom, 0), L);
+	float sunElevation = saturate(L.y * 2.0f);
+	float3 directSunRadiance = setting.sunRadiance * sunLightColor * sunElevation;
+
+	// Adaptive ambient skylight:
+	// - Zenith / clear sky: bright sky dome illumination
+	// - Dense clouds / overcast: deep ambient occlusion at cloud base (prevents blown-out white ceiling)
+	float coverage = saturate(setting.cloud);
+	float denseOcclusion = lerp(1.0f, 0.65f, coverage * (1.0f - 0.5f));
 
 	[loop]
 	for (int i = 0; i < NUMS_SAMPLES_CLOUD; ++i)
@@ -165,10 +184,11 @@ void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 
 			float lightOptical = (density * 0.4f + lightDensity * 0.6f) * (stepLength * 2.5f) * 0.00075f;
 
 			float sunTrans = ComputeBeerPowder(lightOptical, density);
-			float3 directSun = sunTrans * (phaseHG * 0.25f) * setting.sunRadiance * float3(1.02f, 0.98f, 0.94f);
+			float3 directSun = sunTrans * (phaseHG * 0.25f) * directSunRadiance;
 
-			// Height-dependent ambient: warm golden near base, cool blue-white dome on top
-			float3 ambientSky = lerp(float3(0.28f, 0.35f, 0.48f), float3(0.65f, 0.75f, 0.88f), cloudHeight) * (setting.sunRadiance * 0.12f);
+			// Height-dependent ambient: warm golden near base, cool blue-white dome on top, modulated by density occlusion
+			float heightOcclusion = lerp(0.65f, 1.0f, cloudHeight);
+			float3 ambientSky = lerp(float3(0.24f, 0.32f, 0.45f), float3(0.62f, 0.74f, 0.88f), cloudHeight) * (setting.sunRadiance * 0.12f * denseOcclusion * heightOcclusion);
 
 			float stepTransmittance = exp(-stepOpticalDepth);
 			accumulatedColor += (directSun + ambientSky) * (transmittance * (1.0f - stepTransmittance));
