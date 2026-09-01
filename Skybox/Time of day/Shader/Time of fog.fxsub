@@ -117,8 +117,8 @@ float4 AtmosphericFogMiePS(
 
 #if ATM_CLOUD_ENABLE
 	setting.cloud = mCloudDensity;
-	setting.cloudTop = 5.2 * mUnitDistance;
-	setting.cloudBottom = 5 * mUnitDistance;
+	setting.cloudTop = 5.6 * mUnitDistance;
+	setting.cloudBottom = 5.0 * mUnitDistance;
 	setting.clouddir = float3(1315.7, 0, -3000) * mCloudSpeed;
 	fog *= step(0.5, HitCloudsTest(setting, CameraPosition + float3(0, mEarthPeopleHeight * mUnitDistance, 0), V, SunDirection));
 #endif
