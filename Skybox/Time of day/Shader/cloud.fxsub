@@ -104,10 +104,11 @@ float ComputeCloudDensity(ScatteringParams setting, float3 P, out float cloudHei
 
 	// STAGE 2: Billowy cumulus structure carved through the coverage mask.
 	// setting.cloud [0..1] shifts the THRESHOLD: low = sparse clouds, high = overcast.
-	// At 0.0: threshold=0.52 → very few noise values qualify → almost no clouds
+	// Threshold > 1.204 (= noise_max * 2.15 * 0.56) guarantees billowy = 0 → no clouds at all.
+	// At 0.0: threshold=1.5  → billowy always 0 → completely clear sky
 	// At 0.5: threshold=0.28 → partly cloudy (SA_DirectX default)
 	// At 1.0: threshold=0.04 → almost everywhere qualifies → solid overcast
-	float coverageThreshold = lerp(0.52f, 0.04f, saturate(setting.cloud));
+	float coverageThreshold = lerp(1.5f, 0.04f, saturate(setting.cloud));
 	float billowy = clamp((tex2Dlod(CloudDetailMapSamp, float4(p1.xz * 0.000021f, 0, 0)).r * 2.15f * 0.56f - coverageThreshold) * 0.8f, 0.0f, 0.35f);
 	float clouds2 = clouds1 * billowy;
 	clouds2 *= smoothstep(0.0f, 0.35f, cloudHeight) * smoothstep(1.0f, 0.50f, cloudHeight);
