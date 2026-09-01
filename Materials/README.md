@@ -373,6 +373,37 @@ Procedural Hair:
 * ##### const float PROCEDURAL_HAIR_SCALE = 0.45;
     Scale/density of the generated hair strands.
 
+Cornea Refraction & Iris Parallax:
+----------------------------------
+* ##### EYE_PARALLAX_ENABLE
+    Set `EYE_PARALLAX_ENABLE` to `1` in your eye material `.fx` file (e.g. `material_eye.fx`) to enable physical Snell's law refraction through the corneal dome into the anterior chamber of the eye.
+    
+    `0` . Disabled (flat eye mapping)
+    `1` . Enable Cornea Refraction & Iris Parallax Depth
+
+* ##### const float EYE_IRIS_DEPTH = 0.05;
+    Physical optical depth distance of the concave iris behind the corneal dome (recommended: `0.03` ~ `0.08`).
+
+* ##### const float EYE_CORNEA_IOR = 1.376;
+    Index of refraction (IOR) of the human cornea lens.
+
+Procedural Micro-Glitter / Sparkle:
+-----------------------------------
+* ##### GLITTER_ENABLE
+    Set `GLITTER_ENABLE` to `1` in your material `.fx` file to generate dynamic stochastic micro-flake sparkles for cosmetics, glitter fabrics, snow, and metallic paint.
+    
+    `0` . Disabled
+    `1` . Enable Procedural Micro-Glitter Sparkle
+
+* ##### const float GLITTER_DENSITY = 150.0;
+    Spatial density and frequency of the glittering flakes.
+
+* ##### const float GLITTER_ROUGHNESS = 0.50;
+    Angular spread/scatter of the flake micro-normals.
+
+* ##### const float GLITTER_INTENSITY = 2.5;
+    Peak specular flash intensity of the glittering flakes.
+
 Triplanar Projection:
 ---------------------
 * ##### TRIPLANAR_ENABLE

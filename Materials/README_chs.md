@@ -333,6 +333,62 @@ Shading Model ID
 * ##### const float3 customB = 0.0 ~ 1.0; (sRGB color-space)
 * ##### const float2 customBMapLoopNum = 1.0; (see [albedoMapLoopNum](#albedoMapLoopNum))
 
+程序化发丝 (Procedural Hair):
+----------------
+* ##### PROCEDURAL_HAIR
+    在材质 `.fx` 文件中设置 `PROCEDURAL_HAIR` 为 `1`，可在着色器中实时程序化生成各向异性发丝法线，无需静态 `hair.jpg` 贴图。
+    
+    `0` . 禁用  
+    `1` . 启用程序化发丝法线  
+
+* ##### const float PROCEDURAL_HAIR_INTENSITY = 0.45;
+    发丝法线凹凸强度。
+
+* ##### const float PROCEDURAL_HAIR_SCALE = 0.45;
+    发丝密度与缩放比例。
+
+角膜折射与虹膜视差 (Cornea Refraction & Iris Parallax):
+----------------------------------
+* ##### EYE_PARALLAX_ENABLE
+    在眼球材质 `.fx`（如 `material_eye.fx`）中将 `EYE_PARALLAX_ENABLE` 设为 `1`，开启基于斯涅尔定律的角膜透镜折射与虹膜深度视差映射。
+    
+    `0` . 禁用（平面贴图映射）  
+    `1` . 启用角膜折射与虹膜深度视差  
+
+* ##### const float EYE_IRIS_DEPTH = 0.05;
+    角膜后方虹膜的物理光学深度距离（推荐范围：`0.03` ~ `0.08`）。
+
+* ##### const float EYE_CORNEA_IOR = 1.376;
+    人类角膜透镜的折射率（IOR）。
+
+程序化闪烁微亮片 (Procedural Micro-Glitter / Sparkle):
+-----------------------------------
+* ##### GLITTER_ENABLE
+    在材质 `.fx` 文件中将 `GLITTER_ENABLE` 设为 `1`，生成用于化妆品、亮片布料、雪地和金属漆的随机微面高光闪烁效果。
+    
+    `0` . 禁用  
+    `1` . 启用程序化闪烁亮片  
+
+* ##### const float GLITTER_DENSITY = 150.0;
+    微亮片的空间密度与频率。
+
+* ##### const float GLITTER_ROUGHNESS = 0.50;
+    微亮片法线的角度发散度。
+
+* ##### const float GLITTER_INTENSITY = 2.5;
+    微亮片的高光峰值反射强度。
+
+三向投影 (Triplanar Projection):
+---------------------
+* ##### TRIPLANAR_ENABLE
+    在材质 `.fx` 文件中设置 `TRIPLANAR_ENABLE` 为 `1`，可在世界空间三轴方向上无缝投射贴图，无需手动展开 UV。
+
+    `0` . 禁用（默认 UV 采样）  
+    `1` . 启用三向投影  
+
+* ##### const float triplanarScale = 0.1;
+    世界坐标系中的平铺缩放系数。
+
 FAQ:
 --------------------
 * What is sRGB-color and Gamma

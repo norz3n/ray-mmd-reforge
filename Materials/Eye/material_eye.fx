@@ -129,4 +129,9 @@ const float2 customBMapLoopNum = 1.0;
 // Inverts the concave anime eye mesh curvature into a convex spherical dome
 #define CONVEX_NORMAL 1
 
+// Cornea Refraction & Iris Parallax Mapping (Snell's Law refraction + Limbal darkening + Caustics)
+#define EYE_PARALLAX_ENABLE 1
+#define EYE_IRIS_DEPTH 0.05
+#define EYE_CORNEA_IOR 1.376
+
 #include "../material_common_2.0.fxsub"

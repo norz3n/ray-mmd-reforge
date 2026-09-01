@@ -1,11 +1,11 @@
-#define ALBEDO_MAP_FROM 3
+﻿#define ALBEDO_MAP_FROM 0
 #define ALBEDO_MAP_UV_FLIP 0
 #define ALBEDO_MAP_APPLY_SCALE 0
-#define ALBEDO_MAP_APPLY_DIFFUSE 1
+#define ALBEDO_MAP_APPLY_DIFFUSE 0
 #define ALBEDO_MAP_APPLY_MORPH_COLOR 0
 #define ALBEDO_MAP_FILE "albedo.png"
 
-const float3 albedo = 1.05;
+const float3 albedo = float3(1.0, 0.78, 0.35);
 const float2 albedoMapLoopNum = 1.0;
 
 #define ALBEDO_SUB_ENABLE 0
@@ -48,7 +48,7 @@ const float normalSubMapLoopNum = 1.0;
 #define SMOOTHNESS_MAP_APPLY_SCALE 0
 #define SMOOTHNESS_MAP_FILE "smoothness.png"
 
-const float smoothness = 0.95;
+const float smoothness = 0.82;
 const float smoothnessMapLoopNum = 1.0;
 
 #define METALNESS_MAP_FROM 0
@@ -57,7 +57,7 @@ const float smoothnessMapLoopNum = 1.0;
 #define METALNESS_MAP_APPLY_SCALE 0
 #define METALNESS_MAP_FILE "metalness.png"
 
-const float metalness = 0.0;
+const float metalness = 0.85;
 const float metalnessMapLoopNum = 1.0;
 
 #define SPECULAR_MAP_FROM 0
@@ -67,7 +67,7 @@ const float metalnessMapLoopNum = 1.0;
 #define SPECULAR_MAP_APPLY_SCALE 0
 #define SPECULAR_MAP_FILE "specular.png"
 
-const float3 specular = 0.05;
+const float3 specular = float3(1.0, 0.85, 0.45);
 const float2 specularMapLoopNum = 1.0;
 
 #define OCCLUSION_MAP_FROM 0
@@ -88,8 +88,8 @@ const float occlusionMapLoopNum = 1.0;
 const float parallaxMapScale = 1.0;
 const float parallaxMapLoopNum = 1.0;
 
-#define EMISSIVE_ENABLE 1
-#define EMISSIVE_MAP_FROM 3
+#define EMISSIVE_ENABLE 0
+#define EMISSIVE_MAP_FROM 0
 #define EMISSIVE_MAP_UV_FLIP 0
 #define EMISSIVE_MAP_APPLY_SCALE 0
 #define EMISSIVE_MAP_APPLY_MORPH_COLOR 0
@@ -97,13 +97,12 @@ const float parallaxMapLoopNum = 1.0;
 #define EMISSIVE_MAP_APPLY_BLINK 0
 #define EMISSIVE_MAP_FILE "emissive.png"
 
-const float3 emissive = 1.0;
-const float3 emissiveBlink = 1.0;
-const float  emissiveIntensity = 0.85;
+const float3 emissive = 0.0;
+const float3 emissiveBlink = 0.0;
+const float  emissiveIntensity = 0.0;
 const float2 emissiveMapLoopNum = 1.0;
 
-// 6: ClearCoat layer for physical Cornea dome highlight on top of Iris
-#define CUSTOM_ENABLE 6
+#define CUSTOM_ENABLE 0
 
 #define CUSTOM_A_MAP_FROM 0
 #define CUSTOM_A_MAP_UV_FLIP 0
@@ -112,8 +111,7 @@ const float2 emissiveMapLoopNum = 1.0;
 #define CUSTOM_A_MAP_APPLY_SCALE 0
 #define CUSTOM_A_MAP_FILE "custom.png"
 
-// Smoothness of the outer corneal lens layer (0.98 = crystal gloss highlight)
-const float customA = 0.98;
+const float customA = 0.0;
 const float customAMapLoopNum = 1.0;
 
 #define CUSTOM_B_MAP_FROM 0
@@ -125,12 +123,10 @@ const float customAMapLoopNum = 1.0;
 const float3 customB = 0.0;
 const float2 customBMapLoopNum = 1.0;
 
-// Inverts the concave anime eye mesh curvature into a convex spherical dome
-#define CONVEX_NORMAL 1
-
-// Cornea Refraction & Iris Parallax Mapping (Snell's Law refraction + Limbal darkening + Caustics)
-#define EYE_PARALLAX_ENABLE 1
-#define EYE_IRIS_DEPTH 0.04
-#define EYE_CORNEA_IOR 1.376
+// Procedural Micro-Glitter / Sparkle Flakes
+#define GLITTER_ENABLE 1
+#define GLITTER_DENSITY 200.0f
+#define GLITTER_ROUGHNESS 0.60f
+#define GLITTER_INTENSITY 3.5f
 
 #include "../material_common_2.0.fxsub"
