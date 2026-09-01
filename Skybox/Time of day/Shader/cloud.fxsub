@@ -1,4 +1,4 @@
-#define NUMS_SAMPLES_CLOUD 8
+#define NUMS_SAMPLES_CLOUD 10
 
 // Multi-octave cloud textures (ported from SA_DirectX 3.0 / AAA Cumulus Model)
 texture CloudMacroMap<string ResourceName = "shader/textures/clouds1.png";>; 
@@ -100,9 +100,10 @@ float ComputeCloudDensity(ScatteringParams setting, float3 P, out float cloudHei
 	float density = RemapCoverage(cumulusNoise, targetCoverage);
 	density *= heightGradient;
 
-	// Soft edge detail erosion (wispy micro-eddies)
+	// Soft edge detail erosion (wispy micro-eddies without high-frequency stepping)
 	float microErosion = tex2Dlod(CloudDetailMapSamp, float4(P2 * 0.000078f, 0, 0)).g;
-	density = saturate(density - microErosion * 0.18f * (1.0f - cloudHeight));
+	density = saturate(density - microErosion * 0.12f * (1.0f - cloudHeight));
+	density = smoothstep(0.01f, 0.95f, density);
 
 	return density * setting.cloud;
 }
@@ -127,7 +128,7 @@ float HitCloudsTest(ScatteringParams setting, float3 eye, float3 V, float3 L)
 }
 
 /**
- * Spherical-shell volumetric raymarching (conforming to planetary curvature, 60+ FPS).
+ * Spherical-shell volumetric raymarching (smooth sub-pixel dithering, 60+ FPS).
  */
 void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 end, float3 V, float3 L, inout float opticalDepth, inout float3 insctrMie)
 {
@@ -137,9 +138,9 @@ void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 
 	float stepLength = totalDist / float(NUMS_SAMPLES_CLOUD);
 	float3 sampleStep = rayDir * stepLength;
 
-	// Blue noise jittering to eliminate step banding
-	float blueNoise = tex2Dlod(CloudBlueNoiseMapSamp, float4(start.xz * 0.0005f, 0, 0)).r;
-	float3 samplePos = start + sampleStep * (0.2f + blueNoise * 0.8f);
+	// Screen/direction-space subtle blue noise dithering (smooth sub-step jittering, zero jagged contour teeth)
+	float dither = tex2Dlod(CloudBlueNoiseMapSamp, float4(V.xz * 32.0f, 0, 0)).r;
+	float3 samplePos = start + sampleStep * (0.45f + dither * 0.10f);
 
 	float3 accumulatedColor = 0.0f;
 	float transmittance = 1.0f;
@@ -229,8 +230,8 @@ float4 ComputeCloudsInscattering(ScatteringParams setting, float3 eye, float3 V,
 			float startDist = max(0.0f, (cloudsInnerIntersections.y > 0.0f) ? cloudsInnerIntersections.y : cloudsInnerIntersections.x);
 			float endDist = cloudsOuterIntersections.y;
 
-			// Strict distance horizon bound prevents excessive overdraw
-			endDist = min(endDist, startDist + 90000.0f);
+			// Strict distance horizon bound prevents excessive step elongation and overdraw
+			endDist = min(endDist, startDist + 35000.0f);
 
 			if (endDist > startDist)
 			{
