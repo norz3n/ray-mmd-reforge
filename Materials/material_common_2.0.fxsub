@@ -3,6 +3,31 @@
 #define PROCEDURAL_HAIR_INTENSITY 0.5
 #endif
 
+#ifndef EYE_PARALLAX_ENABLE
+#define EYE_PARALLAX_ENABLE 0
+#endif
+#ifndef EYE_IRIS_DEPTH
+#define EYE_IRIS_DEPTH 0.05f
+#endif
+#ifndef EYE_CORNEA_IOR
+#define EYE_CORNEA_IOR 1.376f
+#endif
+
+#ifndef GLITTER_ENABLE
+#define GLITTER_ENABLE 0
+#endif
+#ifndef GLITTER_DENSITY
+#define GLITTER_DENSITY 150.0f
+#endif
+#ifndef GLITTER_ROUGHNESS
+#define GLITTER_ROUGHNESS 0.50f
+#endif
+#ifndef GLITTER_INTENSITY
+#define GLITTER_INTENSITY 2.0f
+#endif
+
+float3 CameraPosition : POSITION < string Object = "Camera"; >;
+
 float4x4 matView : VIEW;
 float4x4 matWorld : WORLD;
 float4x4 matWorldView : WORLDVIEW;
@@ -1710,12 +1735,28 @@ GbufferParam MaterialPS(
 	float pomShadow = 1.0f;
 #endif
 
+#if EYE_PARALLAX_ENABLE
+	float3 eyeViewDir = normalize(CameraPosition - worldPos.xyz);
+	float eyeCaustic = 0.0f, eyeLimbal = 1.0f;
+	coord0 = ComputeCorneaIrisParallax(coord0, eyeViewDir, normal, EYE_IRIS_DEPTH, EYE_CORNEA_IOR, eyeCaustic, eyeLimbal);
+#endif
+
 	MaterialParam material;
 	material.albedo = GetSubAlbedo(GetAlbedo(coord0, worldPos.xyz, normal), coord0);
+#if EYE_PARALLAX_ENABLE
+	material.albedo = material.albedo * eyeLimbal + material.albedo * (eyeCaustic * 0.35f);
+#endif
 	material.normal = GetNormal(normal, worldPos.xyz, coord0);
 	material.smoothness = GetSmoothness(coord0);
 	material.metalness = GetMetalness(coord0);
 	material.specular = GetSpecular(coord0);
+#if GLITTER_ENABLE
+	float3 glitterV = normalize(CameraPosition - worldPos.xyz);
+	float3 glitterL = mul(float3(0.0f, 1.0f, 0.5f), (float3x3)matView);
+	float3 glitterH = normalize(glitterV + glitterL);
+	float sparkle = ComputeMicroGlitterSparkle(worldPos.xyz, material.normal, glitterH, GLITTER_DENSITY, GLITTER_ROUGHNESS, GLITTER_INTENSITY);
+	material.specular += sparkle * (1.0f - material.smoothness * 0.5f);
+#endif
 	material.customDataA = GetCustomDataA(coord0);
 #if CUSTOM_ENABLE == 1 // SHADINGMODELID_SKIN
 	float3 ddxP = ddx(worldPos.xyz);
@@ -1777,12 +1818,28 @@ GbufferParam Material2PS(
 	float pomShadow2 = 1.0f;
 #endif
 
+#if EYE_PARALLAX_ENABLE
+	float3 eyeViewDir2 = normalize(CameraPosition - worldPos.xyz);
+	float eyeCaustic2 = 0.0f, eyeLimbal2 = 1.0f;
+	coord0 = ComputeCorneaIrisParallax(coord0, eyeViewDir2, normal, EYE_IRIS_DEPTH, EYE_CORNEA_IOR, eyeCaustic2, eyeLimbal2);
+#endif
+
 	MaterialParam material;
 	material.albedo = GetSubAlbedo(GetAlbedo(coord0, worldPos.xyz, normal), coord0);
+#if EYE_PARALLAX_ENABLE
+	material.albedo = material.albedo * eyeLimbal2 + material.albedo * (eyeCaustic2 * 0.35f);
+#endif
 	material.normal = GetNormal(normal, worldPos.xyz, coord0);
 	material.smoothness = GetSmoothness(coord0);
 	material.metalness = GetMetalness(coord0);
 	material.specular = GetSpecular(coord0);
+#if GLITTER_ENABLE
+	float3 glitterV2 = normalize(CameraPosition - worldPos.xyz);
+	float3 glitterL2 = mul(float3(0.0f, 1.0f, 0.5f), (float3x3)matView);
+	float3 glitterH2 = normalize(glitterV2 + glitterL2);
+	float sparkle2 = ComputeMicroGlitterSparkle(worldPos.xyz, material.normal, glitterH2, GLITTER_DENSITY, GLITTER_ROUGHNESS, GLITTER_INTENSITY);
+	material.specular += sparkle2 * (1.0f - material.smoothness * 0.5f);
+#endif
 	material.customDataA = GetCustomDataA(coord0);
 #if CUSTOM_ENABLE == 1 // SHADINGMODELID_SKIN
 	float3 ddxP = ddx(worldPos.xyz);
