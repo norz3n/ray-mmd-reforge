@@ -74,8 +74,8 @@ float4 ScatteringWithCloudsPS(
 	setting.waveLambdaRayleigh = rayleight;
 	setting.cloud = mCloudDensity;
 	setting.cloudTop = 4.5 * mUnitDistance;
-	setting.cloudBottom = 1.5 * mUnitDistance;
-	setting.clouddir = float3(0.045, 0, -0.095) * mCloudSpeed;
+	setting.cloudBottom = 1.6 * mUnitDistance;
+	setting.clouddir = float3(1315.7, 0, -3000) * mCloudSpeed;
 	setting.cloudLambda = cloud;
 
 	float4 insctrColor = ComputeCloudsInscattering(setting, CameraPosition + float3(0, mEarthPeopleHeight * mUnitDistance, 0), V, SunDirection);
