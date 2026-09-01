@@ -317,20 +317,16 @@ float ShadowPCSS(sampler source, float2 coord, float receiverDepth, float noise,
 		filterSamples = min(SUN_FILTER_SAMPLES, 12);
 	}
 
-	// Graze angle mitigation: shrink search/filter radius to avoid sampling background and causing light leaks (ESM noise)
+	// Graze angle mitigation: shrink search/filter radius to avoid sampling background and causing light leaks
 	float grazeScale = saturate(1.0f - normalBias * normalBias);
 
-	// Calculate scale relative to Cascade 0 to keep UV clamp limits physically constant in world space.
-	// This completely eliminates hard seams when shadows transition between cascades.
-	float relativeScale = lightCropParams[cascadeIndex].x / lightCropParams[0].x;
-
-	// STEP 1: Blocker Search
-	float searchRadiusWorld = mSunPCSSBlockerSearchScale * (10.0f * mSunLightSize);
+	// STEP 1: Blocker Search (bounded in texel space for stable performance)
+	float searchRadiusWorld = mSunPCSSBlockerSearchScale * (12.0f * mSunLightSize);
 	float searchRadiusUV = searchRadiusWorld * cascadeCropScale;
-	float minSearchUV = (3.0f / float(SHADOW_MAP_SIZE)) * relativeScale;
-	float maxSearchUV = 0.08f * relativeScale;
+	float minSearchUV = 2.0f / float(SHADOW_MAP_SIZE);
+	float maxSearchUV = 16.0f / float(SHADOW_MAP_SIZE);
 	searchRadiusUV = clamp(searchRadiusUV, minSearchUV, maxSearchUV);
-	searchRadiusUV *= max(grazeScale, 0.2f); // Keep a small minimum search radius
+	searchRadiusUV *= max(grazeScale, 0.25f);
 
 	float2 blocker = FindBlocker(source, coord, searchRadiusUV, receiverDepth, rotMat, minBlockerDist, blockerSamples);
 	float avgBlockerDepth = blocker.x;
@@ -342,17 +338,17 @@ float ShadowPCSS(sampler source, float2 coord, float receiverDepth, float noise,
 		return 1.0f; // No occluders in search area -> fully lit early exit
 	}
 
-	// STEP 2: Penumbra Size Estimation
+	// STEP 2: Penumbra Size Estimation (Contact-Hardening)
 	float blockerDistance = max(0.0f, receiverDepth - avgBlockerDepth);
-	float penumbraWorld = blockerDistance * mSunLightSize;
-	float filterRadiusUV = penumbraWorld * cascadeCropScale;
+	float penumbraWorld = blockerDistance * (mSunLightSize * 25.0f);
+	float filterRadiusUV = (penumbraWorld * cascadeCropScale) + (mSunPCSSMinFilterRadius / float(SHADOW_MAP_SIZE));
 
-	float minFilterUV = (mSunPCSSMinFilterRadius / float(SHADOW_MAP_SIZE)) * relativeScale;
-	float maxFilterUV = (mSunPCSSMaxFilterRadius / float(SHADOW_MAP_SIZE)) * relativeScale;
+	float minFilterUV = mSunPCSSMinFilterRadius / float(SHADOW_MAP_SIZE);
+	float maxFilterUV = mSunPCSSMaxFilterRadius / float(SHADOW_MAP_SIZE);
 	filterRadiusUV = clamp(filterRadiusUV, minFilterUV, maxFilterUV);
-	filterRadiusUV *= grazeScale; // Shrink penumbra at grazing angles
+	filterRadiusUV *= max(grazeScale, 0.25f);
 
-	// STEP 3: Percentage-Closer Filtering (PCF)
+	// STEP 3: Percentage-Closer Filtering (PCF with crisp non-bleeding depth test)
 	float shadow = 0.0f;
 	float totalWeight = 0.0f;
 
@@ -368,7 +364,8 @@ float ShadowPCSS(sampler source, float2 coord, float receiverDepth, float noise,
 		if (zMap > 1e-5)
 		{
 			float diff = receiverDepth - zMap;
-			sampleShadow = (diff <= 0.0f) ? 1.0f : saturate(exp(-20.0f * diff));
+			// Hard depth test with micro-bias to eliminate semi-transparent light bleed
+			sampleShadow = (diff <= 0.002f) ? 1.0f : 0.0f;
 		}
 
 		shadow += sampleShadow * kVogelFilterDisk[i].z;
