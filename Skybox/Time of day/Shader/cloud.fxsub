@@ -99,20 +99,20 @@ float ComputeCloudDensity(ScatteringParams setting, float3 P, out float cloudHei
 	float3 P2 = P + setting.clouddir * 0.6f;
 
 	// --- Domain Warping ---
-	// Sample a very low-frequency warp field to laterally distort sample positions.
-	// This makes the flat XZ plane appear to have towering vertical columns
-	// because nearby columns sample different noise "islands", creating depth contrast.
+	// Very gentle lateral distortion to break up the repeating flat-plane look.
+	// Amplitude is intentionally small (12% of layer height) to avoid ghosting/doubling.
 	float2 warpOffset = tex2Dlod(CloudMacroMapSamp, float4(P1.xz * 0.0000025f, 0, 0)).rg * 2.0f - 1.0f;
-	float3 warpedP1 = P1 + float3(warpOffset.x, 0.0f, warpOffset.y) * (setting.cloudTop - setting.cloudBottom) * 0.85f;
-	float3 warpedP2 = P2 + float3(-warpOffset.y, 0.0f, warpOffset.x) * (setting.cloudTop - setting.cloudBottom) * 0.4f;
+	float warpScale = (setting.cloudTop - setting.cloudBottom) * 0.12f;
+	float3 warpedP1 = P1 + float3(warpOffset.x, 0.0f, warpOffset.y) * warpScale;
+	float3 warpedP2 = P2 + float3(-warpOffset.y, 0.0f, warpOffset.x) * (warpScale * 0.5f);
 
 	// Macro cloud coverage (large majestic formations spanning tens of kilometers)
 	float macroShape = tex2Dlod(CloudMacroMapSamp, float4(warpedP1.xz * 0.000008f, 0, 0)).r;
 	float coverNoise = tex2Dlod(CloudCoverMapSamp, float4(warpedP2.xz * 0.000015f, 0, 0)).r;
 	float targetCoverage = saturate(macroShape * 0.7f + coverNoise * 0.4f);
 
-	// Mid-frequency cumulus structure — also domain-warped for depth
-	float cumulusNoise = tex2Dlod(CloudDetailMapSamp, float4((warpedP1.xz + P.y * 0.3f) * 0.000028f, 0, 0)).r;
+	// Mid-frequency cumulus structure — NO P.y term (prevents vertical tiling/duplication)
+	float cumulusNoise = tex2Dlod(CloudDetailMapSamp, float4(warpedP1.xz * 0.000028f, 0, 0)).r;
 
 	// Carve cloud shapes using coverage remapping (Guerrilla Games / Schneider)
 	float density = RemapCoverage(cumulusNoise, targetCoverage);
