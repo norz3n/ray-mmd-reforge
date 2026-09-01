@@ -145,6 +145,9 @@ void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 
 
 	float cosTheta = dot(V, L);
 	float phaseHG = ComputeCloudPhaseHG(cosTheta);
+	// Multi-scattering phase: forward Silver Lining peak + backscatter glory + isotropic multiple bounce.
+	// Ensures cloud tops and flanks stay brilliant white from all viewing angles instead of turning into dark blue mush.
+	float cloudPhase = phaseHG * 0.40f + 0.38f;
 	float3 lightStep = L * (stepLength * 2.5f);
 
 	[loop]
@@ -165,10 +168,13 @@ void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 
 			float lightOptical = (density * 0.4f + lightDensity * 0.6f) * (stepLength * 2.5f) * 0.00075f;
 
 			float sunTrans = ComputeBeerPowder(lightOptical, density);
-			float3 directSun = sunTrans * (phaseHG * 0.25f) * setting.sunRadiance * float3(1.02f, 0.98f, 0.94f);
+			// Direct sun illumination on cloud tops/flanks: brilliant warm white
+			float3 directSun = sunTrans * cloudPhase * setting.sunRadiance * float3(1.08f, 1.02f, 0.95f);
 
-			// Height-dependent ambient: warm golden near base, cool blue-white dome on top
-			float3 ambientSky = lerp(float3(0.28f, 0.35f, 0.48f), float3(0.65f, 0.75f, 0.88f), cloudHeight) * (setting.sunRadiance * 0.12f);
+			// Atmospheric ambient: deep cool contrast shadow at cloud base vs bright blue-sky bounce at cloud top
+			float3 ambientShadow = float3(0.12f, 0.16f, 0.24f); // dark underside
+			float3 ambientLit    = float3(0.55f, 0.65f, 0.82f); // top skylight
+			float3 ambientSky = lerp(ambientShadow, ambientLit, cloudHeight * cloudHeight) * (setting.sunRadiance * 0.12f);
 
 			float stepTransmittance = exp(-stepOpticalDepth);
 			accumulatedColor += (directSun + ambientSky) * (transmittance * (1.0f - stepTransmittance));
