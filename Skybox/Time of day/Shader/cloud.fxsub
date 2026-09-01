@@ -86,49 +86,40 @@ float ComputeCloudDensity(ScatteringParams setting, float3 P, out float cloudHei
 	float atmoHeight = length(P - setting.earthCenter) - setting.earthRadius;
 	cloudHeight = saturate((atmoHeight - setting.cloudBottom) / max(setting.cloudTop - setting.cloudBottom, 1.0f));
 
-	// Asymmetric cumulus profile (SA_DirectX signature):
-	// Very sharp flat BASE (real cumulus condensation level), gradual rounded TOPS
-	float hBase = smoothstep(0.0f, 0.05f, cloudHeight);  // sharp flat base
-	float hTop  = smoothstep(1.0f, 0.50f, cloudHeight);  // soft rounded top
+	// Natural height envelope: soft condensation base, voluminous center, wispy dissipated top
+	float hBase = smoothstep(0.0f, 0.10f, cloudHeight);
+	float hTop  = smoothstep(1.0f, 0.45f, cloudHeight);
 	float heightMask = hBase * hTop;
 	if (heightMask <= 1e-4f) return 0.0f;
 
-	// Two drift layers scrolling in opposite directions (SA_DirectX parallax trick)
-	// p1: fast-drifting detail layer (like p1.xy -= cl_time*146 in SA_DirectX)
-	float3 p1 = P + setting.clouddir * 1.20f;
-	// p2: slow counter-drifting coverage layer (like p2.xy += cl_time*15 in SA_DirectX)
-	float3 p2 = P + setting.clouddir * 0.18f;
+	// Dual-speed drift layers for natural atmospheric parallax
+	float3 p1 = P + setting.clouddir * 1.15f;
+	float3 p2 = P + setting.clouddir * 0.25f;
 
-	// STAGE 1: Large-scale coverage mask (SA_DirectX: SamplerNoise2 at 0.00005*9.99)
-	// Provides the broad cloud presence regions
-	float clouds1 = clamp((tex2Dlod(CloudCoverMapSamp, float4(p2.xz * 0.0000047f, 0, 0)).r * 1.2f * 0.56f) * 0.45f, 0.0f, 0.35f);
-	clouds1 *= heightMask;
-	clouds1 = lerp(1.0f, clouds1, 0.85f); // 15% minimum presence: prevents hard cutoffs
+	// STAGE 1: Broad multi-scale cloud structure
+	float macro = tex2Dlod(CloudMacroMapSamp, float4(p2.xz * 0.000006f, 0, 0)).r;
+	float cover = tex2Dlod(CloudCoverMapSamp, float4(p2.xz * 0.000014f, 0, 0)).r;
+	float detail = tex2Dlod(CloudDetailMapSamp, float4(p1.xz * 0.000032f, 0, 0)).r;
 
-	// STAGE 2: Billowy cumulus structure carved through the coverage mask.
-	// setting.cloud [0..1] shifts the THRESHOLD:
-	// - At 0.0 (Cloud- max): threshold >= 1.15 -> completely clear sky
-	// - At 0.5 (default): threshold ≈ 0.38 -> normal scattered cumulus clouds
-	// - At 1.0 (Cloud+ max): threshold ≈ -0.05 -> overcast, large dense cloud clusters
-	// Crucially: individual clouds retain 100% solid density and opacity rather than fading into ghosts.
-	float coverageThreshold = lerp(1.15f, -0.05f, saturate(setting.cloud));
-	float detailNoise = tex2Dlod(CloudDetailMapSamp, float4(p1.xz * 0.000021f, 0, 0)).r;
-	float billowy = clamp((detailNoise * 2.15f * 0.56f - coverageThreshold) * 0.8f, 0.0f, 0.35f);
-	float clouds2 = clouds1 * billowy;
-	clouds2 *= smoothstep(0.0f, 0.35f, cloudHeight) * smoothstep(1.0f, 0.50f, cloudHeight);
+	// Weighted multi-scale blend: broad macro clusters + mid-scale billow shapes
+	float cumulusShape = (macro * 0.45f + cover * 0.35f + detail * 0.45f) * 0.85f;
 
-	// STAGE 3: Power-curve sharpening (SA_DirectX: pow(clouds2, 0.3+0.3*smoothstep(...)))
-	// Low exponent at base = soft gradient transition; high exponent at top = crisp edge
-	float sharpness = 0.30f + 0.28f * smoothstep(0.08f, 0.50f, cloudHeight);
-	float sh = pow(max(clouds2, 0.0f), sharpness);
-	if (sh <= 0.0f) return 0.0f;
+	// STAGE 2: Smooth coverage thresholding (Cloud- / Cloud+)
+	// - At 0.0 (Cloud- max): threshold >= 0.85 -> 0 clouds
+	// - At 0.5 (default): threshold ≈ 0.42 -> natural scattered cumulus
+	// - At 1.0 (Cloud+ max): threshold ≈ 0.05 -> overcast
+	float covThreshold = lerp(0.85f, 0.05f, saturate(setting.cloud));
 
-	// STAGE 4: Soft micro-detail erosion — single sample, gentle subtraction.
-	float2 microUV = p1.xz * 0.000048f;
-	float microDetail = CloudMicroDetail(microUV);
+	// Soft Hermite transition over 0.28 range: completely eliminates harsh/sharp cutout edges
+	float density = smoothstep(covThreshold, covThreshold + 0.28f, cumulusShape);
+	if (density <= 1e-4f) return 0.0f;
 
-	// Threshold: 5.0*sh maps low sh values to [0..1], microDetail softens the boundary
-	return saturate(5.0f * sh - microDetail * 0.30f);
+	// STAGE 3: Soft micro-fluff edge erosion — feathers the borders smoothly without sandblast noise
+	float micro = CloudMicroDetail(p1.xz * 0.000085f);
+	density = smoothstep(micro * 0.22f * (1.0f - cloudHeight * 0.4f), 1.0f, density);
+
+	// Apply height envelope
+	return density * heightMask;
 }
 
 float ComputeClound(ScatteringParams setting, float3 P)
