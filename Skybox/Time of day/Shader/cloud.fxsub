@@ -80,6 +80,9 @@ float CloudMicroDetail(float2 uv)
  */
 float ComputeCloudDensity(ScatteringParams setting, float3 P, out float cloudHeight)
 {
+	cloudHeight = 0.0f;
+	if (setting.cloud <= 0.001f) return 0.0f;
+
 	float atmoHeight = length(P - setting.earthCenter) - setting.earthRadius;
 	cloudHeight = saturate((atmoHeight - setting.cloudBottom) / max(setting.cloudTop - setting.cloudBottom, 1.0f));
 
@@ -98,17 +101,19 @@ float ComputeCloudDensity(ScatteringParams setting, float3 P, out float cloudHei
 
 	// STAGE 1: Large-scale coverage mask (SA_DirectX: SamplerNoise2 at 0.00005*9.99)
 	// Provides the broad cloud presence regions
-	float clouds1 = clamp((tex2Dlod(CloudCoverMapSamp,  float4(p2.xz * 0.0000047f, 0, 0)).r * 1.2f * 0.56f) * 0.45f, 0.0f, 0.35f);
+	float clouds1 = clamp((tex2Dlod(CloudCoverMapSamp, float4(p2.xz * 0.0000047f, 0, 0)).r * 1.2f * 0.56f) * 0.45f, 0.0f, 0.35f);
 	clouds1 *= heightMask;
 	clouds1 = lerp(1.0f, clouds1, 0.85f); // 15% minimum presence: prevents hard cutoffs
 
 	// STAGE 2: Billowy cumulus structure carved through the coverage mask.
-	// smoothstep ramp: cloud [0..0.25] = guaranteed clear sky (threshold > noise max)
-	//                  cloud [0.25..0.80] = transition from sparse to overcast
-	//                  cloud [0.80..1.0]  = solid overcast
-	float cloudRamp = smoothstep(0.25f, 0.80f, saturate(setting.cloud));
-	float coverageThreshold = lerp(1.5f, 0.04f, cloudRamp);
-	float billowy = clamp((tex2Dlod(CloudDetailMapSamp, float4(p1.xz * 0.000021f, 0, 0)).r * 2.15f * 0.56f - coverageThreshold) * 0.8f, 0.0f, 0.35f);
+	// setting.cloud [0..1] shifts the THRESHOLD:
+	// - At 0.0 (Cloud- max): threshold >= 1.15 -> completely clear sky
+	// - At 0.5 (default): threshold ≈ 0.38 -> normal scattered cumulus clouds
+	// - At 1.0 (Cloud+ max): threshold ≈ -0.05 -> overcast, large dense cloud clusters
+	// Crucially: individual clouds retain 100% solid density and opacity rather than fading into ghosts.
+	float coverageThreshold = lerp(1.15f, -0.05f, saturate(setting.cloud));
+	float detailNoise = tex2Dlod(CloudDetailMapSamp, float4(p1.xz * 0.000021f, 0, 0)).r;
+	float billowy = clamp((detailNoise * 2.15f * 0.56f - coverageThreshold) * 0.8f, 0.0f, 0.35f);
 	float clouds2 = clouds1 * billowy;
 	clouds2 *= smoothstep(0.0f, 0.35f, cloudHeight) * smoothstep(1.0f, 0.50f, cloudHeight);
 
@@ -119,7 +124,6 @@ float ComputeCloudDensity(ScatteringParams setting, float3 P, out float cloudHei
 	if (sh <= 0.0f) return 0.0f;
 
 	// STAGE 4: Soft micro-detail erosion — single sample, gentle subtraction.
-	// No negative-coefficient FBM: that caused the "sandblasted" look.
 	float2 microUV = p1.xz * 0.000048f;
 	float microDetail = CloudMicroDetail(microUV);
 
@@ -224,7 +228,7 @@ float4 ComputeCloudsInscattering(ScatteringParams setting, float3 eye, float3 V,
 #endif
 
 #if ATM_CLOUD_ENABLE
-	if (intersectionTest && V.y > 0.01f)
+	if (intersectionTest && V.y > 0.01f && setting.cloud > 0.001f)
 	{
 		float tOuter = ComputeRayPlaneIntersection(eye, V, float3(0,-1,0), setting.cloudTop);
 		float tInner = ComputeRayPlaneIntersection(eye, V, float3(0,-1,0), setting.cloudBottom);
