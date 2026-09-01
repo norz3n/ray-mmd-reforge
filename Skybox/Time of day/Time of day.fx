@@ -73,8 +73,8 @@ float4 ScatteringWithCloudsPS(
 	setting.waveLambdaOzone = mOzoneScatteringCoeff * mOzoneMass;
 	setting.waveLambdaRayleigh = rayleight;
 	setting.cloud = mCloudDensity;
-	setting.cloudTop = 4.5 * mUnitDistance;
-	setting.cloudBottom = 1.6 * mUnitDistance;
+	setting.cloudTop = 7.5 * mUnitDistance;
+	setting.cloudBottom = 5.0 * mUnitDistance;
 	setting.clouddir = float3(1315.7, 0, -3000) * mCloudSpeed;
 	setting.cloudLambda = cloud;
 
