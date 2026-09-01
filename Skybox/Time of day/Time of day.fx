@@ -73,9 +73,9 @@ float4 ScatteringWithCloudsPS(
 	setting.waveLambdaOzone = mOzoneScatteringCoeff * mOzoneMass;
 	setting.waveLambdaRayleigh = rayleight;
 	setting.cloud = mCloudDensity;
-	setting.cloudTop = 5.2 * mUnitDistance;
-	setting.cloudBottom = 5 * mUnitDistance;
-	setting.clouddir = float3(1315.7, 0, -3000) * mCloudSpeed;
+	setting.cloudTop = 4.5 * mUnitDistance;
+	setting.cloudBottom = 1.5 * mUnitDistance;
+	setting.clouddir = float3(1200, 0, -2500) * mCloudSpeed;
 	setting.cloudLambda = cloud;
 
 	float4 insctrColor = ComputeCloudsInscattering(setting, CameraPosition + float3(0, mEarthPeopleHeight * mUnitDistance, 0), V, SunDirection);
