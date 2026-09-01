@@ -317,6 +317,35 @@ float3 DecodeOctahedronSigned(float2 enc)
 	return normalize(n);
 }
 
+/**
+ * Geometric normal variance specular anti-aliasing (Kaplanyan et al. 2016 / Tokuyoshi 2017 / CLEAN filtering)
+ * Dynamically widens the microfacet roughness parameter based on screen-space geometric normal derivatives (ddx/ddy),
+ * eliminating subpixel specular flickering, moiré, and fireflies on high-curvature surfaces, thin geometry, and normal maps.
+ *
+ * @param baseRoughness Authored material linear roughness [0.001, 1.0].
+ * @param N Normalized surface normal in screen or view space.
+ * @param maxVarianceClamp Maximum variance limit to prevent over-blurring at extreme grazing angles (default: 0.25).
+ * @return Filtered effective linear roughness for GGX/Cook-Torrance evaluation.
+ */
+inline float FilterGeometricRoughness(float baseRoughness, float3 N, float maxVarianceClamp = 0.25f)
+{
+	float3 dNdx = ddx(N);
+	float3 dNdy = ddy(N);
+	float normalVariance = (dot(dNdx, dNdx) + dot(dNdy, dNdy)) * 0.5f;
+	float clampedVariance = min(normalVariance * 0.20f, maxVarianceClamp);
+	float alpha = baseRoughness * baseRoughness;
+	float effectiveAlpha = sqrt(saturate(alpha * alpha + clampedVariance));
+	return saturate(sqrt(effectiveAlpha));
+}
+
+inline float2 FilterGeometricRoughnessAniso(float2 roughness, float3 N, float maxVarianceClamp = 0.25f)
+{
+	float3 dNdx = ddx(N);
+	float3 dNdy = ddy(N);
+	float normalVariance = min((dot(dNdx, dNdx) + dot(dNdy, dNdy)) * 0.10f, maxVarianceClamp);
+	return sqrt(saturate(roughness * roughness + normalVariance));
+}
+
 float3 ColorBalance(float3 color, float4 balance)
 {
 	float3 lum = luminance(color);
