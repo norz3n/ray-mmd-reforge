@@ -769,6 +769,58 @@ float ParallaxSelfShadow(sampler heightMap, float2 coord, float3 L, float initia
 }
 #endif
 
+/**
+ * Cornea Refraction & Iris Parallax Mapping (based on Jimenez / Next-Gen Eye Shading).
+ * Computes Snell's law refraction through the corneal dome into the anterior chamber,
+ * offsetting the 2D iris texture to create realistic depth, limbal darkening, and caustic focus.
+ */
+float2 ComputeCorneaIrisParallax(float2 uv, float3 viewDir, float3 normal, float irisDepth, float corneaIOR, out float outCaustic, out float outLimbal)
+{
+	// Refract view ray through the corneal dome (Air -> Cornea IOR)
+	float eta = 1.0f / max(corneaIOR, 1.0f);
+	float3 refrRay = refract(-viewDir, normal, eta);
+	if (all(refrRay == 0.0f))
+		refrRay = -viewDir;
+
+	// Parallax shift into anterior chamber
+	float2 uvOffset = (refrRay.xy / max(abs(refrRay.z), 0.25f)) * irisDepth;
+	float2 refractedUV = uv + uvOffset;
+
+	// Limbal ring darkening (dark perimeter around iris boundary)
+	float2 centeredUV = (uv - 0.5f) * 2.0f;
+	float distFromCenter = length(centeredUV);
+	outLimbal = saturate(smoothstep(0.98f, 0.70f, distFromCenter) + 0.35f);
+
+	// Iris caustic highlight (light focus on the opposite side of the pupil)
+	outCaustic = saturate(pow(saturate(dot(refrRay, normal) * 0.5f + 0.5f), 2.5f) * 1.5f);
+
+	return refractedUV;
+}
+
+/**
+ * Procedural Micro-Glitter / Sparkle Generator (Stochastic Micro-Flake Distribution).
+ * Simulates glittering flakes and crystals on metallic fabrics, cosmetics, snow, and car paint.
+ * Evaluates random micro-normal orientations per cell that flash when aligned with the half-vector H.
+ */
+float ComputeMicroGlitterSparkle(float3 worldPos, float3 N, float3 H, float flakeDensity = 120.0f, float flakeRoughness = 0.55f, float sparkleIntensity = 2.5f)
+{
+	float3 cellCoord = floor(worldPos * flakeDensity);
+	// High-quality branchless 3D pseudo-random hash
+	float3 hash = frac(sin(float3(
+		dot(cellCoord, float3(12.9898f, 78.233f, 45.164f)),
+		dot(cellCoord, float3(39.346f, 11.135f, 83.156f)),
+		dot(cellCoord, float3(73.156f, 52.235f, 29.178f))
+	)) * 43758.5453f) * 2.0f - 1.0f;
+
+	// Perturb surface normal with stochastic flake orientation
+	float3 flakeNormal = normalize(N + hash * flakeRoughness);
+	float NdotH = saturate(dot(flakeNormal, H));
+
+	// Sharp microfacet specular response (flash when facing H)
+	float sparkle = pow(NdotH, 120.0f) * sparkleIntensity;
+	return sparkle;
+}
+
 float SmoothnessToRoughness(float smoothness)
 {
 	return (1.0f - smoothness) * (1.0f - smoothness);
