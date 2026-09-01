@@ -1,6 +1,6 @@
 #define NUMS_SAMPLES_CLOUD 8
 
-// Multi-octave cloud textures (ported from SA_DirectX 3.0 / AAA Cumulus Model)
+// Multi-octave cloud textures (SA_DirectX 3.0 cloud model adapted for Ray-MMD)
 texture CloudMacroMap<string ResourceName = "shader/textures/clouds1.png";>; 
 sampler CloudMacroMapSamp = sampler_state {
 	texture = <CloudMacroMap>;
@@ -33,14 +33,9 @@ float ComputeRayPlaneIntersection(float3 position, float3 viewdir, float3 n, flo
 {
 	float a = dot(n, viewdir);
 	if (a > 0.0)
-	{
 		return -1;
-	}
-	else
-	{
-		float t = -(dot(position, n) + dist) / a;
-		return t;
-	}
+	float t = -(dot(position, n) + dist) / a;
+	return t;
 }
 
 /**
@@ -48,86 +43,86 @@ float ComputeRayPlaneIntersection(float3 position, float3 viewdir, float3 n, flo
  */
 float ComputeCloudPhaseHG(float cosTheta)
 {
-	const float g1 = 0.82f;
-	const float g2 = -0.25f;
-	const float g1_2 = g1 * g1;
-	const float g2_2 = g2 * g2;
-	
-	float hgForward  = (1.0f - g1_2) / (4.0f * PI * pow(max(1.0f + g1_2 - 2.0f * g1 * cosTheta, 0.001f), 1.5f));
-	float hgBackward = (1.0f - g2_2) / (4.0f * PI * pow(max(1.0f + g2_2 - 2.0f * g2 * cosTheta, 0.001f), 1.5f));
-	
-	return lerp(hgBackward, hgForward, 0.70f);
+	const float g1 = 0.82f, g2 = -0.25f;
+	const float g1_2 = g1 * g1, g2_2 = g2 * g2;
+	float hgF = (1.0f - g1_2) / (4.0f * PI * pow(max(1.0f + g1_2 - 2.0f * g1 * cosTheta, 0.001f), 1.5f));
+	float hgB = (1.0f - g2_2) / (4.0f * PI * pow(max(1.0f + g2_2 - 2.0f * g2 * cosTheta, 0.001f), 1.5f));
+	return lerp(hgB, hgF, 0.70f);
 }
 
 /**
- * Beer-Powder Law transmission calculation:
- * Models direct optical extinction combined with forward multiple-scattering in dense water droplets.
+ * Beer-Powder Law: models multiple scattering in dense water droplets.
+ * Makes clouds look bright white and luminous, not dark smoke.
  */
-float ComputeBeerPowder(float opticalDepth, float stepDensity)
+float ComputeBeerPowder(float opticalDepth, float density)
 {
-	float beer = exp(-opticalDepth);
-	float powder = 1.0f - exp(-stepDensity * 2.5f);
-	return 2.0f * beer * powder;
+	return 2.0f * exp(-opticalDepth) * (1.0f - exp(-density * 2.5f));
 }
 
 /**
- * Smooth coverage remap curve (Guerrilla Games / Schneider cloud density carving).
+ * FBM micro-erosion noise (ported from SA_DirectX ns() function).
+ * NOTE: Third octave has a NEGATIVE coefficient which carves realistic ragged cloud edges.
  */
-float RemapCoverage(float shape, float coverage)
+float CloudFBM(float2 uv)
 {
-	float c = saturate((shape - (1.0f - coverage)) / max(coverage, 0.01f));
-	return c * c * (3.0f - 2.0f * c);
+	float v  =  0.500f * tex2Dlod(CloudDetailMapSamp,  float4(uv,            0, 0)).r;
+	v        +=  0.250f * tex2Dlod(CloudDetailMapSamp,  float4(uv * 1.72f,    0, 0)).r;
+	v        += -0.150f * tex2Dlod(CloudDetailMapSamp,  float4(uv * 2.98f,    0, 0)).r; // carves holes
+	v        +=  0.080f * tex2Dlod(CloudMacroMapSamp,   float4(uv * 5.10f,    0, 0)).r;
+	return v;
 }
 
 /**
- * Computes volumetric cumulus cloud density using realistic broad-scale FBM carving
- * with domain warping for vertical tower illusion.
+ * Volumetric cumulus cloud density — adapted from SA_DirectX 3.0 cl2() model.
  *
- * Domain warping: a low-frequency noise offsets the sample point in XZ before high-frequency
- * density evaluation, breaking up the flat-plane look into towering cumulus columns.
+ * Key techniques (matching Makarus / Boris Vorontsov approach):
+ *   Stage 1: Large coverage mask with two layers scrolling in OPPOSITE directions for parallax.
+ *   Stage 2: clouds1 * detail (multiplication, not remap) for cumulus billowing.
+ *   Stage 3: pow() sharpening curve that varies with height (sharp base, soft top).
+ *   Stage 4: FBM micro-erosion with negative coefficient for ragged realistic edges.
  */
 float ComputeCloudDensity(ScatteringParams setting, float3 P, out float cloudHeight)
 {
 	float atmoHeight = length(P - setting.earthCenter) - setting.earthRadius;
 	cloudHeight = saturate((atmoHeight - setting.cloudBottom) / max(setting.cloudTop - setting.cloudBottom, 1.0f));
 
-	// Gaussian height profile: density peaks sharply at cloudHeight=0.45, σ≈0.22.
-	// This ensures only steps near the cloud center have non-zero density,
-	// preventing the "N layers = N raymarching steps" duplication artifact.
-	float heightPeak = 0.45f;
-	float heightGradient = exp(-pow((cloudHeight - heightPeak) * 4.5f, 2.0f));
-	// Hard clamp at slab edges to avoid bleeding outside cloudBottom/cloudTop
-	heightGradient *= smoothstep(0.0f, 0.08f, cloudHeight) * smoothstep(1.0f, 0.92f, cloudHeight);
-	if (heightGradient <= 1e-4f) return 0.0f;
+	// Asymmetric cumulus profile (SA_DirectX signature):
+	// Very sharp flat BASE (real cumulus condensation level), gradual rounded TOPS
+	float hBase = smoothstep(0.0f, 0.05f, cloudHeight);  // sharp flat base
+	float hTop  = smoothstep(1.0f, 0.50f, cloudHeight);  // soft rounded top
+	float heightMask = hBase * hTop;
+	if (heightMask <= 1e-4f) return 0.0f;
 
-	float3 P1 = P + setting.clouddir;
-	float3 P2 = P + setting.clouddir * 0.6f;
+	// Two drift layers scrolling in opposite directions (SA_DirectX parallax trick)
+	// p1: fast-drifting detail layer (like p1.xy -= cl_time*146 in SA_DirectX)
+	float3 p1 = P + setting.clouddir * 1.20f;
+	// p2: slow counter-drifting coverage layer (like p2.xy += cl_time*15 in SA_DirectX)
+	float3 p2 = P + setting.clouddir * 0.18f;
 
-	// --- Domain Warping ---
-	// Very gentle lateral distortion to break up the repeating flat-plane look.
-	// Amplitude is intentionally small (12% of layer height) to avoid ghosting/doubling.
-	float2 warpOffset = tex2Dlod(CloudMacroMapSamp, float4(P1.xz * 0.0000025f, 0, 0)).rg * 2.0f - 1.0f;
-	float warpScale = (setting.cloudTop - setting.cloudBottom) * 0.12f;
-	float3 warpedP1 = P1 + float3(warpOffset.x, 0.0f, warpOffset.y) * warpScale;
-	float3 warpedP2 = P2 + float3(-warpOffset.y, 0.0f, warpOffset.x) * (warpScale * 0.5f);
+	// STAGE 1: Large-scale coverage mask (SA_DirectX: SamplerNoise2 at 0.00005*9.99)
+	// Provides the broad cloud presence regions
+	float clouds1 = clamp((tex2Dlod(CloudCoverMapSamp,  float4(p2.xz * 0.0000047f, 0, 0)).r * 1.2f * 0.56f) * 0.45f, 0.0f, 0.35f);
+	clouds1 *= heightMask;
+	clouds1 = lerp(1.0f, clouds1, 0.85f); // 15% minimum presence: prevents hard cutoffs
 
-	// Macro cloud coverage (large majestic formations spanning tens of kilometers)
-	float macroShape = tex2Dlod(CloudMacroMapSamp, float4(warpedP1.xz * 0.000008f, 0, 0)).r;
-	float coverNoise = tex2Dlod(CloudCoverMapSamp, float4(warpedP2.xz * 0.000015f, 0, 0)).r;
-	float targetCoverage = saturate(macroShape * 0.7f + coverNoise * 0.4f);
+	// STAGE 2: Billowy cumulus structure carved through the coverage mask
+	// (SA_DirectX: clouds1 * SamplerNoise3 at 0.0002*0.5)
+	float billowy = clamp((tex2Dlod(CloudDetailMapSamp, float4(p1.xz * 0.000021f, 0, 0)).r * 2.15f * 0.56f - 0.28f) * 0.8f, 0.0f, 0.35f);
+	float clouds2 = clouds1 * billowy;
+	clouds2 *= smoothstep(0.0f, 0.35f, cloudHeight) * smoothstep(1.0f, 0.50f, cloudHeight);
 
-	// Mid-frequency cumulus structure — NO P.y term (prevents vertical tiling/duplication)
-	float cumulusNoise = tex2Dlod(CloudDetailMapSamp, float4(warpedP1.xz * 0.000028f, 0, 0)).r;
+	// STAGE 3: Power-curve sharpening (SA_DirectX: pow(clouds2, 0.3+0.3*smoothstep(...)))
+	// Low exponent at base = soft gradient transition; high exponent at top = crisp edge
+	float sharpness = 0.30f + 0.28f * smoothstep(0.08f, 0.50f, cloudHeight);
+	float sh = pow(max(clouds2, 0.0f), sharpness);
+	if (sh <= 0.0f) return 0.0f;
 
-	// Carve cloud shapes using coverage remapping (Guerrilla Games / Schneider)
-	float density = RemapCoverage(cumulusNoise, targetCoverage);
+	// STAGE 4: FBM micro-erosion with carved edges (SA_DirectX: ns() with -0.15 coefficient)
+	float2 microUV = p1.xz * 0.000048f;
+	float fbm = CloudFBM(microUV);
 
-	// Height gradient modulates vertical shape: thick middle, dissolved base/top
-	density *= heightGradient;
-
-	// Micro-erosion at cloud edges (wispy, without repeating tile artifacts)
-	float microErosion = tex2Dlod(CloudDetailMapSamp, float4(warpedP2.xz * 0.000085f, 0, 0)).g;
-	density = saturate(density - microErosion * 0.18f * (1.0f - cloudHeight));
+	// SA_DirectX threshold: 5.0*d - fbm - threshold (negative fbm carves holes)
+	float density = saturate(5.0f * sh - fbm - 0.14f);
 
 	return density * setting.cloud;
 }
@@ -140,29 +135,25 @@ float ComputeClound(ScatteringParams setting, float3 P)
 
 float HitCloudsTest(ScatteringParams setting, float3 eye, float3 V, float3 L)
 {
-	float2 cloudsOuterIntersections = ComputeRaySphereIntersection(eye, V, setting.earthCenter, setting.earthRadius + setting.cloudTop);
-	float2 cloudsInnerIntersections = ComputeRaySphereIntersection(eye, V, setting.earthCenter, setting.earthRadius + setting.cloudBottom);
-
-	if (cloudsInnerIntersections.y > 0)
-		cloudsOuterIntersections.x = cloudsInnerIntersections.y;
-
-	float3 cloudsStart = eye + V * max(0, cloudsOuterIntersections.x);
+	float2 outer = ComputeRaySphereIntersection(eye, V, setting.earthCenter, setting.earthRadius + setting.cloudTop);
+	float2 inner = ComputeRaySphereIntersection(eye, V, setting.earthCenter, setting.earthRadius + setting.cloudBottom);
+	if (inner.y > 0) outer.x = inner.y;
+	float3 cloudsStart = eye + V * max(0, outer.x);
 	float cloudHeight;
 	return exp(-0.002f * ComputeCloudDensity(setting, cloudsStart, cloudHeight));
 }
 
 /**
- * Fast & ultra-efficient volumetric raymarching (60+ FPS, zero slice banding, natural lighting).
+ * Volumetric raymarching — Beer-Powder law + single-tap sun probe + ambient height gradient.
  */
 void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 end, float3 V, float3 L, inout float opticalDepth, inout float3 insctrMie)
 {
 	float3 rayVec = end - start;
 	float totalDist = length(rayVec);
-	float3 rayDir = rayVec / totalDist;
 	float stepLength = totalDist / float(NUMS_SAMPLES_CLOUD);
-	float3 sampleStep = rayDir * stepLength;
+	float3 sampleStep = (rayVec / totalDist) * stepLength;
 
-	// Blue noise jittering to eliminate step banding
+	// Blue noise jitter to kill banding
 	float blueNoise = tex2Dlod(CloudBlueNoiseMapSamp, float4(start.xz * 0.0005f, 0, 0)).r;
 	float3 samplePos = start + sampleStep * (0.2f + blueNoise * 0.8f);
 
@@ -171,9 +162,7 @@ void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 
 
 	float cosTheta = dot(V, L);
 	float phaseHG = ComputeCloudPhaseHG(cosTheta);
-
-	// Light sample offset vector towards sun
-	float3 lightOffsetStep = L * (stepLength * 2.2f);
+	float3 lightStep = L * (stepLength * 2.5f);
 
 	[loop]
 	for (int i = 0; i < NUMS_SAMPLES_CLOUD; ++i)
@@ -187,24 +176,19 @@ void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 
 		{
 			float stepOpticalDepth = density * stepLength * 0.00075f;
 
-			// Single-tap light extinction probe towards the sun (high performance, no nested raymarch)
-			float lightHeight;
-			float lightDensity = ComputeCloudDensity(setting, samplePos + lightOffsetStep, lightHeight);
-			float lightOpticalDepth = (density * 0.4f + lightDensity * 0.6f) * (stepLength * 2.2f) * 0.00075f;
+			// Single-tap sun probe (no nested loop: high perf, low noise)
+			float lh;
+			float lightDensity = ComputeCloudDensity(setting, samplePos + lightStep, lh);
+			float lightOptical = (density * 0.4f + lightDensity * 0.6f) * (stepLength * 2.5f) * 0.00075f;
 
-			// Direct sun transmission (Beer-Powder law) + silver lining
-			float sunTransmission = ComputeBeerPowder(lightOpticalDepth, density);
-			float3 directSun = sunTransmission * (phaseHG * 0.25f) * setting.sunRadiance * float3(1.02f, 0.98f, 0.94f);
+			float sunTrans = ComputeBeerPowder(lightOptical, density);
+			float3 directSun = sunTrans * (phaseHG * 0.25f) * setting.sunRadiance * float3(1.02f, 0.98f, 0.94f);
 
-			// Ambient skylight (cool ambient at base, bright dome on top, proportional to sun power)
+			// Height-dependent ambient: warm golden near base, cool blue-white dome on top
 			float3 ambientSky = lerp(float3(0.28f, 0.35f, 0.48f), float3(0.65f, 0.75f, 0.88f), cloudHeight) * (setting.sunRadiance * 0.12f);
-			
-			// Source radiance (intensive quantity, energy-conserving)
-			float3 stepScattering = directSun + ambientSky;
 
-			// Energy-conserving front-to-back compositing
 			float stepTransmittance = exp(-stepOpticalDepth);
-			accumulatedColor += stepScattering * (transmittance * (1.0f - stepTransmittance));
+			accumulatedColor += (directSun + ambientSky) * (transmittance * (1.0f - stepTransmittance));
 			transmittance *= stepTransmittance;
 			opticalDepth += stepOpticalDepth;
 		}
@@ -229,41 +213,38 @@ float4 ComputeCloudsInscattering(ScatteringParams setting, float3 eye, float3 V,
 
 	float3 insctrTotalMie = insctrMie * phaseMie;
 	float3 insctrTotalRayleigh = insctrRayleigh * phaseRayleigh;
-
 	float3 sky = (insctrTotalMie + insctrTotalRayleigh) * setting.sunRadiance;
 
 #if ATM_LIMADARKENING_ENABLE
 	float angle = saturate((1 - phaseTheta) * sqrt(abs(L.y)) * setting.sunRadius);
 	float cosAngle = cos(angle * PI * 0.5);
-
 	float3 limaDarkening = GetTransmittance(setting, -L, V);
 	limaDarkening *= pow(cosAngle, float3(0.420, 0.503, 0.652)) * (1.0 - ((angle >= 0.9) ? smoothstep(0.9, 1.0, angle) : 0.0)) * intersectionTest;
-
 	sky += limaDarkening;
 #endif
 
 #if ATM_CLOUD_ENABLE
 	if (intersectionTest && V.y > 0.01f)
 	{
-		float2 cloudsOuterIntersections = ComputeRayPlaneIntersection(eye, V, float3(0,-1,0), setting.cloudTop);
-		float2 cloudsInnerIntersections = ComputeRayPlaneIntersection(eye, V, float3(0,-1,0), setting.cloudBottom);
+		float tOuter = ComputeRayPlaneIntersection(eye, V, float3(0,-1,0), setting.cloudTop);
+		float tInner = ComputeRayPlaneIntersection(eye, V, float3(0,-1,0), setting.cloudBottom);
+		if (tInner > 0) tOuter = tInner;
 
-		if (cloudsInnerIntersections.y > 0)
-			cloudsOuterIntersections.x = cloudsInnerIntersections.y;
+		float3 cloudsStart = eye + V * max(0, tOuter);
+		float3 cloudsEnd   = eye + V * ComputeRayPlaneIntersection(eye, V, float3(0,1,0), -setting.cloudTop);
 
-		float3 cloudsStart = eye + V * max(0, cloudsOuterIntersections.x);
-		float3 cloudsEnd = eye + V * cloudsOuterIntersections.y;
+		// Clamp march distance to avoid infinitely long rays near horizon
+		float marchDist = min(length(cloudsEnd - cloudsStart), setting.cloudTop * 2.5f);
+		cloudsEnd = cloudsStart + V * marchDist;
 
 		float3 cloudsMie = 0.0;
 		float cloudsOpticalLength = 0.0;
 		ComputeCloudsInsctrIntegral(setting, cloudsStart, cloudsEnd, V, -L, cloudsOpticalLength, cloudsMie);
 
-		// Aerial perspective horizon blending (clouds smoothly dissolve into horizon atmosphere)
+		// Aerial perspective: clouds dissolve at horizon
 		float horizonFade = saturate(V.y * 12.0f);
 		float cloudTransmittance = exp(-cloudsOpticalLength * 4.0f);
-		
-		float3 finalSkyWithClouds = sky * cloudTransmittance + cloudsMie;
-		sky = lerp(sky, finalSkyWithClouds, horizonFade);
+		sky = lerp(sky, sky * cloudTransmittance + cloudsMie, horizonFade);
 	}
 #endif
 
