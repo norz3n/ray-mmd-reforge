@@ -175,12 +175,13 @@ void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 
 
 			// Direct sun transmission (Beer-Powder law) + silver lining
 			float sunTransmission = ComputeBeerPowder(lightOpticalDepth, density);
-			float3 directSun = sunTransmission * phaseHG * setting.sunRadiance * float3(1.05f, 0.98f, 0.92f);
+			float3 directSun = sunTransmission * (phaseHG * 0.25f) * setting.sunRadiance * float3(1.02f, 0.98f, 0.94f);
 
-			// Ambient skylight (cool sky on top, soft atmospheric occlusion at cloud bottom)
-			float3 ambientSky = lerp(float3(0.40f, 0.48f, 0.62f), float3(0.82f, 0.90f, 1.0f), cloudHeight) * 0.42f;
+			// Ambient skylight (cool ambient at base, bright dome on top, proportional to sun power)
+			float3 ambientSky = lerp(float3(0.28f, 0.35f, 0.48f), float3(0.65f, 0.75f, 0.88f), cloudHeight) * (setting.sunRadiance * 0.12f);
 			
-			float3 stepScattering = (directSun + ambientSky) * density;
+			// Source radiance (intensive quantity, energy-conserving)
+			float3 stepScattering = directSun + ambientSky;
 
 			// Energy-conserving front-to-back compositing
 			float stepTransmittance = exp(-stepOpticalDepth);
