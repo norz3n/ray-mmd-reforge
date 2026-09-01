@@ -203,6 +203,8 @@ float4 AtmosphericScatteringPS(
 #if FOG_DISCARD_SKY
 	if (dot(material.albedo + material.specular, 1) - 1e-5 < 0)
 		visibility = 0;
+#endif
+
 	float3 fogBlur = tex2Dlod(FogBlurMapSamp, float4(coord + ViewportOffset, 0, 0)).rgb;
 	
 	// Ensure background sky and clouds are not washed out by additive fog blanket.
