@@ -25,6 +25,10 @@ float ComputeAmbientMicroOcclusion(float nl, float ao)
 	return shadow;
 }
 
+/**
+ * Multi-spectral Subsurface Scattering with Dermal Chromatic Dispersion (Penner & Borshukov).
+ * Simulates wavelength-dependent skin diffusion and saturated reddish terminator fringing.
+ */
 float3 SubsurfaceShadingPennerSkin(MaterialParam material, float3 N, float3 L)
 {
 	float nl = dot(N, L);
@@ -32,12 +36,15 @@ float3 SubsurfaceShadingPennerSkin(MaterialParam material, float3 N, float3 L)
 	float pndl = saturate( nl);
 	float nndl = saturate(-nl);
 
-	float ir = material.customDataA;
-	float brdf = pndl;
+	float ir = max(material.customDataA, 0.01f);
 	float3 sssColor = ComputeSpectralSubsurfaceColor(material.albedo, material.customDataB);
-	float3 sss = sssColor * pow2(1.0 - pndl) * pow(1.0-nndl,3.0 / (ir + 0.001)) * saturate(ir - 0.04);
+	float3 sss = sssColor * pow2(1.0f - pndl) * pow(1.0f - nndl, 3.0f / (ir + 0.001f)) * saturate(ir - 0.04f);
 
-	return sss;
+	// Chromatic dispersion fringe: narrow saturated blood-glow peak exactly along the shadow boundary (N.L ~ 0)
+	float terminatorFringe = exp(-pow2(nl / max(ir * 0.35f, 0.08f))) * saturate(ir * 1.5f);
+	float3 chromaticBlood = float3(1.0f, 0.22f, 0.04f) * sssColor * terminatorFringe * 0.45f;
+
+	return sss + chromaticBlood;
 }
 
 float3 SubsurfaceTranslucency(MaterialParam material, float3 N, float3 L, float3 V, float2 coord = float2(0, 0))
@@ -90,7 +97,7 @@ float3 SubsurfaceTranslucency(MaterialParam material, float3 N, float3 L, float3
 float3 SubsurfaceShadingPreIntegratedSkin(MaterialParam material, float3 N, float3 L)
 {
 	float ndotl = dot(N, L);
-	float curvature = material.customDataA;
+	float curvature = max(material.customDataA, 0.01f);
 	float scatter = saturate(curvature * 2.5f);
 	
 	float3 wrap = float3(0.6f, 0.2f, 0.05f) * scatter;
@@ -99,9 +106,13 @@ float3 SubsurfaceShadingPreIntegratedSkin(MaterialParam material, float3 N, floa
 	
 	float3 energy_normalization = 1.0f / (1.0f + wrap * 0.5f);
 	float edge_mask = saturate(1.0f - abs(ndotl));
-	float3 blood_scatter = float3(0.3f, 0.0f, 0.0f) * edge_mask * scatter * energy_normalization;
+	float3 blood_scatter = float3(0.35f, 0.04f, 0.01f) * edge_mask * scatter * energy_normalization;
 	
-	float3 brdf = (scatter_profile * energy_normalization) + blood_scatter;
+	// Chromatic dispersion fringe along terminator
+	float terminatorFringe = exp(-pow2(ndotl / max(curvature * 0.35f, 0.08f))) * scatter;
+	float3 chromaticBlood = float3(0.40f, 0.08f, 0.01f) * terminatorFringe;
+
+	float3 brdf = (scatter_profile * energy_normalization) + blood_scatter + chromaticBlood;
 	float3 sssColor = ComputeSpectralSubsurfaceColor(material.albedo, material.customDataB);
 	return sssColor * brdf;
 }
