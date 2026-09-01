@@ -60,16 +60,13 @@ float ComputeBeerPowder(float opticalDepth, float density)
 }
 
 /**
- * FBM micro-erosion noise (ported from SA_DirectX ns() function).
- * NOTE: Third octave has a NEGATIVE coefficient which carves realistic ragged cloud edges.
+ * Single-octave micro-detail erosion for soft cloud edge variation.
+ * A single smooth sample avoids the "sandblasted" look that multi-octave FBM with
+ * negative coefficients creates, while still breaking up the perfectly smooth coverage mask.
  */
-float CloudFBM(float2 uv)
+float CloudMicroDetail(float2 uv)
 {
-	float v  =  0.500f * tex2Dlod(CloudDetailMapSamp,  float4(uv,            0, 0)).r;
-	v        +=  0.250f * tex2Dlod(CloudDetailMapSamp,  float4(uv * 1.72f,    0, 0)).r;
-	v        += -0.150f * tex2Dlod(CloudDetailMapSamp,  float4(uv * 2.98f,    0, 0)).r; // carves holes
-	v        +=  0.080f * tex2Dlod(CloudMacroMapSamp,   float4(uv * 5.10f,    0, 0)).r;
-	return v;
+	return tex2Dlod(CloudDetailMapSamp, float4(uv, 0, 0)).r;
 }
 
 /**
@@ -117,14 +114,17 @@ float ComputeCloudDensity(ScatteringParams setting, float3 P, out float cloudHei
 	float sh = pow(max(clouds2, 0.0f), sharpness);
 	if (sh <= 0.0f) return 0.0f;
 
-	// STAGE 4: FBM micro-erosion with carved edges (SA_DirectX: ns() with -0.15 coefficient)
+	// STAGE 4: Soft micro-detail erosion — single sample, gentle subtraction.
+	// No negative-coefficient FBM: that caused the "sandblasted" look.
 	float2 microUV = p1.xz * 0.000048f;
-	float fbm = CloudFBM(microUV);
+	float microDetail = CloudMicroDetail(microUV);
 
-	// SA_DirectX threshold: 5.0*d - fbm - threshold (negative fbm carves holes)
-	float density = saturate(5.0f * sh - fbm - 0.14f);
+	// Threshold: 5.0*sh maps low sh values to [0..1], microDetail softens the boundary
+	float density = saturate(5.0f * sh - microDetail * 0.30f);
 
-	return density * setting.cloud;
+	// setting.cloud (mCloudDensity) controls coverage amount in [0..1] range.
+	// Clamped so the slider never yields degenerate values outside coverage mapping.
+	return density * saturate(setting.cloud);
 }
 
 float ComputeClound(ScatteringParams setting, float3 P)
