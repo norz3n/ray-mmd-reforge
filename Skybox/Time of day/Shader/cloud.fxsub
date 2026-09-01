@@ -22,12 +22,6 @@ sampler CloudDetailMapSamp = sampler_state {
 	ADDRESSU = WRAP; ADDRESSV = WRAP;
 };
 
-texture CloudBlueNoiseMap<string ResourceName = "shader/textures/BlueNoise.png";>; 
-sampler CloudBlueNoiseMapSamp = sampler_state {
-	texture = <CloudBlueNoiseMap>;
-	MINFILTER = LINEAR; MAGFILTER = LINEAR; MIPFILTER = NONE;
-	ADDRESSU = WRAP; ADDRESSV = WRAP;
-};
 
 float ComputeRayPlaneIntersection(float3 position, float3 viewdir, float3 n, float dist)
 {
