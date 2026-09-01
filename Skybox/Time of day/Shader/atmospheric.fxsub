@@ -194,6 +194,14 @@ float4 ComputeSkyInscattering(ScatteringParams setting, float3 eye, float3 V, fl
 	sky += limbDarkening;
 #endif
 
+	// --- Adaptive Brightness & Highlight Compression ---
+	float maxLum = max(sky.r, max(sky.g, sky.b));
+	if (maxLum > 0.8f)
+	{
+		float mappedLum = 0.8f + 0.2f * (1.0f - exp(-(maxLum - 0.8f) * 1.25f));
+		sky *= (mappedLum / maxLum);
+	}
+
 	return float4(sky, phaseNight * intersectionTest);
 }
 
