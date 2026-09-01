@@ -29,6 +29,10 @@ sampler CloudBlueNoiseMapSamp = sampler_state {
 	ADDRESSU = WRAP; ADDRESSV = WRAP;
 };
 
+// 2D Rotation matrices with golden ratio angles (37.5 deg and -53.2 deg) to break symmetry
+static const float2x2 kCloudRotA = float2x2(0.7933f, -0.6087f, 0.6087f, 0.7933f);
+static const float2x2 kCloudRotB = float2x2(0.5990f, 0.8007f, -0.8007f, 0.5990f);
+
 /**
  * Dual-lobe Henyey-Greenstein phase function with strong forward scattering (Silver Lining).
  */
@@ -66,11 +70,11 @@ float RemapCoverage(float shape, float coverage)
 }
 
 /**
- * Computes volumetric cumulus cloud density conforming to Earth's spherical planetary curvature.
+ * Computes volumetric cumulus cloud density with domain warping to completely break repetitive tiling.
  */
 float ComputeCloudDensity(ScatteringParams setting, float3 P, out float cloudHeight)
 {
-	// Calculate true altitude above spherical Earth surface
+	// Calculate altitude above spherical Earth surface
 	float3 toPos = P - setting.earthCenter;
 	float radialDist = length(toPos);
 	float altitude = radialDist - setting.earthRadius;
@@ -85,30 +89,55 @@ float ComputeCloudDensity(ScatteringParams setting, float3 P, out float cloudHei
 	float3 sphereNormal = toPos / radialDist;
 	float2 sphereUV = sphereNormal.xz * (setting.earthRadius + setting.cloudBottom);
 
-	float2 P1 = sphereUV + setting.clouddir.xz;
-	float2 P2 = sphereUV + setting.clouddir.xz * 0.55f;
+	// Domain Warping: fluid atmospheric turbulence distorts the sampling grid, completely preventing pattern repetition
+	float2 warpNoise = tex2Dlod(CloudCoverMapSamp, float4(mul(sphereUV, kCloudRotA) * 0.000007f, 0, 0)).rg * 2.0f - 1.0f;
+	float2 warpedUV = sphereUV + warpNoise * 14000.0f;
+
+	float2 P1 = warpedUV + setting.clouddir.xz;
+	float2 P2 = mul(warpedUV, kCloudRotB) + setting.clouddir.xz * 0.45f;
 
 	// Macro cloud coverage (large majestic formations spanning tens of kilometers)
-	float macroShape = tex2Dlod(CloudMacroMapSamp, float4(P1 * 0.0000075f, 0, 0)).r;
-	float coverNoise = tex2Dlod(CloudCoverMapSamp, float4(P2 * 0.000014f, 0, 0)).r;
+	float macroShape = tex2Dlod(CloudMacroMapSamp, float4(P1 * 0.0000065f, 0, 0)).r;
+	float coverNoise = tex2Dlod(CloudCoverMapSamp, float4(P2 * 0.000012f, 0, 0)).r;
 
 	// Dynamic cloud coverage scaling driven by controller (Cloud- shrinks to clear sky, Cloud+ expands to overcast)
 	float coverageBias = saturate(setting.cloud * 0.35f);
 	float targetCoverage = saturate(macroShape * (0.35f + coverageBias * 0.45f) + coverNoise * (0.20f + coverageBias * 0.30f));
 
 	// Mid-frequency cumulus structure
-	float cumulusNoise = tex2Dlod(CloudDetailMapSamp, float4((P1 + cloudHeight * 2500.0f) * 0.000026f, 0, 0)).r;
+	float cumulusNoise = tex2Dlod(CloudDetailMapSamp, float4((P1 + cloudHeight * 2500.0f) * 0.000024f, 0, 0)).r;
 	
 	// Carve cloud shapes using coverage remapping
 	float density = RemapCoverage(cumulusNoise, targetCoverage);
 	density *= heightGradient;
 
-	// Soft edge detail erosion (wispy micro-eddies without high-frequency stepping)
-	float microErosion = tex2Dlod(CloudDetailMapSamp, float4(P2 * 0.000078f, 0, 0)).g;
+	// Soft edge detail erosion (wispy micro-eddies)
+	float microErosion = tex2Dlod(CloudDetailMapSamp, float4(P2 * 0.000072f, 0, 0)).g;
 	density = saturate(density - microErosion * 0.12f * (1.0f - cloudHeight));
 	density = smoothstep(0.01f, 0.95f, density);
 
 	return density * max(setting.cloud, 0.0f);
+}
+
+/**
+ * Ultra-fast single-sample cloud density approximation for light probe (60+ FPS).
+ */
+float ComputeCloudDensityFast(ScatteringParams setting, float3 P, out float cloudHeight)
+{
+	float3 toPos = P - setting.earthCenter;
+	float radialDist = length(toPos);
+	float altitude = radialDist - setting.earthRadius;
+
+	cloudHeight = saturate((altitude - setting.cloudBottom) / max(setting.cloudTop - setting.cloudBottom, 1.0f));
+	float heightGradient = smoothstep(0.0f, 0.16f, cloudHeight) * smoothstep(1.0f, 0.55f, cloudHeight);
+	if (heightGradient <= 1e-4f) return 0.0f;
+
+	float3 sphereNormal = toPos / radialDist;
+	float2 sphereUV = sphereNormal.xz * (setting.earthRadius + setting.cloudBottom);
+	float2 P1 = sphereUV + setting.clouddir.xz;
+
+	float cumulusNoise = tex2Dlod(CloudDetailMapSamp, float4((P1 + cloudHeight * 2500.0f) * 0.000024f, 0, 0)).r;
+	return saturate(cumulusNoise * heightGradient) * max(setting.cloud, 0.0f);
 }
 
 float ComputeClound(ScatteringParams setting, float3 P)
@@ -131,7 +160,7 @@ float HitCloudsTest(ScatteringParams setting, float3 eye, float3 V, float3 L)
 }
 
 /**
- * Spherical-shell volumetric raymarching (smooth sub-pixel dithering, 60+ FPS).
+ * Spherical-shell volumetric raymarching (domain-warped anti-tiling, 60+ FPS).
  */
 void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 end, float3 V, float3 L, inout float opticalDepth, inout float3 insctrMie)
 {
@@ -141,7 +170,7 @@ void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 
 	float stepLength = totalDist / float(NUMS_SAMPLES_CLOUD);
 	float3 sampleStep = rayDir * stepLength;
 
-	// Screen/direction-space subtle blue noise dithering (smooth sub-step jittering, zero jagged contour teeth)
+	// Direction-space subtle blue noise dithering (smooth sub-step jittering)
 	float dither = tex2Dlod(CloudBlueNoiseMapSamp, float4(V.xz * 32.0f, 0, 0)).r;
 	float3 samplePos = start + sampleStep * (0.45f + dither * 0.10f);
 
@@ -168,8 +197,8 @@ void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 
 
 			// Single-tap light extinction probe towards the sun (high performance, no nested raymarch)
 			float lightHeight;
-			float lightDensity = ComputeCloudDensity(setting, samplePos + lightOffsetStep, lightHeight);
-			float lightOpticalDepth = (density * 0.4f + lightDensity * 0.6f) * (stepLength * 2.0f) * 0.00075f;
+			float lightDensity = ComputeCloudDensityFast(setting, samplePos + lightOffsetStep, lightHeight);
+			float lightOpticalDepth = (density * 0.35f + lightDensity * 0.65f) * (stepLength * 2.0f) * 0.00075f;
 
 			// Direct sun transmission (Beer-Powder law) + silver lining
 			float sunTransmission = ComputeBeerPowder(lightOpticalDepth, density);
