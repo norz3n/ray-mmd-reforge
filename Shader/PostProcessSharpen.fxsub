@@ -1,36 +1,64 @@
-// ponytail: AMD FidelityFX CAS (Contrast Adaptive Sharpening) with NaN protection and scalable 0..1 sharpness
+// ponytail: AMD FidelityFX CAS (Contrast Adaptive Sharpening) 1.2 with CAS_BETTER_DIAGONALS 3x3 kernel
 float3 CASSharpen(sampler2D source, float2 coord, float2 offset, float sharpness)
 {
-	float3 e = tex2Dlod(source, float4(coord, 0, 0)).rgb;
+	// 3x3 sample neighborhood:
+	// a b c
+	// d e f
+	// g h i
+	float3 a = tex2Dlod(source, float4(coord + float2(-offset.x, -offset.y), 0, 0)).rgb;
 	float3 b = tex2Dlod(source, float4(coord + float2(0, -offset.y), 0, 0)).rgb;
+	float3 c = tex2Dlod(source, float4(coord + float2(offset.x, -offset.y), 0, 0)).rgb;
 	float3 d = tex2Dlod(source, float4(coord + float2(-offset.x, 0), 0, 0)).rgb;
+	float3 e = tex2Dlod(source, float4(coord, 0, 0)).rgb;
 	float3 f = tex2Dlod(source, float4(coord + float2(offset.x, 0), 0, 0)).rgb;
+	float3 g = tex2Dlod(source, float4(coord + float2(-offset.x, offset.y), 0, 0)).rgb;
 	float3 h = tex2Dlod(source, float4(coord + float2(0, offset.y), 0, 0)).rgb;
+	float3 i = tex2Dlod(source, float4(coord + float2(offset.x, offset.y), 0, 0)).rgb;
 
-	float3 minColor = min(min(b, d), min(f, h));
-	float3 maxColor = max(max(b, d), max(f, h));
+	// Soft min and max (CAS_BETTER_DIAGONALS: Cross min/max + Box 3x3 min/max)
+	float3 mnCross = min(min(min(d, e), f), min(b, h));
+	float3 mnBox   = min(min(min(mnCross, a), c), min(g, i));
+	float3 mn      = mnCross + mnBox;
 
-	// AMD CAS peak weight clamping (-0.1875 max negative weight prevents 1 + 4*w division by zero)
-	float3 w = sqrt(saturate(min(minColor, 1.0 - maxColor) / max(maxColor, 1e-5))) * (-0.1875 * saturate(sharpness));
-	float3 denom = max(0.01, 1.0 + 4.0 * w);
+	float3 mxCross = max(max(max(d, e), f), max(b, h));
+	float3 mxBox   = max(max(max(mxCross, a), c), max(g, i));
+	float3 mx      = mxCross + mxBox;
 
-	float3 result = (b * w + d * w + f * w + h * w + e) / denom;
+	// Smooth minimum distance to signal limit divided by smooth max
+	float3 amp = saturate(min(mn, 2.0 - mx) / max(mx, 1e-5));
+	amp = sqrt(amp);
+
+	// Shaping sharpness: Peak weight from AMD CasSetup: sharp = -1.0 / lerp(8.0, 5.0, sharpness)
+	float peak = -1.0 / lerp(8.0, 5.0, saturate(sharpness));
+	float3 w = amp * peak;
+
+	// Filter kernel normalization and output
+	float3 rcpWeight = 1.0 / (1.0 + 4.0 * w);
+	float3 result = (b * w + d * w + f * w + h * w + e) * rcpWeight;
 	return saturate(result);
+}
+
+// ponytail: Sine-free isotropic GPU hash eliminates 1D projection moire and diagonal artifacts
+float2 Hash23(float3 p)
+{
+	float3 p3 = frac(p * float3(0.1031f, 0.1030f, 0.0973f));
+	p3 += dot(p3, p3.yzx + 33.33f);
+	return frac((p3.xx + p3.yz) * p3.zy);
 }
 
 // Procedural Cinematic Film Grain
 float3 ApplyFilmGrain(float3 color, float2 coord, float time, float intensity)
 {
-	// Generate high-frequency pseudo-random noise based on spatial coordinates and time
-	float2 seed = coord + frac(time);
-	float noise = frac(sin(dot(seed, float2(12.9898, 78.233))) * 43758.5453);
+	// High-frequency decorrelated noise in pixel space with temporal jitter
+	float2 pixelPos = coord * ViewportSize;
+	float2 noise2D = Hash23(float3(pixelPos, frac(time) * 1000.0f));
 	
-	// Shift from [0, 1] to [-1, 1], scale down internally for finer slider control
-	noise = (noise * 2.0 - 1.0) * (intensity * 0.2);
+	// Triangular probability density function (TPDF) for soft photographic grain distribution [-1, 1]
+	float noise = (noise2D.x - noise2D.y) * intensity;
 	
-	// Blend: Parabolic curve (smoother than linear) to softly fade grain in deep shadows and bright highlights
-	float luma = dot(color, float3(0.299, 0.587, 0.114));
-	float grainWeight = 1.0 - pow(abs(luma - 0.5) * 2.0, 2.0);
+	// Blend: Parabolic curve to softly fade grain in deep shadows and bright highlights
+	float luma = dot(color, float3(0.299f, 0.587f, 0.114f));
+	float grainWeight = 1.0f - pow(abs(luma - 0.5f) * 2.0f, 2.0f);
 	
 	return saturate(color + noise * grainWeight);
 }
