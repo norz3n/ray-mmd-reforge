@@ -102,9 +102,13 @@ float ComputeCloudDensity(ScatteringParams setting, float3 P, out float cloudHei
 	clouds1 *= heightMask;
 	clouds1 = lerp(1.0f, clouds1, 0.85f); // 15% minimum presence: prevents hard cutoffs
 
-	// STAGE 2: Billowy cumulus structure carved through the coverage mask
-	// (SA_DirectX: clouds1 * SamplerNoise3 at 0.0002*0.5)
-	float billowy = clamp((tex2Dlod(CloudDetailMapSamp, float4(p1.xz * 0.000021f, 0, 0)).r * 2.15f * 0.56f - 0.28f) * 0.8f, 0.0f, 0.35f);
+	// STAGE 2: Billowy cumulus structure carved through the coverage mask.
+	// setting.cloud [0..1] shifts the THRESHOLD: low = sparse clouds, high = overcast.
+	// At 0.0: threshold=0.52 → very few noise values qualify → almost no clouds
+	// At 0.5: threshold=0.28 → partly cloudy (SA_DirectX default)
+	// At 1.0: threshold=0.04 → almost everywhere qualifies → solid overcast
+	float coverageThreshold = lerp(0.52f, 0.04f, saturate(setting.cloud));
+	float billowy = clamp((tex2Dlod(CloudDetailMapSamp, float4(p1.xz * 0.000021f, 0, 0)).r * 2.15f * 0.56f - coverageThreshold) * 0.8f, 0.0f, 0.35f);
 	float clouds2 = clouds1 * billowy;
 	clouds2 *= smoothstep(0.0f, 0.35f, cloudHeight) * smoothstep(1.0f, 0.50f, cloudHeight);
 
@@ -120,11 +124,7 @@ float ComputeCloudDensity(ScatteringParams setting, float3 P, out float cloudHei
 	float microDetail = CloudMicroDetail(microUV);
 
 	// Threshold: 5.0*sh maps low sh values to [0..1], microDetail softens the boundary
-	float density = saturate(5.0f * sh - microDetail * 0.30f);
-
-	// setting.cloud (mCloudDensity) controls coverage amount in [0..1] range.
-	// Clamped so the slider never yields degenerate values outside coverage mapping.
-	return density * saturate(setting.cloud);
+	return saturate(5.0f * sh - microDetail * 0.30f);
 }
 
 float ComputeClound(ScatteringParams setting, float3 P)
