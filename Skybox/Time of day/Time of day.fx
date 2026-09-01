@@ -75,7 +75,7 @@ float4 ScatteringWithCloudsPS(
 	setting.cloud = mCloudDensity;
 	setting.cloudTop = 4.5 * mUnitDistance;
 	setting.cloudBottom = 1.5 * mUnitDistance;
-	setting.clouddir = float3(1200, 0, -2500) * mCloudSpeed;
+	setting.clouddir = float3(0.045, 0, -0.095) * mCloudSpeed;
 	setting.cloudLambda = cloud;
 
 	float4 insctrColor = ComputeCloudsInscattering(setting, CameraPosition + float3(0, mEarthPeopleHeight * mUnitDistance, 0), V, SunDirection);
