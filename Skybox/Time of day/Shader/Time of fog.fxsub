@@ -203,10 +203,13 @@ float4 AtmosphericScatteringPS(
 #if FOG_DISCARD_SKY
 	if (dot(material.albedo + material.specular, 1) - 1e-5 < 0)
 		visibility = 0;
-#endif
-
 	float3 fogBlur = tex2Dlod(FogBlurMapSamp, float4(coord + ViewportOffset, 0, 0)).rgb;
-	return float4(fogAmount * visibility + fogBlur, luminance(mWaveLength) * material.linearDepth * mFogDensity * visibility);
+	
+	// Ensure background sky and clouds are not washed out by additive fog blanket.
+	// On models/geometry (visibility == 1): full atmospheric fog + godrays.
+	// On skybox (visibility == 0): preserve cloud contrast, softly adding only radiant godray shafts.
+	float3 finalFog = fogAmount * visibility + fogBlur * lerp(0.35f, 1.0f, visibility);
+	return float4(finalFog, luminance(mWaveLength) * material.linearDepth * mFogDensity * visibility);
 }
 
 #endif
