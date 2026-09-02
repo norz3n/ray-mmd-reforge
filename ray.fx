@@ -116,9 +116,7 @@ static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceB
 #include "shader/ColorGrading.fxsub"
 #include "shader/ShadingMaterials.fxsub"
 
-#if SSR_QUALITY || GI_ENABLE || GLASS_REFRACTION
-#	include "shader/HiZ/HiZ_Main.fxsub"
-#endif
+
 
 #if SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE
 #	include "shader/ShadowCommon.fxsub"
@@ -248,21 +246,6 @@ technique DeferredLighting<
 	"Clear=Depth;"
 	"ScriptExternal=Color;"
 
-#if SSR_QUALITY || GI_ENABLE || GLASS_REFRACTION
-	// The G-buffer is complete after ScriptExternal.  Build the hierarchy here
-	// so deferred sun shadows and later screen-space passes use this frame.
-	"RenderColorTarget=ZBufferMipmap1;            Pass=HiZ_Mipmap1;"
-	"RenderColorTarget=ZBufferMipmap2;            Pass=HiZ_Mipmap2;"
-	"RenderColorTarget=ZBufferMipmap3;            Pass=HiZ_Mipmap3;"
-	"RenderColorTarget=ZBufferMipmap4;            Pass=HiZ_Mipmap4;"
-	"RenderColorTarget=ZBufferMipmap5;            Pass=HiZ_Mipmap5;"
-	"RenderColorTarget=ZBufferMipmap6;            Pass=HiZ_Mipmap6;"
-	"RenderColorTarget=ZBufferMipmap7;            Pass=HiZ_Mipmap7;"
-	"RenderColorTarget=ZBufferMipmap8;            Pass=HiZ_Mipmap8;"
-	"RenderColorTarget=ZBufferMipmap9;            Pass=HiZ_Mipmap9;"
-	"RenderColorTarget=ZBufferMipmap10;           Pass=HiZ_Mipmap10;"
-	"RenderColorTarget=ZBufferMipmap;             Pass=HiZ_CombineAtlas;"
-#endif
 
 #if SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE
 	"RenderColorTarget=ShadowMap;"
@@ -674,74 +657,7 @@ technique DeferredLighting<
 		PixelShader  = compile ps_3_0 ScreenSpaceBilateralFilterPS(ShadingMapTempSamp, mDiffusionOffsetY);
 	}
 #endif
-#if SSR_QUALITY || GI_ENABLE || GLASS_REFRACTION
-	pass HiZ_Mipmap1<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
-		PixelShader  = compile ps_3_0 HiZ_BuildMip1_PS(Gbuffer8Map);
-	}
-	pass HiZ_Mipmap2<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
-		PixelShader  = compile ps_3_0 HiZ_BuildMipN_PS(ZBufferMipmap1Samp, kHiZMip2Size, kHiZMip1Size);
-	}
-	pass HiZ_Mipmap3<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
-		PixelShader  = compile ps_3_0 HiZ_BuildMipN_PS(ZBufferMipmap2Samp, kHiZMip3Size, kHiZMip2Size);
-	}
-	pass HiZ_Mipmap4<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
-		PixelShader  = compile ps_3_0 HiZ_BuildMipN_PS(ZBufferMipmap3Samp, kHiZMip4Size, kHiZMip3Size);
-	}
-	pass HiZ_Mipmap5<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
-		PixelShader  = compile ps_3_0 HiZ_BuildMipN_PS(ZBufferMipmap4Samp, kHiZMip5Size, kHiZMip4Size);
-	}
-	pass HiZ_Mipmap6<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
-		PixelShader  = compile ps_3_0 HiZ_BuildMipN_PS(ZBufferMipmap5Samp, kHiZMip6Size, kHiZMip5Size);
-	}
-	pass HiZ_Mipmap7<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
-		PixelShader  = compile ps_3_0 HiZ_BuildMipN_PS(ZBufferMipmap6Samp, kHiZMip7Size, kHiZMip6Size);
-	}
-	pass HiZ_Mipmap8<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
-		PixelShader  = compile ps_3_0 HiZ_BuildMipN_PS(ZBufferMipmap7Samp, kHiZMip8Size, kHiZMip7Size);
-	}
-	pass HiZ_Mipmap9<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
-		PixelShader  = compile ps_3_0 HiZ_BuildMipN_PS(ZBufferMipmap8Samp, kHiZMip9Size, kHiZMip8Size);
-	}
-	pass HiZ_Mipmap10<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadOffsetVS(0);
-		PixelShader  = compile ps_3_0 HiZ_BuildMipN_PS(ZBufferMipmap9Samp, kHiZMip10Size, kHiZMip9Size);
-	}
-	pass HiZ_CombineAtlas<string Script= "Draw=Buffer;";>{
- 		AlphaBlendEnable = false; AlphaTestEnable = false;
- 		ZEnable = false; ZWriteEnable = false;
- 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
- 		PixelShader  = compile ps_3_0 HiZ_CombineAtlas_PS();
- 	}
-#endif
+
 #if SSR_QUALITY
 	pass SSR_Trace<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;

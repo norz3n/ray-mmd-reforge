@@ -6,7 +6,7 @@ Ray-MMD Reforge
 </div>
 
 　　**Ray-MMD Reforge** is a modified fork of the original Ray-MMD library for [mikumikudance](http://www.geocities.jp/higuchuu4/index_e.htm).
-　　Focused on bridging realistic lighting with stylized rendering, Reforge rebuilds the engine pipeline around a single **unified Hi-Z buffer** that accelerates every screen-space effect — reflections, global illumination, ambient occlusion, contact shadows, and glass refraction. On top of it sit modern graphics techniques: **Temporal Anti-Aliasing (TAA)**, **Screen Space Global Illumination (SSGI)**, **Hybrid HBAO/SSDO**, and the **AgX tone mapper** — for a stable, physically grounded image out of the box.
+　　Focused on bridging realistic lighting with stylized rendering, Reforge rebuilds the engine pipeline around direct, high-precision screen-space raymarching and ultrafast root-finding algorithms. On top of it sit modern graphics techniques: **Temporal Anti-Aliasing (TAA)**, **Screen Space Global Illumination (SSGI)**, **Hybrid HBAO/SSDO**, and the **AgX tone mapper** — for a stable, physically grounded image out of the box.
 
 Screenshots:
 ------------
@@ -27,9 +27,8 @@ Requirement :
 Reforge Exclusive Features (through v1.17.0) :
 ------------
 
-**Unified Hi-Z Core**
-* **Unified Hierarchical Z-Buffer**: one Hi-Z acceleration structure shared by SSR, SSGI, HBAO/SSDO, Contact Shadows, and glass refraction.
-* **Clean-Room Hi-Z Traversal**: academically correct DDA-based hierarchical stepping with near-plane clamping and cell-boundary artifact fixes.
+**Direct Screen-Space Core**
+* **Direct 1:1 Screen-Space Architecture**: eliminated the heavy 11-pass hierarchical depth pyramid (Hi-Z), freeing 11 RenderTarget textures in VRAM and removing per-frame downsampling passes in favor of direct G-buffer raymarching and Newton root-finding.
 
 **Global Illumination**
 * **Screen Space Global Illumination (SSGI)**: rewritten modular architecture using hybrid linear-quadratic raymarching at full 1:1 resolution, replacing both legacy VXGI and Hi-Z dependent traces.
@@ -40,8 +39,8 @@ Reforge Exclusive Features (through v1.17.0) :
 
 **Reflections & Occlusion**
 * **PBR Screen-Space Reflections**: binary-search refinement, depth-aware bilateral blur, edge fade, and energy-conserving BRDF integration.
-* **Hybrid HBAO / SSDO**: horizon-based and directional occlusion with multi-scale Hi-Z sampling for accurate contact shading.
-* **Contact Shadows**: screen-space shadows rewritten on Hi-Z hierarchical ray traversal, with depth-discontinuity artifact fixes.
+* **Hybrid HBAO / SSDO**: horizon-based and directional occlusion for accurate contact shading.
+* **Contact Shadows**: screen-space contact shadows with depth-discontinuity artifact fixes.
 * **Directional Bent Normals**: occlusion-aware normal bending for more believable indirect shading.
 
 **Lighting & Shadows**
@@ -55,7 +54,7 @@ Reforge Exclusive Features (through v1.17.0) :
 * **Procedural Hair Materials**: mathematical anisotropic hair normals plus Kajiya-Kay highlights — ported hbee hair presets with no heavy static textures.
 * **Physical Cloth & ClearCoat**: rewritten BRDFs with cloth-DFG and Charlie Sheen distribution.
 * **Procedural Eyes**: spherical corneal dome normal generation with limbal ring, UV-atlas safe, and CONVEX_NORMAL inversion mode for concave eye meshes. Dedicated Cornea ClearCoat eye materials included.
-* **Glass Pipeline**: tinted glass presets inheriting MMD diffuse color, chromatic-dispersion refraction, and Hi-Z traced refraction validated against scene depth.
+* **Glass Pipeline**: tinted glass presets inheriting MMD diffuse color, chromatic-dispersion refraction, and ultrafast Newton's method screen-space refraction root-finding (Mayer et al. 2026) converging in 3–4 iterations directly against the G-buffer.
 * **Forced Transparency Presets**: make an opaque PMX material transparent without editing the model — plain and glass (SHADINGMODELID_GLASS refraction) variants, shaded through the alpha gbuffer with the model's own texture and MMD diffuse.
 * **Wetness Special-Case Material**: now with ordered-dither alpha clipping; alpha cutout threshold unified at 0.5 across all passes.
 * **Procedural Foliage Wind**: vertex wind animation engine with four vegetation presets.
@@ -158,13 +157,15 @@ Contact:
 
 Credits :
 --------
-* Clean Room Hierarchical Z-Buffer (Hi-Z) & PBR Screen-Space Reflections based on Morgan McGuire & Michael Mara (2014) and Yasin Uludag (GPU Pro 5, 2014).
+* PBR Screen-Space Reflections based on Morgan McGuire & Michael Mara (2014) 2D DDA ray traversal.
+* Ultrafast Screen-Space Refractions via Newton's Method based on Chase Mayer, Ulf Assarsson & Erik Sintorn (JCGT 2026).
 * HBSSDO rendering concepts referenced from [dendewa](https://dendewa.vercel.app/).
 * AgX Tone Mapping per the official Blender 4.0 implementation ([link](https://github.com/EaryChow/AgX)).
 * Karis anti-firefly downsampling and luma weighting from Brian Karis' "Next Generation Post Processing in Call of Duty: Advanced Warfare".
 
 References :
 --------
+* Ultrafast Screen-Space Refractions and Caustics via Newton's Method \[[link](https://jcgt.org/published/0015/01/03/)\].
 * Moving to the Next Generation - The Rendering Technology of Ryse \[[link](http://www.crytek.com/download/2014_03_25_CRYENGINE_GDC_Schultz.pdf)\].
 * ACES Filmic Tone Mapping Curve \[[link](https://knarkowicz.wordpress.com/2016/08/31/hdr-display-first-steps/)\].
 * Compact Normal Storage for small G-Buffers \[[link](http://aras-p.info/texts/CompactNormalStorage.html)\].

@@ -1,7 +1,3 @@
-#if GLASS_REFRACTION
-// Hi-Z pyramid for traced glass refraction (include-guarded; shared with SSR/GI/contact shadows)
-#include "shader/HiZ/HiZ_Main.fxsub"
-#endif
 
 #if SUN_LIGHT_ENABLE
 float3 ComputeSunIntensity(float zenithAngleCos, float EE = 10)
@@ -201,6 +197,110 @@ float4 ShadingOpacitySpecularPS(in float2 coord: TEXCOORD0) : COLOR
 	return float4(specular, 0);
 }
 
+#if GLASS_REFRACTION
+/**
+ * Newton's Method Screen-Space Refraction Solver.
+ * Based on: "Ultrafast Screen-Space Refractions and Caustics via Newton's Method"
+ *           Chase Mayer, Ulf Assarsson, Erik Sintorn (JCGT 2026).
+ *           https://jcgt.org/published/0015/01/03/
+ *
+ * Formulates ray-surface intersection as a scalar root-finding problem along the
+ * refracted ray: F(x) = depth(ray(s)) - depth(Gbuffer(x)) = 0.
+ * Solving via local tangent planes is algebraically equivalent to Newton's method
+ * with quadratic convergence, resolving intersections in 3-4 steps without the
+ * heavy traversal overhead of hierarchical Hi-Z DDA raymarching.
+ *
+ * @param originVS      Ray origin on transparent surface in View Space.
+ * @param rayDirVS     Normalized refracted ray direction in View Space.
+ * @param startUV      Screen UV of the refractive surface fragment (seed p0).
+ * @param surfaceDepth Linear depth of the refractive surface fragment.
+ * @param projConstant Precomputed projection constant from GetProjConstant().
+ * @param outHitUV     Output refined screen UV coordinates.
+ * @return True if convergence succeeded within pixel error tolerance.
+ */
+bool NewtonRefractionTrace(
+	float3 originVS,
+	float3 rayDirVS,
+	float2 startUV,
+	float surfaceDepth,
+	float4 projConstant,
+	out float2 outHitUV)
+{
+	static const int NUM_NEWTON_ITERATIONS = 4;
+	static const float MAX_PIXEL_ERROR_SQ = 4.0f; // 2 pixels error tolerance (Section 2.2)
+	static const float MIN_PLANE_DENOM = 1e-4f;
+	static const float DEPTH_BIAS = 1e-2f;
+
+	float2 currentUV = startUV;
+	outHitUV = startUV;
+
+	[unroll]
+	for (int i = 0; i < NUM_NEWTON_ITERATIONS; ++i)
+	{
+		// 1. Sample background depth behind the transparent surface (Gbuffer4Map.r is linear depth)
+		float bgDepth = tex2Dlod(Gbuffer4Map, float4(currentUV, 0.0f, 0.0f)).r;
+
+		// 2. Decode background normal in view space
+		float3 bgNormal = DecodeNormal(tex2Dlod(Gbuffer2Map, float4(currentUV, 0.0f, 0.0f)).xyz);
+
+		// 3. Reconstruct background view-space position
+		float3 bgPosVS = GetViewPosition(projConstant, currentUV, bgDepth);
+
+		// 4. Intersect refracted ray with local tangent plane: (x - bgPosVS) . bgNormal = 0
+		float denom = dot(rayDirVS, bgNormal);
+		if (abs(denom) < MIN_PLANE_DENOM)
+			break;
+
+		float t = dot(bgPosVS - originVS, bgNormal) / denom;
+		if (t <= 0.0f)
+			break;
+
+		// 5. Compute intersection point along the ray
+		float3 intersectPosVS = originVS + rayDirVS * t;
+
+		// 6. Project intersection point to screen-space UV coordinates
+		float4 clip = mul(float4(intersectPosVS, 1.0f), matProject);
+		if (clip.w <= 0.0f)
+			break;
+
+		float2 nextUV = (clip.xy / clip.w) * float2(0.5f, -0.5f) + 0.5f;
+
+		// 7. Bounds check (Section 2.2)
+		if (any(nextUV < 0.0f) || any(nextUV > 1.0f))
+			break;
+
+		currentUV = nextUV;
+	}
+
+	// Validation heuristics (Mayer et al. 2026, Section 2.2):
+	// Ensure coordinates remain within screen bounds and candidate lies behind front surface
+	if (any(currentUV < 0.0f) || any(currentUV > 1.0f))
+		return false;
+
+	float finalBgDepth = tex2Dlod(Gbuffer4Map, float4(currentUV, 0.0f, 0.0f)).r;
+	if (finalBgDepth <= surfaceDepth + DEPTH_BIAS)
+		return false;
+
+	// Consistency test: verify candidate G-buffer point lies close to the refracted ray
+	float3 finalPosVS = GetViewPosition(projConstant, currentUV, finalBgDepth);
+	float tClosest = max(0.0f, dot(finalPosVS - originVS, rayDirVS));
+	float3 closestRayPosVS = originVS + rayDirVS * tClosest;
+
+	float4 closestClip = mul(float4(closestRayPosVS, 1.0f), matProject);
+	if (closestClip.w <= 0.0f)
+		return false;
+
+	float2 closestUV = (closestClip.xy / closestClip.w) * float2(0.5f, -0.5f) + 0.5f;
+	float2 pixelError = (closestUV - currentUV) * ViewportSize;
+
+	if (dot(pixelError, pixelError) > MAX_PIXEL_ERROR_SQ)
+		return false;
+
+	outHitUV = currentUV;
+	return true;
+}
+#endif
+
 float4 ShadingTransparentPS(
 	in float2 coord: TEXCOORD0, 
 	in float3 viewdir: TEXCOORD1, 
@@ -237,7 +337,11 @@ float4 ShadingTransparentPS(
 	lighting += (material.lightModel == SHADINGMODELID_GLASS ? 0.0f : iblDiffuse * material.albedo) + iblSpecular;
 #endif
 
-	float2 ior = (material.lightModel != SHADINGMODELID_GLASS) ? 0 : mul(material.normal, (float3x3)matViewInverse).xy * (material.customDataA * 0.003f);
+	// Water presets set customDataA == 0 (physical water IOR = 1.333, eta = 1 / 1.333 ≈ 0.75f).
+	// Glass presets set customDataA > 0 (typical glass IOR = 1.45-1.52, eta ≈ 0.69f).
+	float eta = (material.customDataA > 0.01f) ? 0.69f : 0.75f;
+	float refrMultiplier = (material.customDataA > 0.01f) ? material.customDataA : 0.8f;
+	float2 ior = (material.lightModel != SHADINGMODELID_GLASS) ? 0 : mul(material.normal, (float3x3)matViewInverse).xy * (refrMultiplier * 0.003f);
 	float3 prefilteredRefract;
 
 	if (material.lightModel == SHADINGMODELID_GLASS)
@@ -272,21 +376,33 @@ float4 ShadingTransparentPS(
 		}
 
 #if GLASS_REFRACTION
-		// Hi-Z traced refraction: march the refracted ray to the true background surface point.
-		// Falls back to the flat screen-offset result above when the ray leaves screen or finds no geometry.
+		// Newton's Method Screen-Space Refraction (Mayer et al. 2026, JCGT).
+		// Solves root finding along the refracted ray with quadratic convergence in 3-4 steps.
+		// Directly queries 1:1 G-buffer without hierarchical Hi-Z DDA raymarching overhead.
+		float4 projConstant = GetProjConstant();
 		float3 posVS = viewdir * (material.linearDepth / viewdir.z);
-		float3 refractDir = refract(-V, material.normal, 0.69f);
+		float3 refractDir = refract(-V, material.normal, eta);
 		if (dot(refractDir, refractDir) > 1e-4f)
 		{
 			float3 refrOrigin = posVS + refractDir * (mSSROffset * 2.0f);
 			float2 hitUV;
-			float3 hitPosVS;
-			if (HiZ_TraceRay(16, refrOrigin, refractDir, max(material.linearDepth * 2.0f, 10.0f),
-				float3(mSSROffset, mSSRThickness, 0.0f), hitUV, hitPosVS))
+			if (NewtonRefractionTrace(refrOrigin, refractDir, coord, material.linearDepth, projConstant, hitUV))
 			{
-				float3 tracedBg = tex2Dlod(ShadingMapTempPointSamp, float4(hitUV, 0, 0)).rgb;
-				if (any(tracedBg))
-					prefilteredRefract = lerp(tracedBg, prefilteredRefract, glassRoughness * 0.5f);
+				float2 deltaUV = hitUV - coord;
+				float2 uvR = coord + deltaUV * 0.95f;
+				float2 uvG = hitUV;
+				float2 uvB = coord + deltaUV * 1.05f;
+
+				float3 tracedR = tex2Dlod(ShadingMapTempPointSamp, float4(uvR, 0, 0)).rgb;
+				float3 tracedG = tex2Dlod(ShadingMapTempPointSamp, float4(uvG, 0, 0)).rgb;
+				float3 tracedB = tex2Dlod(ShadingMapTempPointSamp, float4(uvB, 0, 0)).rgb;
+
+				tracedR = any(tracedR) ? tracedR : srgb2linear(tex2Dlod(ScnSamp, float4(uvR, 0, 0)).rgb);
+				tracedG = any(tracedG) ? tracedG : srgb2linear(tex2Dlod(ScnSamp, float4(uvG, 0, 0)).rgb);
+				tracedB = any(tracedB) ? tracedB : srgb2linear(tex2Dlod(ScnSamp, float4(uvB, 0, 0)).rgb);
+
+				float3 tracedBg = float3(tracedR.r, tracedG.g, tracedB.b);
+				prefilteredRefract = lerp(tracedBg, prefilteredRefract, glassRoughness * 0.5f);
 			}
 		}
 #endif
