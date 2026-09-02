@@ -91,14 +91,15 @@ bool HiZ_ConfirmOrAdvance(
 	if (currentMip == 0)
 	{
 		float depthDiff = rayLinearZ - minSceneLinearZ;
-		if (depthDiff >= negTolerance && depthDiff <= surfaceThickness)
+		float maxAllowedThickness = max(surfaceThickness, minSceneLinearZ * 0.08f);
+		if (depthDiff >= negTolerance && depthDiff <= maxAllowedThickness)
 		{
 			result.isHit = true;
 			result.hitProgress = tCurrent;
 			result.hitUV = hitSS.xy;
 			result.depthError = max(depthDiff, 0.0f);
 			result.hitMip = 0;
-			float penetration = max(depthDiff, 0.0f) / max(surfaceThickness, 1e-4f);
+			float penetration = max(depthDiff, 0.0f) / max(maxAllowedThickness, 1e-4f);
 			result.confidence = pow2(saturate(1.0f - penetration));
 			return true;
 		}
