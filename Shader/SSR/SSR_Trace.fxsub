@@ -75,12 +75,14 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 #endif
 	float jitter = InterleavedGradientNoise(coord.xy * ViewportSize, frameCounter);
 
-	float3 prevSS = startSS;
+	float prevT = 0.0f;
+	float prevDiff = -1.0f;
 	float3 hitSS = 0.0f;
 	float hitProgress = 0.0f;
 	bool hitFound = false;
 
-	// Dense polynomial step progression: guarantees smooth, clean, noise-free reflection surfaces
+	// Hybrid root-finding raymarcher (h3r2tic / McGuire & Mara):
+	// Polynomial march -> Interval bracketing -> Bisection -> Secant root polish
 	[loop]
 	for (int i = 1; i <= SSR_MAX_RAY_STEPS; ++i)
 	{
@@ -96,40 +98,65 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 			float rayLinearZ = SSR_RayLinearZ(currentSS.z);
 			float depthDiff = rayLinearZ - sceneLinearZ;
 
+			// Surface crossing detected: ray entered geometry within valid thickness envelope
 			if (depthDiff >= -0.05f && depthDiff <= maxAllowedThickness)
 			{
-				// Subpixel Binary Refinement Search
-				float3 p0 = prevSS;
-				float3 p1 = currentSS;
+				float tMin = prevT;
+				float tMax = t;
+				float dMin = prevDiff;
+				float dMax = depthDiff;
 
+				// Bisection root refinement (bisection_steps = 5)
 				[unroll]
 				for (int b = 0; b < SSR_BINARY_STEPS; ++b)
 				{
-					float3 pm = (p0 + p1) * 0.5f;
-					float sampleZ = tex2Dlod(Gbuffer8Map, float4(pm.xy, 0.0f, 0.0f)).r;
-					float testRayZ = SSR_RayLinearZ(pm.z);
+					float tMid = (tMin + tMax) * 0.5f;
+					float3 pMid = startSS + tMid * rayDelta;
+					float sampleZ = tex2Dlod(Gbuffer8Map, float4(pMid.xy, 0.0f, 0.0f)).r;
+					float testRayZ = SSR_RayLinearZ(pMid.z);
+					float diffMid = testRayZ - sampleZ;
 
-					if (testRayZ >= sampleZ)
-						p1 = pm;
+					if (diffMid >= 0.0f && diffMid <= maxAllowedThickness)
+					{
+						tMax = tMid;
+						dMax = diffMid;
+					}
 					else
-						p0 = pm;
+					{
+						tMin = tMid;
+						dMin = diffMid;
+					}
 				}
 
-				float finalSceneZ = tex2Dlod(Gbuffer8Map, float4(p1.xy, 0.0f, 0.0f)).r;
-				float finalRayZ = SSR_RayLinearZ(p1.z);
+				// Secant method application for subpixel boundary contact
+				float totalD = abs(dMin) + abs(dMax);
+				float tFinal = (totalD > 1e-4f) ? lerp(tMin, tMax, saturate(abs(dMin) / totalD)) : tMax;
+				float3 pFinal = startSS + tFinal * rayDelta;
+
+				float finalSceneZ = tex2Dlod(Gbuffer8Map, float4(pFinal.xy, 0.0f, 0.0f)).r;
+				float finalRayZ = SSR_RayLinearZ(pFinal.z);
 				float finalDiff = finalRayZ - finalSceneZ;
 
-				if (finalDiff >= -0.1f && finalDiff <= maxAllowedThickness)
+				if (abs(finalDiff) <= maxAllowedThickness && finalSceneZ >= 0.01f && finalSceneZ < 90000.0f)
 				{
-					hitFound = true;
-					hitSS = p1;
-					hitProgress = t;
-					break;
+					// Normal orientation check to reject backfaces and false wall captures
+					float3 nHit = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(pFinal.xy, 0.0f, 0.0f)));
+					float facing = smoothstep(-0.45f, 0.05f, dot(nHit, -reflectRayVS));
+
+					if (facing > 1e-3f)
+					{
+						hitFound = true;
+						hitSS = pFinal;
+						hitProgress = tFinal;
+						break;
+					}
 				}
 			}
+
+			prevDiff = depthDiff;
 		}
 
-		prevSS = currentSS;
+		prevT = t;
 	}
 
 	if (!hitFound)
