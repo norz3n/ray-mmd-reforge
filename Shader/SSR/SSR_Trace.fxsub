@@ -65,12 +65,17 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	if (!traceHit.isHit)
 		clip(-1);
 
-	// Screen-edge vignetting and soft end-of-distance falloff (pow4 ensures full reflection height)
+	// Screen-edge vignetting and soft end-of-distance falloff
 	float sourceWindow = SSR_ComputeScreenWindow(coord.xy, max(0.02f, 1.0f - mSSRFadeStart));
-	float hitTargetWindow = SSR_ComputeScreenWindow(traceHit.hitUV, 0.03f);
+	float hitTargetWindow = SSR_ComputeScreenWindow(traceHit.hitUV, 0.04f);
 	float edgeVignette = sourceWindow * hitTargetWindow;
 	float distanceFalloff = 1.0f - pow(saturate(traceHit.hitProgress), 4.0f);
-	float confidence = edgeVignette * distanceFalloff * saturate(facingAngle) * traceHit.confidence;
+
+	// Hit normal alignment: eliminates vertical ghost trails/smearing behind silhouettes
+	float3 hitNormal = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(traceHit.hitUV, 0.0f, 0.0f)));
+	float hitFacing = smoothstep(-0.15f, 0.15f, dot(hitNormal, -reflectRayVS));
+
+	float confidence = edgeVignette * distanceFalloff * saturate(facingAngle) * traceHit.confidence * hitFacing;
 
 	float4 hitRadiance = tex2Dlod(ShadingMapSamp, float4(traceHit.hitUV, 0.0f, 0.0f));
 	return float4(hitRadiance.rgb, 1.0f) * confidence;
