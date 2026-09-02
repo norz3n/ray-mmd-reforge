@@ -49,9 +49,8 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	float normalBias = mSSROffset * (1.0f - NdotV);
 	float3 rayOriginVS = positionVS + surfaceMat.normal * normalBias;
 
-	// Roughness-adaptive start LOD: sharp mirrors start at full-res (LOD 0/1) for crisp contact geometry
-	float surfaceSmoothness = saturate(surfaceMat.smoothness + mSSRSmoothness * 0.5f);
-	int startMip = (surfaceSmoothness > 0.85f) ? 0 : ((surfaceSmoothness > 0.55f) ? 1 : 2);
+	// Full-resolution start LOD: ensures thin geometry (knees, heels, hair) is never skipped at specific camera distances
+	int startMip = 0;
 
 #if AA_QUALITY == 6
 	int frameCounter = (int)fmod(time * 60.0f, 16.0f);
