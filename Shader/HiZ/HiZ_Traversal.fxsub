@@ -91,7 +91,7 @@ bool HiZ_ConfirmOrAdvance(
 	if (currentMip == 0)
 	{
 		float depthDiff = rayLinearZ - minSceneLinearZ;
-		float maxAllowedThickness = surfaceThickness * (1.0f + minSceneLinearZ * 0.02f);
+		float maxAllowedThickness = surfaceThickness * (1.2f + minSceneLinearZ * 0.035f);
 		if (depthDiff >= negTolerance && depthDiff <= maxAllowedThickness)
 		{
 			result.isHit = true;

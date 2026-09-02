@@ -71,9 +71,9 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	float edgeVignette = sourceWindow * hitTargetWindow;
 	float distanceFalloff = 1.0f - pow(saturate(traceHit.hitProgress), 4.0f);
 
-	// Hit normal alignment: eliminates vertical ghost trails/smearing behind silhouettes
+	// Hit normal alignment: allows curved surface normals (legs/arms) while eliminating backface streaking
 	float3 hitNormal = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(traceHit.hitUV, 0.0f, 0.0f)));
-	float hitFacing = smoothstep(-0.15f, 0.15f, dot(hitNormal, -reflectRayVS));
+	float hitFacing = smoothstep(-0.50f, 0.05f, dot(hitNormal, -reflectRayVS));
 
 	float confidence = edgeVignette * distanceFalloff * saturate(facingAngle) * traceHit.confidence * hitFacing;
 
