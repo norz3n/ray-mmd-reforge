@@ -2,21 +2,41 @@
  * Ray-MMD ReForge: Screen-Space Reflections (SSR) Ray Tracing Pass
  *
  * Module: SSR_Trace.fxsub
- * Independent SSR ray tracing pass (Karis 2013 / Uludag 2014).
- * Traces specular reflection rays across the conservative Hi-Z depth pyramid.
+ * Fully independent Screen-Space Raymarching engine with polynomial step distribution
+ * and subpixel binary refinement search. Completely untied from Hi-Z pyramid.
  */
 
 #ifndef RAY_MMD_SSR_TRACE_FXSUB
 #define RAY_MMD_SSR_TRACE_FXSUB
 
 #include "shader/SSR/SSR_Common.fxsub"
-#include "shader/HiZ/HiZ_Main.fxsub"
+
+#if SSR_QUALITY == 1
+#	define SSR_MARCH_STEPS 32
+#	define SSR_REFINE_STEPS 4
+#elif SSR_QUALITY == 2
+#	define SSR_MARCH_STEPS 48
+#	define SSR_REFINE_STEPS 5
+#elif SSR_QUALITY >= 3
+#	define SSR_MARCH_STEPS 64
+#	define SSR_REFINE_STEPS 5
+#else
+#	define SSR_MARCH_STEPS 48
+#	define SSR_REFINE_STEPS 5
+#endif
 
 inline float SSR_ComputeScreenWindow(float2 uv, float edgeMargin)
 {
 	float2 edgeDist = min(uv, 1.0f - uv);
 	float2 windowFactor = smoothstep(0.0f, edgeMargin, edgeDist);
 	return windowFactor.x * windowFactor.y;
+}
+
+inline float SSR_RayLinearZ(float ndcZ)
+{
+	float projDenom = ndcZ - matProject[2][2];
+	projDenom = abs(projDenom) < 1e-7f ? sign(projDenom) * 1e-7f : projDenom;
+	return matProject[3][2] / projDenom;
 }
 
 float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) : COLOR
@@ -43,14 +63,23 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	clip(facingAngle - 1e-5f);
 
 	float NdotV = saturate(dot(viewVector, surfaceMat.normal));
-	// Ensure sufficient ray trace distance across all camera viewing angles
 	float traceDistance = mSSRRangeScale * (max(100.0f, mSSRRangeMax - surfaceMat.linearDepth) + surfaceMat.linearDepth);
 
-	float normalBias = mSSROffset * 0.35f * (1.0f - NdotV);
+	float normalBias = mSSROffset * 0.15f * (1.0f - NdotV);
 	float3 rayOriginVS = positionVS + surfaceMat.normal * normalBias;
 
-	// Full-resolution start LOD: ensures thin geometry (knees, heels, hair) is never skipped at specific camera distances
-	int startMip = 0;
+	// Project endpoints into screen space [0, 1]
+	float4 startClip = mul(float4(rayOriginVS, 1.0f), matProject);
+	float3 startSS = (startClip.xyz / max(startClip.w, 1e-4f)) * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
+
+	float4 endClip = mul(float4(positionVS + reflectRayVS * traceDistance, 1.0f), matProject);
+	float3 endSS = (endClip.xyz / max(endClip.w, 1e-4f)) * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
+
+	float3 rayDelta = endSS - startSS;
+	if (length(rayDelta.xy * ViewportSize) < 1.0f)
+		clip(-1);
+
+	float maxAllowedThickness = mSSRThickness * (1.2f + positionVS.z * 0.04f);
 
 #if AA_QUALITY == 6
 	int frameCounter = (int)fmod(time * 60.0f, 16.0f);
@@ -58,25 +87,80 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	int frameCounter = 0;
 #endif
 	float jitter = InterleavedGradientNoise(coord.xy * ViewportSize, frameCounter);
-	rayOriginVS += reflectRayVS * (jitter * 0.015f);
 
-	HiZTraceResult traceHit = HiZ_TraceRayDetailed(SSR_MAX_RAY_STEPS, startMip, rayOriginVS, reflectRayVS, traceDistance, normalBias, mSSRThickness);
-	if (!traceHit.isHit)
+	float3 prevSS = startSS;
+	float3 hitSS = 0.0f;
+	float hitProgress = 0.0f;
+	bool hitFound = false;
+
+	// Polynomial step raymarching: dense contact sampling near surface + smooth distance expansion
+	[loop]
+	for (int i = 1; i <= SSR_MARCH_STEPS; ++i)
+	{
+		float t = pow((float(i) + jitter * 0.5f) / float(SSR_MARCH_STEPS), 1.25f);
+		float3 currentSS = startSS + t * rayDelta;
+
+		if (currentSS.x < 0.0f || currentSS.x > 1.0f || currentSS.y < 0.0f || currentSS.y > 1.0f)
+			break;
+
+		float sceneLinearZ = tex2Dlod(Gbuffer8Map, float4(currentSS.xy, 0.0f, 0.0f)).r;
+		if (sceneLinearZ >= 0.01f && sceneLinearZ < 90000.0f)
+		{
+			float rayLinearZ = SSR_RayLinearZ(currentSS.z);
+			float depthDiff = rayLinearZ - sceneLinearZ;
+
+			if (depthDiff >= -0.05f && depthDiff <= maxAllowedThickness)
+			{
+				// Subpixel Binary Refinement Search
+				float3 p0 = prevSS;
+				float3 p1 = currentSS;
+
+				[unroll]
+				for (int b = 0; b < SSR_REFINE_STEPS; ++b)
+				{
+					float3 pm = (p0 + p1) * 0.5f;
+					float sampleZ = tex2Dlod(Gbuffer8Map, float4(pm.xy, 0.0f, 0.0f)).r;
+					float testRayZ = SSR_RayLinearZ(pm.z);
+
+					if (testRayZ >= sampleZ)
+						p1 = pm;
+					else
+						p0 = pm;
+				}
+
+				float finalSceneZ = tex2Dlod(Gbuffer8Map, float4(p1.xy, 0.0f, 0.0f)).r;
+				float finalRayZ = SSR_RayLinearZ(p1.z);
+				float finalDiff = finalRayZ - finalSceneZ;
+
+				if (finalDiff >= -0.1f && finalDiff <= maxAllowedThickness)
+				{
+					hitFound = true;
+					hitSS = p1;
+					hitProgress = t;
+					break;
+				}
+			}
+		}
+
+		prevSS = currentSS;
+	}
+
+	if (!hitFound)
 		clip(-1);
 
-	// Screen-edge vignetting (tight 4% margin: preserves reflections of hands/arms near screen edges)
-	float sourceWindow = SSR_ComputeScreenWindow(coord.xy, 0.04f);
-	float hitTargetWindow = SSR_ComputeScreenWindow(traceHit.hitUV, 0.03f);
+	// Screen-edge vignetting (clean 3% margin: preserves wide reflections near frame boundaries)
+	float sourceWindow = SSR_ComputeScreenWindow(coord.xy, 0.03f);
+	float hitTargetWindow = SSR_ComputeScreenWindow(hitSS.xy, 0.03f);
 	float edgeVignette = sourceWindow * hitTargetWindow;
-	float distanceFalloff = 1.0f - pow(saturate(traceHit.hitProgress), 4.0f);
+	float distanceFalloff = 1.0f - pow(saturate(hitProgress), 4.0f);
 
 	// Hit normal alignment: allows curved surface normals (legs/arms) while eliminating backface streaking
-	float3 hitNormal = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(traceHit.hitUV, 0.0f, 0.0f)));
+	float3 hitNormal = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(hitSS.xy, 0.0f, 0.0f)));
 	float hitFacing = smoothstep(-0.50f, 0.05f, dot(hitNormal, -reflectRayVS));
 
-	float confidence = edgeVignette * distanceFalloff * saturate(facingAngle) * traceHit.confidence * hitFacing;
+	float confidence = edgeVignette * distanceFalloff * saturate(facingAngle) * hitFacing;
 
-	float4 hitRadiance = tex2Dlod(ShadingMapSamp, float4(traceHit.hitUV, 0.0f, 0.0f));
+	float4 hitRadiance = tex2Dlod(ShadingMapSamp, float4(hitSS.xy, 0.0f, 0.0f));
 	return float4(hitRadiance.rgb, 1.0f) * confidence;
 }
 
