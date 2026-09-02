@@ -336,8 +336,6 @@ technique DeferredLighting<
 	"Clear=Color;"
 	"Pass=SSR_Trace;"
 
-	"RenderColorTarget=SSRLightX1MapTemp; Pass=SSR_BlurX1;"
-	"RenderColorTarget=SSRLightX1Map;     Pass=SSR_BlurY1;"
 	"RenderColorTarget=SSRLightX2MapTemp; Pass=SSR_BlurX2;"
 	"RenderColorTarget=SSRLightX2Map;	  Pass=SSR_BlurY2;"
 	"RenderColorTarget=SSRLightX3MapTemp; Pass=SSR_BlurX3;"

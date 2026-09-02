@@ -21,7 +21,7 @@ void DepthObjectVS(
 	oPosition = mul(Position, matViewProject);
 }
 
-float4 DepthObjectPS(float3 coord : TEXCOORD0) : COLOR
+float4 DepthObjectPS(float2 coord : TEXCOORD0) : COLOR
 {
 #if SSR_RECIEVER_ALPHA_ENABLE
 	// Exclusion clips only apply when the preset is not suppressing this material:
@@ -33,13 +33,13 @@ float4 DepthObjectPS(float3 coord : TEXCOORD0) : COLOR
 		clip(!opadd - 0.001f);
 		float alpha = MaterialDiffuse.a;
 #if SSR_RECIEVER_ALPHA_MAP_ENABLE
-		if (use_texture) alpha *= tex2D(DiffuseMapSamp, coord.xy).a;
+		if (use_texture) alpha *= tex2D(DiffuseMapSamp, coord).a;
 #endif
 		clip(alpha - 0.01);
 	}
 #endif
 
-	return visibility;
+	return float4(visibility, visibility, visibility, visibility);
 }
 
 #define OBJECT_TEC(name, mmdpass)\
