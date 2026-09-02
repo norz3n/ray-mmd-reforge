@@ -124,20 +124,25 @@ bool HiZ_ConfirmOrAdvance(
  * @param stepSign Component-wise march direction (+1 or -1).
  * @return Parametric progress t at which ray leaves the 2D cell.
  */
-float HiZ_ComputeCellExitT(
-	float3 startSS,
-	float3 rayDelta,
-	float2 cellCoord,
-	float2 mipDim,
-	float2 stepSign)
+float IntersectCellBoundary(float3 begin, float3 delta, float2 cellId, float2 levelSize, float2 crossStep, float2 crossOffset) 
 {
-	float2 boundaryUV = (cellCoord + max(stepSign, 0.0f)) / mipDim;
-	float2 distToBoundary = boundaryUV - startSS.xy;
+	float2 cell = (cellId + crossStep) / levelSize + crossOffset;
+	float kx = cell.x - begin.x;
+	float ky = cell.y - begin.y;
+	float k = 0.0f;
 
-	float tx = (abs(rayDelta.x) > 1e-7f) ? (distToBoundary.x / rayDelta.x) : 1e5f;
-	float ty = (abs(rayDelta.y) > 1e-7f) ? (distToBoundary.y / rayDelta.y) : 1e5f;
+	float ax = abs(delta.x);
+	float ay = abs(delta.y);
 
-	return min(tx, ty);
+	[flatten]
+	if (ax <= 1e-5f && ay > 1e-5f)
+		k = ky / delta.y;
+	else if (ax > 1e-5f && ay <= 1e-5f)
+		k = kx / delta.x;
+	else if (ax > 1e-5f && ay > 1e-5f)
+		k = min(kx / delta.x, ky / delta.y);
+
+	return k;
 }
 
 /**
@@ -145,6 +150,7 @@ float HiZ_ComputeCellExitT(
  * Traverses conservative Hi-Z pyramid using multi-level cell stepping and depth confirmation.
  *
  * @param maxIterations Traversal loop iteration bound.
+ * @param startMip Initial mip level to start ray traversal.
  * @param startPosVS Ray origin in view space.
  * @param rayDirVS Normalized ray direction in view space.
  * @param maxTraceDist Maximum trace distance in view units.
@@ -198,7 +204,6 @@ HiZTraceResult HiZ_TraceRayDetailed(
 
 	int level = 0;
 	static const int maxLevel = 9;
-	float effectiveThickness = max(surfaceThickness, startPosVS.z * 0.04f);
 
 	[loop]
 	for (int it = 0; it < maxIterations && level >= 0 && k < 1.0f; ++it)
@@ -224,21 +229,21 @@ HiZTraceResult HiZ_TraceRayDetailed(
 
 			if (cellId.x != newCellId.x || cellId.y != newCellId.y)
 			{
-				t = HiZ_ComputeCellExitT(begin, delta, cellId, levelSize, crossStep);
+				t = IntersectCellBoundary(begin, delta, cellId, levelSize, crossStep, crossOffset);
 				level += 2;
 			}
 			else
 			{
-				if (level <= 1 && abs(linearZ - linearMinZ) >= effectiveThickness)
+				if (level <= 1 && abs(linearZ - linearMinZ) >= surfaceThickness)
 				{
-					t = HiZ_ComputeCellExitT(begin, delta, cellId, levelSize, crossStep);
+					t = IntersectCellBoundary(begin, delta, cellId, levelSize, crossStep, crossOffset);
 					level += 1;
 				}
 			}
 		}
 		else if (ray.z < minZ)
 		{
-			t = HiZ_ComputeCellExitT(begin, delta, cellId, levelSize, crossStep);
+			t = IntersectCellBoundary(begin, delta, cellId, levelSize, crossStep, crossOffset);
 			level += 2;
 		}
 
