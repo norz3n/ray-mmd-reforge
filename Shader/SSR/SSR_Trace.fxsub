@@ -2,8 +2,8 @@
  * Ray-MMD ReForge: Screen-Space Reflections (SSR) Ray Tracing Pass
  *
  * Module: SSR_Trace.fxsub
- * Morgan McGuire & Michael Mara's 2014 Screen-Space Ray Tracing Engine (JCGT 2014).
- * Fully independent from Hi-Z, marches exact 2D pixel lines with continuous depth interval testing.
+ * Fully independent Screen-Space Raymarching engine with polynomial step distribution,
+ * surface-crossing bracketing (h3r2tic), and subpixel binary/secant refinement.
  */
 
 #ifndef RAY_MMD_SSR_TRACE_FXSUB
@@ -11,25 +11,18 @@
 
 #include "shader/SSR/SSR_Common.fxsub"
 
-#if SSR_QUALITY == 1
-#	define SSR_PIXEL_STRIDE 3.0f
-#	define SSR_DDA_MAX_STEPS 48
-#elif SSR_QUALITY == 2
-#	define SSR_PIXEL_STRIDE 2.0f
-#	define SSR_DDA_MAX_STEPS 96
-#elif SSR_QUALITY >= 3
-#	define SSR_PIXEL_STRIDE 1.0f
-#	define SSR_DDA_MAX_STEPS 160
-#else
-#	define SSR_PIXEL_STRIDE 2.0f
-#	define SSR_DDA_MAX_STEPS 96
-#endif
-
 inline float SSR_ComputeScreenWindow(float2 uv, float edgeMargin)
 {
 	float2 edgeDist = min(uv, 1.0f - uv);
 	float2 windowFactor = smoothstep(0.0f, edgeMargin, edgeDist);
 	return windowFactor.x * windowFactor.y;
+}
+
+inline float SSR_RayLinearZ(float ndcZ)
+{
+	float projDenom = ndcZ - matProject[2][2];
+	projDenom = abs(projDenom) < 1e-7f ? sign(projDenom) * 1e-7f : projDenom;
+	return matProject[3][2] / projDenom;
 }
 
 float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) : COLOR
@@ -59,133 +52,115 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	float traceDistance = mSSRRangeScale * (max(100.0f, mSSRRangeMax - surfaceMat.linearDepth) + surfaceMat.linearDepth);
 
 	float normalBias = mSSROffset * 0.15f * (1.0f - NdotV);
-	float3 csOrigin = positionVS + surfaceMat.normal * normalBias;
+	float3 rayOriginVS = positionVS + surfaceMat.normal * normalBias;
 
-	// Clip ray to camera near plane
-	static const float kNearPlaneZ = 0.05f;
-	float rayLength = traceDistance;
-	if (reflectRayVS.z < -1e-6f)
-	{
-		float maxDistToNear = (kNearPlaneZ - csOrigin.z) / reflectRayVS.z;
-		if (maxDistToNear > 0.0f)
-			rayLength = min(rayLength, maxDistToNear);
-	}
-	float3 csEndPoint = csOrigin + reflectRayVS * rayLength;
+	// Project endpoints into screen space [0, 1]
+	float4 startClip = mul(float4(rayOriginVS, 1.0f), matProject);
+	float3 startSS = (startClip.xyz / max(startClip.w, 1e-4f)) * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
 
-	// Project endpoints into pixel coordinates (McGuire & Mara 2014)
-	float4 H0 = mul(float4(csOrigin, 1.0f), matProject);
-	float4 H1 = mul(float4(csEndPoint, 1.0f), matProject);
+	float4 endClip = mul(float4(positionVS + reflectRayVS * traceDistance, 1.0f), matProject);
+	float3 endSS = (endClip.xyz / max(endClip.w, 1e-4f)) * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
 
-	float k0 = 1.0f / max(H0.w, 1e-4f);
-	float k1 = 1.0f / max(H1.w, 1e-4f);
-
-	float3 Q0 = csOrigin * k0;
-	float3 Q1 = csEndPoint * k1;
-
-	float2 P0 = ((H0.xy * k0) * float2(0.5f, -0.5f) + 0.5f) * ViewportSize;
-	float2 P1 = ((H1.xy * k1) * float2(0.5f, -0.5f) + 0.5f) * ViewportSize;
-
-	// Degenerate line prevention
-	float2 delta = P1 - P0;
-	if (dot(delta, delta) < 0.01f)
+	float3 rayDelta = endSS - startSS;
+	if (length(rayDelta.xy * ViewportSize) < 1.0f)
 		clip(-1);
 
-	// Permute so primary iteration axis is in X to collapse branches
-	bool permute = false;
-	if (abs(delta.x) < abs(delta.y))
-	{
-		permute = true;
-		delta = delta.yx;
-		P0 = P0.yx;
-		P1 = P1.yx;
-	}
+	float maxAllowedThickness = mSSRThickness * (1.2f + positionVS.z * 0.04f);
 
-	float stepDirection = sign(delta.x);
-	float invdx = stepDirection / delta.x;
-
-	float2 dP = float2(stepDirection, delta.y * invdx);
-	float3 dQ = (Q1 - Q0) * invdx;
-	float  dk = (k1 - k0) * invdx;
-
-	float stride = SSR_PIXEL_STRIDE;
-	dP *= stride;
-	dQ *= stride;
-	dk *= stride;
-
-	float prevZMaxEstimate = csOrigin.z;
-	float rayZMin = prevZMaxEstimate;
-	float rayZMax = prevZMaxEstimate;
-	float sceneZMax = 1e5f;
-
-	float3 Q = Q0;
-	float  k = k0;
-	float  endX = P1.x * stepDirection;
-	float2 hitPixel = 0.0f;
-	float  stepCount = 0.0f;
-	bool   hitFound = false;
-
-	float maxThickness = mSSRThickness * (1.2f + positionVS.z * 0.04f);
+	float prevT = 0.0f;
+	float prevDiff = -1.0f;
+	float3 hitSS = 0.0f;
+	float hitProgress = 0.0f;
+	bool hitFound = false;
 
 	[loop]
-	for (float2 P = P0; (P.x * stepDirection <= endX) && (stepCount < SSR_DDA_MAX_STEPS); P += dP, Q.z += dQ.z, k += dk, stepCount += 1.0f)
+	for (int i = 1; i <= SSR_MAX_RAY_STEPS; ++i)
 	{
-		hitPixel = permute ? P.yx : P.xy;
+		float t = pow(float(i) / float(SSR_MAX_RAY_STEPS), 1.25f);
+		float3 currentSS = startSS + t * rayDelta;
 
-		// Out of screen bounds check
-		if (hitPixel.x < 0.0f || hitPixel.x >= ViewportSize.x || hitPixel.y < 0.0f || hitPixel.y >= ViewportSize.y)
+		if (currentSS.x < 0.0f || currentSS.x > 1.0f || currentSS.y < 0.0f || currentSS.y > 1.0f)
 			break;
 
-		rayZMin = prevZMaxEstimate;
-		rayZMax = (dQ.z * 0.5f + Q.z) / (dk * 0.5f + k);
-		prevZMaxEstimate = rayZMax;
-
-		if (rayZMin > rayZMax)
+		float sceneLinearZ = tex2Dlod(Gbuffer8Map, float4(currentSS.xy, 0.0f, 0.0f)).r;
+		if (sceneLinearZ >= 0.01f && sceneLinearZ < 90000.0f)
 		{
-			float tempZ = rayZMin;
-			rayZMin = rayZMax;
-			rayZMax = tempZ;
-		}
+			float rayLinearZ = SSR_RayLinearZ(currentSS.z);
+			float depthDiff = rayLinearZ - sceneLinearZ;
 
-		float2 hitUV = (hitPixel + 0.5f) / ViewportSize;
-		sceneZMax = tex2Dlod(Gbuffer8Map, float4(hitUV, 0.0f, 0.0f)).r;
-
-		// Skip empty sky
-		if (sceneZMax < 0.01f || sceneZMax >= 90000.0f)
-			continue;
-
-		// Conservative depth interval intersection (McGuire & Mara 2014)
-		if ((rayZMax >= sceneZMax - 0.05f) && (rayZMin <= sceneZMax + maxThickness))
-		{
-			// Normal check to avoid hitting backfaces
-			float3 hitNormal = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(hitUV, 0.0f, 0.0f)));
-			float facing = smoothstep(-0.45f, 0.05f, dot(hitNormal, -reflectRayVS));
-
-			if (facing > 1e-3f)
+			// Surface crossing condition: ray transitioned from in-front (prevDiff < 0) to behind (depthDiff >= 0)
+			if (prevDiff < 0.0f && depthDiff >= 0.0f && depthDiff <= maxAllowedThickness)
 			{
-				hitFound = true;
-				break;
+				float tMin = prevT;
+				float tMax = t;
+				float dMin = prevDiff;
+				float dMax = depthDiff;
+
+				[unroll]
+				for (int b = 0; b < SSR_BINARY_STEPS; ++b)
+				{
+					float tMid = (tMin + tMax) * 0.5f;
+					float3 pMid = startSS + tMid * rayDelta;
+					float sampleZ = tex2Dlod(Gbuffer8Map, float4(pMid.xy, 0.0f, 0.0f)).r;
+					float testRayZ = SSR_RayLinearZ(pMid.z);
+					float diffMid = testRayZ - sampleZ;
+
+					if (diffMid >= 0.0f)
+					{
+						tMax = tMid;
+						dMax = diffMid;
+					}
+					else
+					{
+						tMin = tMid;
+						dMin = diffMid;
+					}
+				}
+
+				float totalD = abs(dMin) + abs(dMax);
+				float tFinal = (totalD > 1e-4f) ? lerp(tMin, tMax, saturate(abs(dMin) / totalD)) : tMax;
+				float3 pFinal = startSS + tFinal * rayDelta;
+
+				float finalSceneZ = tex2Dlod(Gbuffer8Map, float4(pFinal.xy, 0.0f, 0.0f)).r;
+				float finalRayZ = SSR_RayLinearZ(pFinal.z);
+				float finalDiff = finalRayZ - finalSceneZ;
+
+				if (abs(finalDiff) <= maxAllowedThickness && finalSceneZ >= 0.01f && finalSceneZ < 90000.0f)
+				{
+					float3 nHit = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(pFinal.xy, 0.0f, 0.0f)));
+					float facing = smoothstep(-0.45f, 0.05f, dot(nHit, -reflectRayVS));
+
+					if (facing > 1e-3f)
+					{
+						hitFound = true;
+						hitSS = pFinal;
+						hitProgress = tFinal;
+						break;
+					}
+				}
 			}
+
+			prevDiff = depthDiff;
 		}
+
+		prevT = t;
 	}
 
 	if (!hitFound)
 		clip(-1);
 
-	float2 hitUV = (hitPixel + 0.5f) / ViewportSize;
-	float hitProgress = stepCount / float(SSR_DDA_MAX_STEPS);
-
 	// Screen-edge vignetting (clean 3% margin: preserves wide reflections near frame boundaries)
 	float sourceWindow = SSR_ComputeScreenWindow(coord.xy, 0.03f);
-	float hitTargetWindow = SSR_ComputeScreenWindow(hitUV, 0.03f);
+	float hitTargetWindow = SSR_ComputeScreenWindow(hitSS.xy, 0.03f);
 	float edgeVignette = sourceWindow * hitTargetWindow;
 	float distanceFalloff = 1.0f - pow(saturate(hitProgress), 4.0f);
 
-	float3 hitNormal = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(hitUV, 0.0f, 0.0f)));
+	float3 hitNormal = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(hitSS.xy, 0.0f, 0.0f)));
 	float hitFacing = smoothstep(-0.50f, 0.05f, dot(hitNormal, -reflectRayVS));
 
 	float confidence = edgeVignette * distanceFalloff * saturate(facingAngle) * hitFacing;
 
-	float4 hitRadiance = tex2Dlod(ShadingMapSamp, float4(hitUV, 0.0f, 0.0f));
+	float4 hitRadiance = tex2Dlod(ShadingMapSamp, float4(hitSS.xy, 0.0f, 0.0f));
 	return float4(hitRadiance.rgb, 1.0f) * confidence;
 }
 
