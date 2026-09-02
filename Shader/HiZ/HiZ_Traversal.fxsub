@@ -146,11 +146,11 @@ float IntersectCellBoundary(float3 begin, float3 delta, float2 cellId, float2 le
 }
 
 /**
- * Screen-Space Raymarcher with Subpixel Binary Refinement Search (Morgan McGuire / Frostbite).
- * Marches smoothly across full-resolution depth buffer, completely eliminating cell leaping and missing geometry.
+ * Hierarchical Screen-Space Raymarcher (HZTrace engine).
+ * Traverses conservative Hi-Z pyramid using multi-level cell stepping and depth confirmation.
  *
  * @param maxIterations Traversal loop iteration bound.
- * @param startMip Initial mip level (unused in linear mode).
+ * @param startMip Initial mip level.
  * @param startPosVS Ray origin in view space.
  * @param rayDirVS Normalized ray direction in view space.
  * @param maxTraceDist Maximum trace distance in view units.
@@ -176,99 +176,84 @@ HiZTraceResult HiZ_TraceRayDetailed(
 	result.hitMip = 0;
 	result.confidence = 0.0f;
 
-	// Clip ray against near camera plane in view-space to eliminate homogeneous division artifacts (W <= 0)
-	float effectiveTraceDist = maxTraceDist;
-	static const float kRayNearPlaneZ = 0.05f;
-	if (rayDirVS.z < -1e-6f)
-	{
-		float maxDistToNear = (kRayNearPlaneZ - startPosVS.z) / rayDirVS.z;
-		if (maxDistToNear > 0.0f)
-			effectiveTraceDist = min(effectiveTraceDist, maxDistToNear);
-	}
+	int level = 0;
+	static const int maxLevel = 10;
 
-	// Project view-space ray endpoints into normalized screen space [0, 1]
-	float4 startClip = mul(float4(startPosVS, 1.0f), matProject);
-	float3 startSS = (startClip.xyz / max(startClip.w, 1e-4f)) * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
+	float4 beginClip = mul(float4(startPosVS + rayDirVS * normalBias, 1.0f), matProject);
+	float3 beginNDC = beginClip.xyz / max(beginClip.w, 1e-4f);
+	float3 begin = beginNDC * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
 
-	float4 endClip = mul(float4(startPosVS + rayDirVS * effectiveTraceDist, 1.0f), matProject);
-	float3 endSS = (endClip.xyz / max(endClip.w, 1e-4f)) * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
+	float4 endClip = mul(float4(startPosVS + rayDirVS * maxTraceDist * 2.0f, 1.0f), matProject);
+	float3 endNDC = endClip.xyz / max(endClip.w, 1e-4f);
+	float3 end = endNDC * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
 
-	float3 rayDelta = endSS - startSS;
-	float screenLen = length(rayDelta.xy * ViewportSize);
-	if (screenLen < 1.0f)
-		return result;
+	float3 delta = end - begin;
+	float k = 0.0f;
 
-	// Scale thickness proportionally to distance to prevent punch-through on distant geometry
-	float maxAllowedThickness = surfaceThickness * (1.2f + startPosVS.z * 0.04f);
-	float stepSize = 1.0f / float(max(maxIterations, 1));
-	float3 stepDelta = rayDelta * stepSize;
-
-	float currentT = 0.0f;
-	float3 hitPointSS = 0.0f;
-	bool candidateFound = false;
+	float2 crossStep = sign(delta.xy);
+	float2 crossOffset = crossStep * (0.005f / ViewportSize);
+	crossStep = saturate(crossStep);
 
 	[loop]
-	for (int i = 0; i < maxIterations; ++i)
+	for (int it = 0; it < maxIterations && level >= 0 && k < 1.0f; ++it)
 	{
-		currentT += stepSize;
-		if (currentT >= 1.0f) break;
+		float3 ray = begin + k * delta;
+		if (any(floor(ray.xy) != 0.0f)) break;
 
-		float3 currentSS = startSS + currentT * rayDelta;
-		if (currentSS.x < 0.0f || currentSS.x > 1.0f || currentSS.y < 0.0f || currentSS.y > 1.0f)
-			break;
+		float2 levelSize = ViewportSize / exp2(level);
+		int2 cellId = floor(ray.xy * levelSize);
 
-		float sceneLinearZ = tex2Dlod(Gbuffer8Map, float4(currentSS.xy, 0.0f, 0.0f)).r;
-		if (sceneLinearZ < 0.01f || sceneLinearZ >= 90000.0f)
-			continue;
+		float linearZ = matProject[3][2] / (ray.z - matProject[2][2]);
+		float linearMinZ = HiZ_SampleDepthAtMip(ray.xy, level);
+		float minZ = matProject[2][2] + matProject[3][2] / linearMinZ;
+		float t = k;
 
-		float rayLinearZ = HiZ_RayLinearZ(currentSS.z);
-		float depthDiff = rayLinearZ - sceneLinearZ;
-
-		if (depthDiff >= -0.05f && depthDiff <= maxAllowedThickness)
+		if (delta.z > 0.0f)
 		{
-			candidateFound = true;
-			hitPointSS = currentSS;
-			break;
+			float deltaZ = minZ - ray.z;
+			t = (deltaZ > 0.0f) ? (t + deltaZ / delta.z) : t;
+
+			float3 temp = begin + t * delta;
+			int2 newCellId = floor(temp.xy * levelSize);
+
+			if (cellId.x != newCellId.x || cellId.y != newCellId.y)
+			{
+				t = IntersectCellBoundary(begin, delta, cellId, levelSize, crossStep, crossOffset);
+				level += 2;
+			}
+			else
+			{
+				if (level <= 1 && abs(linearZ - linearMinZ) >= surfaceThickness)
+				{
+					t = IntersectCellBoundary(begin, delta, cellId, levelSize, crossStep, crossOffset);
+					level += 1;
+				}
+			}
 		}
+		else if (ray.z < minZ)
+		{
+			t = IntersectCellBoundary(begin, delta, cellId, levelSize, crossStep, crossOffset);
+			level += 2;
+		}
+
+		k = t;
+		--level;
+		level = min(maxLevel, level);
 	}
 
-	if (candidateFound)
+	if (level < 0)
 	{
-		// Subpixel Binary Refinement Search (4 iterations)
-		float3 p0 = hitPointSS - stepDelta;
-		float3 p1 = hitPointSS;
+		result.isHit = true;
+		result.hitProgress = k;
+		float3 hitSS = begin + k * delta;
+		result.hitUV = hitSS.xy;
+		result.hitMip = 0;
+		result.confidence = 1.0f;
 
-		[unroll]
-		for (int b = 0; b < 4; ++b)
-		{
-			float3 pm = (p0 + p1) * 0.5f;
-			float sampleZ = tex2Dlod(Gbuffer8Map, float4(pm.xy, 0.0f, 0.0f)).r;
-			float testRayZ = HiZ_RayLinearZ(pm.z);
-
-			if (testRayZ >= sampleZ)
-				p1 = pm;
-			else
-				p0 = pm;
-		}
-
-		float finalSceneZ = tex2Dlod(Gbuffer8Map, float4(p1.xy, 0.0f, 0.0f)).r;
-		float finalRayZ = HiZ_RayLinearZ(p1.z);
-		float finalDiff = finalRayZ - finalSceneZ;
-
-		if (finalDiff >= -0.1f && finalDiff <= maxAllowedThickness)
-		{
-			result.isHit = true;
-			result.hitProgress = length(p1.xy - startSS.xy) / max(length(rayDelta.xy), 1e-4f);
-			result.hitUV = p1.xy;
-			result.hitMip = 0;
-			result.depthError = max(finalDiff, 0.0f);
-			result.confidence = pow2(saturate(1.0f - (max(finalDiff, 0.0f) / maxAllowedThickness)));
-
-			float3 hitNDC = (p1 - float3(0.5f, 0.5f, 0.0f)) * float3(2.0f, -2.0f, 1.0f);
-			float4 hitClip = float4(0.0f, 0.0f, 0.0f, matProject[3][2] / (hitNDC.z - matProject[2][2]));
-			hitClip.xyz = hitNDC * hitClip.w;
-			result.hitPosVS = mul(hitClip, matProjectInverse).xyz;
-		}
+		float3 hitNDC = (hitSS - float3(0.5f, 0.5f, 0.0f)) * float3(2.0f, -2.0f, 1.0f);
+		float4 hitClip = float4(0.0f, 0.0f, 0.0f, matProject[3][2] / (hitNDC.z - matProject[2][2]));
+		hitClip.xyz = hitNDC * hitClip.w;
+		result.hitPosVS = mul(hitClip, matProjectInverse).xyz;
 	}
 
 	return result;
