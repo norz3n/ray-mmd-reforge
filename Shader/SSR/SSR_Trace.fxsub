@@ -301,8 +301,7 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	float3 hitNormal = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(hitUV, 0.0f, 0.0f)));
 	float hitFacing = smoothstep(0.02f, 0.22f, dot(hitNormal, -reflectRayVS));
 
-	float targetVis = tex2Dlod(SSRMapSamp, float4(hitUV, 0.0f, 0.0f)).a;
-	float confidence = edgeVignette * distanceFalloff * hitFacing * targetVis;
+	float confidence = edgeVignette * distanceFalloff * hitFacing;
 
 	float4 hitRadiance = tex2Dlod(ShadingMapSamp, float4(hitUV, 0.0f, 0.0f));
 	return float4(hitRadiance.rgb, 1.0f) * confidence;

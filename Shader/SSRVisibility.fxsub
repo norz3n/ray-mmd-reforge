@@ -24,19 +24,12 @@ void DepthObjectVS(
 float4 DepthObjectPS(float2 coord : TEXCOORD0) : COLOR
 {
 #if SSR_RECIEVER_ALPHA_ENABLE
-	// Exclusion clips only apply when the preset is not suppressing this material:
-	// clipped pixels are never written and keep the buffer's cleared visibility
-	// (1.0), silently ignoring presets <= 0 on additive / low-alpha materials.
-	[flatten]
-	if (visibility > 1e-4)
-	{
-		clip(!opadd - 0.001f);
-		float alpha = MaterialDiffuse.a;
+	clip(!opadd - 0.001f);
+	float alpha = MaterialDiffuse.a;
 #if SSR_RECIEVER_ALPHA_MAP_ENABLE
-		if (use_texture) alpha *= tex2D(DiffuseMapSamp, coord).a;
+	if (use_texture) alpha *= tex2D(DiffuseMapSamp, coord).a;
 #endif
-		clip(alpha - 0.01);
-	}
+	clip(alpha - 0.01);
 #endif
 
 	return float4(visibility, visibility, visibility, visibility);
