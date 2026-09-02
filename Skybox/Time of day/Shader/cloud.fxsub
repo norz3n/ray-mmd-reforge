@@ -274,7 +274,7 @@ float3 EvaluateSunTransmittance(ScatteringParams setting, float3 positionPS, flo
 // VOLUMETRIC INTEGRATION — PHYSICAL ATMOSPHERIC SUN & SKY INTEGRATION
 // ==============================================================================
 
-void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 end, float3 V, float3 L, inout float opticalDepth, inout float3 insctrMie)
+void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 end, float3 V, float3 L, float3 skyAmbient, inout float opticalDepth, inout float3 insctrMie)
 {
 	float totalDist = length(end - start);
 	float stepLength = totalDist / float(NUMS_SAMPLES_CLOUD);
@@ -288,15 +288,18 @@ void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 
 	float transmittance = 1.0f;
 	float cosAngle = dot(V, L);
 
-	// Atmospheric spectral sunlight color at cloud elevation (warm gold at sunset/sunrise)
-	float3 sunAtmosphereTransmittance = GetTransmittance(setting, L, float3(0.0f, 1.0f, 0.0f));
-	// Horizon shadow cutoff: smoothly darkens clouds when sun dips below horizon
-	float sunHorizonFade = smoothstep(-0.035f, 0.025f, L.y);
-	float3 directSunColor = sunAtmosphereTransmittance * (setting.sunRadiance * sunHorizonFade * 1.85f);
+	// Atmospheric spectral sunlight transmittance based on actual sun elevation L.y
+	float ch = GetOpticalDepthSchueler(setting.cloudBottom, setting.rayleighHeight, setting.earthRadius, max(L.y, 0.001f));
+	float3 sunAtmosphereTransmittance = exp(-(setting.waveLambdaMie + setting.waveLambdaRayleigh + setting.waveLambdaOzone) * ch);
 
-	// Ambient sky & ground colors derived from sun radiance
-	float3 skyColor = float3(0.65f, 0.78f, 0.95f) * (setting.sunRadiance * 0.22f);
-	float3 groundColor = float3(0.42f, 0.46f, 0.54f) * (setting.sunRadiance * 0.16f);
+	// Horizon shadow cutoff: smoothly darkens clouds when sun dips below horizon
+	float sunHorizonFade = smoothstep(-0.04f, 0.03f, L.y);
+	// Direct sunlight: fully reactive to MMD SunColor, atmospheric reddening, and sun elevation
+	float3 directSunColor = SunColor * sunAtmosphereTransmittance * (setting.sunRadiance * sunHorizonFade * 1.85f);
+
+	// Ambient sky & ground colors directly derived from skybox inscattering (zero in complete darkness)
+	float3 skyColor = skyAmbient * 0.45f;
+	float3 groundColor = skyAmbient * float3(0.50f, 0.45f, 0.40f) * 0.40f;
 
 	[loop]
 	for (int i = 0; i < NUMS_SAMPLES_CLOUD; ++i)
@@ -385,9 +388,12 @@ float4 ComputeCloudsInscattering(ScatteringParams setting, float3 eye, float3 V,
 				float marchDist = min(length(cloudsEnd - cloudsStart), 42000.0f);
 				cloudsEnd = cloudsStart + V * marchDist;
 
+				// Dynamic sky ambient from atmospheric inscattering (matches evening/sunset and goes to 0 in full dark)
+				float3 skyAmbient = (insctrMie + insctrRayleigh) * setting.sunRadiance;
+
 				float3 cloudsMie = 0.0f;
 				float cloudsOpticalLength = 0.0f;
-				ComputeCloudsInsctrIntegral(setting, cloudsStart, cloudsEnd, V, -L, cloudsOpticalLength, cloudsMie);
+				ComputeCloudsInsctrIntegral(setting, cloudsStart, cloudsEnd, V, -L, skyAmbient, cloudsOpticalLength, cloudsMie);
 
 				// Aerial perspective fade — less aggressive near horizon for wider visible range
 				float horizonFade = saturate(abs(V.y) * 6.0f + 0.12f);
