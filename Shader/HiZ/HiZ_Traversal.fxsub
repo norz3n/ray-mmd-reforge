@@ -194,8 +194,7 @@ HiZTraceResult HiZ_TraceRayDetailed(
 
 	float2 startMipDim = kAllMipDimensions[currentMip];
 	float2 cellCoord0 = floor(startSS.xy * startMipDim);
-	float tExit0 = HiZ_ComputeCellExitT(startSS, rayDelta, cellCoord0, startMipDim, stepSign);
-	float currentT = min(tExit0 + 1e-4f, 1.0f);
+	float currentT = 0.0f;
 
 	[loop]
 	for (int iter = 0; iter < maxIterations && currentMip >= 0 && currentT < 1.0f; ++iter)

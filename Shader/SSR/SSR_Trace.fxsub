@@ -46,7 +46,7 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	// Ensure sufficient ray trace distance across all camera viewing angles
 	float traceDistance = mSSRRangeScale * (max(100.0f, mSSRRangeMax - surfaceMat.linearDepth) + surfaceMat.linearDepth);
 
-	float normalBias = mSSROffset * (1.0f - NdotV);
+	float normalBias = mSSROffset * 0.35f * (1.0f - NdotV);
 	float3 rayOriginVS = positionVS + surfaceMat.normal * normalBias;
 
 	// Full-resolution start LOD: ensures thin geometry (knees, heels, hair) is never skipped at specific camera distances
@@ -58,15 +58,15 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	int frameCounter = 0;
 #endif
 	float jitter = InterleavedGradientNoise(coord.xy * ViewportSize, frameCounter);
-	rayOriginVS += reflectRayVS * (jitter * 0.05f);
+	rayOriginVS += reflectRayVS * (jitter * 0.015f);
 
 	HiZTraceResult traceHit = HiZ_TraceRayDetailed(SSR_MAX_RAY_STEPS, startMip, rayOriginVS, reflectRayVS, traceDistance, normalBias, mSSRThickness);
 	if (!traceHit.isHit)
 		clip(-1);
 
-	// Screen-edge vignetting and soft end-of-distance falloff
-	float sourceWindow = SSR_ComputeScreenWindow(coord.xy, max(0.02f, 1.0f - mSSRFadeStart));
-	float hitTargetWindow = SSR_ComputeScreenWindow(traceHit.hitUV, 0.04f);
+	// Screen-edge vignetting (tight 4% margin: preserves reflections of hands/arms near screen edges)
+	float sourceWindow = SSR_ComputeScreenWindow(coord.xy, 0.04f);
+	float hitTargetWindow = SSR_ComputeScreenWindow(traceHit.hitUV, 0.03f);
 	float edgeVignette = sourceWindow * hitTargetWindow;
 	float distanceFalloff = 1.0f - pow(saturate(traceHit.hitProgress), 4.0f);
 
