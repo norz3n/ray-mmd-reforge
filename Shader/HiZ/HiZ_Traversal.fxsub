@@ -187,111 +187,75 @@ HiZTraceResult HiZ_TraceRayDetailed(
 	float4 endClip = mul(float4(startPosVS + rayDirVS * effectiveTraceDist, 1.0f), matProject);
 	float3 endSS = (endClip.xyz / max(endClip.w, 1e-4f)) * float3(0.5f, -0.5f, 1.0f) + float3(0.5f, 0.5f, 0.0f);
 
-	float3 rayDelta = endSS - startSS;
-	float2 stepSign = sign(rayDelta.xy);
+	float3 begin = startSS;
+	float3 end = endSS;
+	float3 delta = end - begin;
+	float k = 0.0f;
 
-	int currentMip = clamp(startMip, 0, kMaxMipLevel);
+	float2 crossStep = sign(delta.xy);
+	float2 crossOffset = crossStep * (0.005f / ViewportSize);
+	crossStep = saturate(crossStep);
 
-	float2 startMipDim = kAllMipDimensions[currentMip];
-	float2 cellCoord0 = floor(startSS.xy * startMipDim);
-	float currentT = 0.0f;
+	int level = 0;
+	static const int maxLevel = 9;
+	float effectiveThickness = max(surfaceThickness, startPosVS.z * 0.04f);
 
 	[loop]
-	for (int iter = 0; iter < maxIterations && currentMip >= 0 && currentT < 1.0f; ++iter)
+	for (int it = 0; it < maxIterations && level >= 0 && k < 1.0f; ++it)
 	{
-		float3 currentSS = startSS + currentT * rayDelta;
+		float3 ray = begin + k * delta;
+		if (any(floor(ray.xy) != 0.0f)) break;
 
-		// Ray out of screen bounds test
-		if (currentSS.x < 0.0f || currentSS.x > 1.0f || currentSS.y < 0.0f || currentSS.y > 1.0f)
-			break;
+		float2 levelSize = ViewportSize / exp2(level);
+		int2 cellId = floor(ray.xy * levelSize);
 
-		// Constant array lookup: no exp2() transcendental per iteration
-		float2 mipDim = kAllMipDimensions[currentMip];
-		float2 cellCoord = floor(currentSS.xy * mipDim);
+		float linearZ = matProject[3][2] / (ray.z - matProject[2][2]);
+		float linearMinZ = HiZ_SampleDepthAtMip(ray.xy, level);
+		float minZ = matProject[2][2] + matProject[3][2] / linearMinZ;
+		float t = k;
 
-		// Calculate parameter t at which ray exits the 2D cell
-		float tExit = HiZ_ComputeCellExitT(startSS, rayDelta, cellCoord, mipDim, stepSign);
-		float tNext = tExit + 1e-4f;
-
-		// Fetch conservative minimum linear depth across current cell
-		float minSceneLinearZ = HiZ_SampleDepthAtMip(currentSS.xy, currentMip);
-
-		// Sky/background depth rejection: no valid geometry to intersect.
-		// Mip >= 1 encodes empty/sky regions with kSkyDepthSentinel (1e5f).
-		if (minSceneLinearZ < 0.01f || minSceneLinearZ >= 90000.0f)
+		if (delta.z > 0.0f)
 		{
-			currentT = tNext;
-			currentMip = min(currentMip + 1, kMaxMipLevel);
-			continue;
-		}
+			float deltaZ = minZ - ray.z;
+			t = (deltaZ > 0.0f) ? (t + deltaZ / delta.z) : t;
 
-		// Depth-scaled negative tolerance to reduce false self-intersections at close range
-		float negTolerance = -0.05f * saturate(minSceneLinearZ * 0.1f);
+			float3 temp = begin + t * delta;
+			int2 newCellId = floor(temp.xy * levelSize);
 
-		float minSceneHyperbolicZ = matProject[2][2] + matProject[3][2] / minSceneLinearZ;
-
-		// Parameter t at which ray crosses the minimum depth plane of the cell
-		float tDepth = currentT;
-		if (abs(rayDelta.z) > 1e-7f)
-		{
-			tDepth = (minSceneHyperbolicZ - startSS.z) / rayDelta.z;
-		}
-
-		if (rayDelta.z > 1e-7f)
-		{
-			// Ray is marching deeper into scene
-			if (tDepth > currentT)
+			if (cellId.x != newCellId.x || cellId.y != newCellId.y)
 			{
-				// Ray reaches depth plane further along
-				if (tDepth < tExit)
-				{
-					// Ray intersects depth plane INSIDE current cell
-					currentT = max(tDepth, currentT + 1e-5f);
-
-					if (HiZ_ConfirmOrAdvance(HiZ_RayLinearZ(startSS.z + currentT * rayDelta.z), minSceneLinearZ,
-						negTolerance, surfaceThickness, currentT, tNext, startSS + currentT * rayDelta,
-						currentT, currentMip, result))
-						break;
-				}
-				else
-				{
-					// Ray exits cell before reaching depth plane -> advance to next cell
-					currentT = tNext;
-					currentMip = min(currentMip + 1, kMaxMipLevel);
-				}
+				t = HiZ_ComputeCellExitT(begin, delta, cellId, levelSize, crossStep);
+				level += 2;
 			}
 			else
 			{
-				// Ray is already at or behind depth plane at cell entrance
-				if (HiZ_ConfirmOrAdvance(HiZ_RayLinearZ(currentSS.z), minSceneLinearZ,
-					negTolerance, surfaceThickness, currentT, tNext, currentSS,
-					currentT, currentMip, result))
-					break;
+				if (level <= 1 && abs(linearZ - linearMinZ) >= effectiveThickness)
+				{
+					t = HiZ_ComputeCellExitT(begin, delta, cellId, levelSize, crossStep);
+					level += 1;
+				}
 			}
 		}
-		else
+		else if (ray.z < minZ)
 		{
-			// Ray marching towards camera or parallel
-			if (currentSS.z < minSceneHyperbolicZ)
-			{
-				// Ray is in front of geometry -> advance through cell
-				currentT = tNext;
-				currentMip = min(currentMip + 1, kMaxMipLevel);
-			}
-			else
-			{
-				// Ray intersects or is behind geometry
-				if (HiZ_ConfirmOrAdvance(HiZ_RayLinearZ(currentSS.z), minSceneLinearZ,
-					negTolerance, surfaceThickness, currentT, tNext, currentSS,
-					currentT, currentMip, result))
-					break;
-			}
+			t = HiZ_ComputeCellExitT(begin, delta, cellId, levelSize, crossStep);
+			level += 2;
 		}
+
+		k = t;
+		--level;
+		level = min(maxLevel, level);
 	}
 
-	if (result.isHit)
+	if (level < 0)
 	{
-		float3 hitSS = startSS + result.hitProgress * rayDelta;
+		result.isHit = true;
+		result.hitProgress = k;
+		float3 hitSS = begin + k * delta;
+		result.hitUV = hitSS.xy;
+		result.hitMip = 0;
+		result.confidence = 1.0f;
+
 		float3 hitNDC = (hitSS - float3(0.5f, 0.5f, 0.0f)) * float3(2.0f, -2.0f, 1.0f);
 		float4 hitClip = float4(0.0f, 0.0f, 0.0f, matProject[3][2] / (hitNDC.z - matProject[2][2]));
 		hitClip.xyz = hitNDC * hitClip.w;
