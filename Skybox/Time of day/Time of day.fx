@@ -89,7 +89,7 @@ technique MainTech<string MMDPass = "object";
 	pass DrawScattering {
 		AlphaTestEnable = FALSE; AlphaBlendEnable = FALSE;\
 		VertexShader = compile vs_3_0 ScatteringVS();
-		PixelShader  = compile ps_3_0 ScatteringPS();
+		PixelShader  = compile ps_3_0 ScatteringWithCloudsPS();
 	}
 }
 technique MainTechSS<string MMDPass = "object_ss";
