@@ -10,17 +10,17 @@
 #define RAY_MMD_SSR_COMMON_FXSUB
 
 #if SSR_QUALITY == 1
-#	define SSR_MAX_RAY_STEPS 64
-#	define SSR_BINARY_STEPS 3
+#	define SSR_MAX_RAY_STEPS 32
+#	define SSR_BINARY_STEPS 4
 #elif SSR_QUALITY == 2
-#	define SSR_MAX_RAY_STEPS 128
-#	define SSR_BINARY_STEPS 4
-#elif SSR_QUALITY >= 3
-#	define SSR_MAX_RAY_STEPS 256
+#	define SSR_MAX_RAY_STEPS 64
 #	define SSR_BINARY_STEPS 5
+#elif SSR_QUALITY >= 3
+#	define SSR_MAX_RAY_STEPS 96
+#	define SSR_BINARY_STEPS 6
 #else
-#	define SSR_MAX_RAY_STEPS 128
-#	define SSR_BINARY_STEPS 4
+#	define SSR_MAX_RAY_STEPS 64
+#	define SSR_BINARY_STEPS 5
 #endif
 
 // Multi-resolution roughness pyramid render targets (Full, 1/2, 1/4, 1/8)

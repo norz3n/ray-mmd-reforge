@@ -11,19 +11,6 @@
 
 #include "shader/SSR/SSR_Common.fxsub"
 
-#if SSR_QUALITY == 1
-#	define SSR_MARCH_STEPS 32
-#	define SSR_REFINE_STEPS 4
-#elif SSR_QUALITY == 2
-#	define SSR_MARCH_STEPS 48
-#	define SSR_REFINE_STEPS 5
-#elif SSR_QUALITY >= 3
-#	define SSR_MARCH_STEPS 64
-#	define SSR_REFINE_STEPS 5
-#else
-#	define SSR_MARCH_STEPS 48
-#	define SSR_REFINE_STEPS 5
-#endif
 
 inline float SSR_ComputeScreenWindow(float2 uv, float edgeMargin)
 {
@@ -93,11 +80,11 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	float hitProgress = 0.0f;
 	bool hitFound = false;
 
-	// Polynomial step raymarching: dense contact sampling near surface + smooth distance expansion
+	// Dense polynomial step progression: guarantees smooth, clean, noise-free reflection surfaces
 	[loop]
-	for (int i = 1; i <= SSR_MARCH_STEPS; ++i)
+	for (int i = 1; i <= SSR_MAX_RAY_STEPS; ++i)
 	{
-		float t = pow((float(i) + jitter * 0.5f) / float(SSR_MARCH_STEPS), 1.25f);
+		float t = pow(float(i) / float(SSR_MAX_RAY_STEPS), 1.25f);
 		float3 currentSS = startSS + t * rayDelta;
 
 		if (currentSS.x < 0.0f || currentSS.x > 1.0f || currentSS.y < 0.0f || currentSS.y > 1.0f)
@@ -116,7 +103,7 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 				float3 p1 = currentSS;
 
 				[unroll]
-				for (int b = 0; b < SSR_REFINE_STEPS; ++b)
+				for (int b = 0; b < SSR_BINARY_STEPS; ++b)
 				{
 					float3 pm = (p0 + p1) * 0.5f;
 					float sampleZ = tex2Dlod(Gbuffer8Map, float4(pm.xy, 0.0f, 0.0f)).r;
