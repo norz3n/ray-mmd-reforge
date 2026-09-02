@@ -50,7 +50,7 @@ float4 SSR_ResolvePS(in float2 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1)
 	float NdotV = abs(dot(normalVS, viewVector));
 
 	// Split-sum environmental specular BRDF (Karis / Unreal Engine 4 PBR)
-	float3 pbrSpecularColor = EnvironmentSpecularUnreal4(NdotV, surfaceSmoothness, specularF0);
+	float3 pbrSpecularColor = EnvironmentSpecularUnreal4(NdotV, gloss, specularF0);
 
 	// User intensity modulation & Fresnel factor
 	float intensityScale = mSSRBrightness;
