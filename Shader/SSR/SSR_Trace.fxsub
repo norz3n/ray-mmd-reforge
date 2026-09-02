@@ -43,8 +43,11 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	clip(facingAngle - 1e-5f);
 
 	float NdotV = saturate(dot(viewVector, surfaceMat.normal));
-	float traceDistance = mSSRRangeMax * mSSRRangeScale * (1.0f - NdotV * 0.5f);
-	float normalBias = mSSROffset * (1.0f - NdotV * 0.5f);
+	// Adaptive trace distance: scales up dramatically on grazing angles (floors/mirrors) to capture distant reflections
+	float traceDistance = mSSRRangeScale * (max(0.0f, mSSRRangeMax - surfaceMat.linearDepth) + surfaceMat.linearDepth);
+	traceDistance *= pow(1.0f - NdotV * (1.0f - SSR_QUALITY * 0.1f), 5 - SSR_QUALITY);
+
+	float normalBias = mSSROffset * (1.0f - NdotV);
 	float3 rayOriginVS = positionVS + surfaceMat.normal * normalBias;
 
 	// Roughness-adaptive start LOD: sharp mirrors start at full-res (LOD 0/1) for crisp contact geometry
@@ -63,22 +66,15 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	if (!traceHit.isHit)
 		clip(-1);
 
+	// Screen-edge vignetting and distance falloff
 	float sourceWindow = SSR_ComputeScreenWindow(coord.xy, max(0.02f, 1.0f - mSSRFadeStart));
-	float hitTargetWindow = SSR_ComputeScreenWindow(traceHit.hitUV, 0.08f);
+	float hitTargetWindow = SSR_ComputeScreenWindow(traceHit.hitUV, 0.05f);
 	float edgeVignette = sourceWindow * hitTargetWindow;
 	float distanceFalloff = 1.0f - saturate(traceHit.hitProgress * traceHit.hitProgress);
-	float3 hitNormal = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(traceHit.hitUV, 0.0f, 0.0f)));
-	float hitFacing = smoothstep(-0.35f, 0.05f, dot(hitNormal, -reflectRayVS));
-	float confidence = edgeVignette * distanceFalloff * saturate(facingAngle) * traceHit.confidence * hitFacing;
-
-	float ssrMask = tex2Dlod(SSRMapSamp, float4(coord.xy, 0.0f, 0.0f)).a;
-	confidence *= ssrMask;
+	float confidence = edgeVignette * distanceFalloff * saturate(facingAngle) * traceHit.confidence;
 
 	float4 hitRadiance = tex2Dlod(ShadingMapSamp, float4(traceHit.hitUV, 0.0f, 0.0f));
-	// Emitter gating: a material suppressed by its visibility preset must not
-	// act as a reflection source either (mirrors SSGI_Trace emitter weighting).
-	float hitEmitterVis = tex2Dlod(SSRMapSamp, float4(traceHit.hitUV, 0.0f, 0.0f)).a;
-	return float4(hitRadiance.rgb, 1.0f) * confidence * hitEmitterVis;
+	return float4(hitRadiance.rgb, 1.0f) * confidence;
 }
 
 #endif // RAY_MMD_SSR_TRACE_FXSUB
