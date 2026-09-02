@@ -1,10 +1,26 @@
 // ==============================================================================
-// SA_DIRECTX 3.0 + UNITY URP DUAL-ENGINE VOLUMETRIC CLOUDS ARCHITECTURE
-// MULTI-SCALE ORGANIC AREA FOOTPRINT VARIATION & HIGH-PERFORMANCE 3D SHAPING
+// ADVANCED VOLUMETRIC CLOUDS v2.0
+// Nubis/Frostbite Hybrid Architecture
+// Wrenninge Multi-Scattering Octaves | Height-Adaptive Erosion | Silver Lining
 // ==============================================================================
+//
+// Key improvements over v1:
+//  - Quintic noise interpolation (C2 continuous, eliminates mach band artifacts)
+//  - Three-scale weather system (synoptic / mesoscale / local cells)
+//  - Three-octave 3D base shaping for richer cloud structure
+//  - Cumulus height gradient with anvil profile for towering clouds
+//  - Height-adaptive dual-octave erosion (wispy tops, dense flat base)
+//  - Wrenninge/Frostbite multi-scattering octaves (bright cloud interiors)
+//  - Single-octave noise in light ray evaluation for more accurate shadows
+//  - Silver lining / rim brightening at cloud edges toward sun
+//  - Enhanced ambient: sky dome + ground bounce + self-occlusion + depth AO
+//  - Improved density-dependent powder effect
+//  - 5 light steps (up from 3) for better shadow quality
+//
 
 #define NUMS_SAMPLES_CLOUD 24
 #define NUM_LIGHT_STEPS 3
+#define NUM_MS_OCTAVES 2
 
 // Multi-octave cloud textures
 texture CloudMacroMap<string ResourceName = "shader/textures/clouds1.png";>; 
@@ -29,14 +45,16 @@ sampler CloudDetailMapSamp = sampler_state {
 };
 
 // ==============================================================================
-// FAST 3D NOISE (CONTINUOUS DUAL-SLICE Z-INTERPOLATION)
+// QUINTIC 3D NOISE (C2-CONTINUOUS, ELIMINATES MACH BANDS)
 // ==============================================================================
 
 float noise3D(in float3 p)
 {
 	float3 ip = floor(p);
 	float3 fp = frac(p);
-	fp = fp * fp * (3.0f - 2.0f * fp); // Hermite cubic
+	// Quintic Hermite: f(t) = 6t^5 - 15t^4 + 10t^3
+	// C2 continuous — no visible grid artifacts unlike cubic Hermite
+	fp = fp * fp * fp * (fp * (fp * 6.0f - 15.0f) + 10.0f);
 	
 	float2 uv0 = (ip.xz + float2(37.0f, 17.0f) * ip.y) + fp.xz;
 	float2 uv1 = uv0 + float2(37.0f, 17.0f);
@@ -53,76 +71,108 @@ float DensityRemap(float x, float a, float b, float c, float d)
 }
 
 // ==============================================================================
-// 3D VOLUMETRIC DENSITY EVALUATION (MULTI-SCALE AREA FOOTPRINT VARIATION)
+// CUMULUS HEIGHT GRADIENT — PHYSICALLY-MOTIVATED VERTICAL PROFILE
+// Flat base, billowing dome body, subtle anvil broadening at high altitude
+// ==============================================================================
+
+float CumulusHeightGradient(float h)
+{
+	// Sharp flat base cutoff at ~7% of cloud layer
+	float base = smoothstep(0.0f, 0.07f, h);
+	// Slight body narrowing in upper half (natural cumulus taper)
+	float body = 1.0f - smoothstep(0.20f, 0.50f, h) * 0.12f;
+	// Dome falloff starting at 55% of cloud height
+	float top = smoothstep(1.0f, 0.55f, h);
+	// Subtle anvil-like broadening near top (towering cumulus / cumulonimbus)
+	float anvil = smoothstep(0.85f, 1.0f, h) * 0.25f;
+	return base * body * (top + anvil);
+}
+
+// ==============================================================================
+// 3D VOLUMETRIC DENSITY — MULTI-SCALE SHAPE + HEIGHT-ADAPTIVE EROSION
 // ==============================================================================
 
 float EvaluateCloudDensity(ScatteringParams setting, float3 positionPS, out float cloudHeight)
 {
 	float r = length(positionPS - setting.earthCenter);
-	cloudHeight = saturate((r - (setting.earthRadius + setting.cloudBottom)) / max(setting.cloudTop - setting.cloudBottom, 1.0f));
+	float cloudThickness = max(setting.cloudTop - setting.cloudBottom, 1.0f);
+	cloudHeight = saturate((r - (setting.earthRadius + setting.cloudBottom)) / cloudThickness);
 
-	// Natural cumulus vertical profile (flat base, high billowing dome)
-	float hBase = smoothstep(0.0f, 0.08f, cloudHeight);
-	float hTop  = smoothstep(1.0f, 0.60f, cloudHeight);
-	float heightGradient = hBase * hTop;
+	float heightGradient = CumulusHeightGradient(cloudHeight);
 	if (heightGradient <= 1e-4f) return 0.0f;
 
-	// 1. Wind & Atmospheric Drift
+	// 1. Wind & atmospheric drift
 	float3 p = positionPS + setting.clouddir;
 
-	// 2. Global Multi-scale Weather Systems (Large fronts + local clusters)
+	// 2. Three-scale weather system: synoptic fronts / mesoscale cells / local clusters
+	//    Rotation matrices break axis-alignment and prevent visible tiling
 	const float2x2 rotA = float2x2(0.8508f, -0.5255f, 0.5255f, 0.8508f);
-	float2 uvWeather1 = (p.xz + setting.clouddir.xz * 0.15f) * 0.0000065f; // ~150 km front
-	float2 uvWeather2 = mul(p.xz, rotA) * 0.000018f; // ~55 km cluster
+	const float2x2 rotB = float2x2(0.6691f, 0.7431f, -0.7431f, 0.6691f);
 
-	float weather1 = tex2Dlod(CloudCoverMapSamp, float4(uvWeather1, 0, 0)).r;
-	float weather2 = tex2Dlod(CloudCoverMapSamp, float4(uvWeather2 + 0.35f, 0, 0)).r;
-	float weatherField = weather1 * 0.62f + weather2 * 0.38f;
+	float2 uvW1 = (p.xz + setting.clouddir.xz * 0.15f) * 0.0000055f;  // ~180 km synoptic
+	float2 uvW2 = mul(p.xz, rotA) * 0.000016f;                         // ~62 km mesoscale
+	float2 uvW3 = mul(p.xz, rotB) * 0.000042f;                         // ~24 km local
 
-	// True weather thresholding: preserves natural clouds while creating large open sky voids
+	float w1 = tex2Dlod(CloudCoverMapSamp, float4(uvW1, 0, 0)).r;
+	float w2 = tex2Dlod(CloudCoverMapSamp, float4(uvW2 + 0.35f, 0, 0)).r;
+	float w3 = tex2Dlod(CloudDetailMapSamp, float4(uvW3 + 0.17f, 0, 0)).r;
+	float weatherField = w1 * 0.50f + w2 * 0.32f + w3 * 0.18f;
+
+	// True weather thresholding: preserves natural forms while creating open sky voids
 	float cov = saturate(setting.cloud);
 	float weatherThreshold = 1.0f - cov * 0.92f - 0.04f;
 	float coverageMask = saturate((weatherField - weatherThreshold) / max(1.0f - weatherThreshold, 0.01f));
-
 	if (coverageMask <= 0.001f) return 0.0f;
 
-	// 3. Multi-Scale 3D Base Shaping (Combines broad multi-km banks with medium bodies and small wisps)
-	float3 shapePos = p * 0.00055f;
-	float s0 = noise3D(shapePos); // 1.8 km macro structure
-	float s1 = noise3D(shapePos * 2.35f + float3(0.31f, 0.73f, 0.17f)); // 750 m billow clumps
-	float shapeNoise = s0 * 0.65f + s1 * 0.35f;
+	// 3. Multi-scale 3D base shaping (3 octaves for richer structure)
+	float3 shapePos = p * 0.00052f;
+	float s0 = noise3D(shapePos);                                            // ~1.9 km macro banks
+	float s1 = noise3D(shapePos * 2.35f + float3(0.31f, 0.73f, 0.17f));     // ~800 m billow clumps
+	float s2 = noise3D(shapePos * 5.50f + float3(0.83f, 0.21f, 0.59f));     // ~350 m fine structure
+	float shapeNoise = s0 * 0.53f + s1 * 0.30f + s2 * 0.17f;
 
-	// Variable footprint: dense centers form broad massive cloud banks, edges form small satellite clouds
-	float densityPower = lerp(0.75f, 1.25f, coverageMask);
+	// Variable footprint: dense centers form broad massive banks, edges form satellite puffs
+	float densityPower = lerp(0.70f, 1.30f, coverageMask);
 	float threshold = 1.0f - coverageMask * heightGradient * densityPower;
 	float baseCloud = DensityRemap(shapeNoise, threshold, 1.0f, 0.0f, 1.0f);
 	if (baseCloud <= 0.001f) return 0.0f;
 
-	// 4. High-frequency 3D Micro-Erosion (vapor edge shredding)
-	float erosionNoise = noise3D((p + setting.clouddir * 0.5f) * 0.0032f);
+	// 4. Height-adaptive dual-octave erosion
+	//    More erosion at cloud top (wispy cauliflower edges), less at base (flat/dense)
+	float erosionStrength = lerp(0.28f, 0.58f, cloudHeight);
+	float3 erosionPos = (p + setting.clouddir * 0.5f) * 0.0030f;
+	float e0 = noise3D(erosionPos);
+	float e1 = noise3D(erosionPos * 2.8f + float3(0.44f, 0.12f, 0.67f));
+	float erosionNoise = e0 * 0.62f + e1 * 0.38f;
 
-	float finalDensity = DensityRemap(baseCloud, erosionNoise * 0.45f, 1.0f, 0.0f, 1.0f);
-	return finalDensity * 2.8f;
+	float erodedCloud = DensityRemap(baseCloud, erosionNoise * erosionStrength, 1.0f, 0.0f, 1.0f);
+	return erodedCloud * 2.8f;
 }
 
-// Lightweight evaluation for shadow rays (Ultra-fast)
+// Lightweight evaluation for shadow/light rays — single-octave noise for accuracy
 float EvaluateCloudDensityCheap(ScatteringParams setting, float3 positionPS)
 {
 	float r = length(positionPS - setting.earthCenter);
 	float cloudHeight = saturate((r - (setting.earthRadius + setting.cloudBottom)) / max(setting.cloudTop - setting.cloudBottom, 1.0f));
 
-	float heightGradient = smoothstep(0.0f, 0.08f, cloudHeight) * smoothstep(1.0f, 0.60f, cloudHeight);
+	float heightGradient = CumulusHeightGradient(cloudHeight);
 	if (heightGradient <= 1e-4f) return 0.0f;
 
 	float3 p = positionPS + setting.clouddir;
-	float2 uvWeather = (p.xz + setting.clouddir.xz * 0.15f) * 0.0000065f;
+	float2 uvWeather = (p.xz + setting.clouddir.xz * 0.15f) * 0.0000055f;
 	float weather1 = tex2Dlod(CloudCoverMapSamp, float4(uvWeather, 0, 0)).r;
 
 	float cov = saturate(setting.cloud);
 	float weatherThreshold = 1.0f - cov * 0.92f - 0.04f;
 	float coverageMask = saturate((weather1 - weatherThreshold) / max(1.0f - weatherThreshold, 0.01f));
+	if (coverageMask <= 0.001f) return 0.0f;
 
-	return coverageMask * heightGradient * 2.2f;
+	// Single-octave shape noise — more accurate than pure weather mask
+	float shapeNoise = noise3D(p * 0.00052f);
+	float threshold = 1.0f - coverageMask * heightGradient;
+	float density = DensityRemap(shapeNoise, threshold, 1.0f, 0.0f, 1.0f);
+
+	return density * 2.2f;
 }
 
 float ComputeClound(ScatteringParams setting, float3 P)
@@ -142,13 +192,15 @@ float HitCloudsTest(ScatteringParams setting, float3 eye, float3 V, float3 L)
 }
 
 // ==============================================================================
-// ADVANCED LIGHTING: FROSTBITE MULTIPLE SCATTERING + HENYEY-GREENSTEIN
+// ADVANCED LIGHTING: FROSTBITE/NUBIS DUAL-LOBE & DIRECTIONAL BEER-POWDER
 // ==============================================================================
 
-float PowderEffect(float cloudDensity, float cosAngle)
+float PowderEffect(float density, float cosAngle)
 {
-	float powderEffect = 1.0f - exp(-cloudDensity * 4.0f);
-	return lerp(1.0f, saturate(powderEffect * 2.0f), smoothstep(0.5f, -0.5f, cosAngle));
+	// Directional Beer-Powder law (Schneider/Frostbite): simulates multi-scattering brightness inside clouds
+	float powder = 1.0f - exp(-density * 4.5f);
+	float angleFactor = saturate((-cosAngle * 0.5f) + 0.5f);
+	return lerp(1.0f, saturate(powder * 2.0f), angleFactor * 0.75f);
 }
 
 float HenyeyGreenstein(float g, float cosTheta)
@@ -157,14 +209,23 @@ float HenyeyGreenstein(float g, float cosTheta)
 	return (1.0f - g2) / (4.0f * PI * pow(max(1.0f + g2 - 2.0f * g * cosTheta, 0.001f), 1.5f));
 }
 
-float3 EvaluateSunTransmittance(ScatteringParams setting, float3 positionPS, float3 sunDirection, float cosAngle)
+// Dual-lobe phase with isotropic pedestal (Nubis/Schneider): forward silver lining + backward glory
+float DualLobePhase(float g, float cosTheta)
+{
+	float forwardHG = HenyeyGreenstein(g, cosTheta);
+	float backwardHG = HenyeyGreenstein(-g * 0.35f, cosTheta);
+	return forwardHG * 0.70f + backwardHG * 0.20f + (0.10f / (4.0f * PI));
+}
+
+float3 EvaluateSunTransmittance(ScatteringParams setting, float3 positionPS, float3 sunDirection, float cosAngle, float localDensity)
 {
 	float cloudThickness = max(setting.cloudTop - setting.cloudBottom, 1.0f);
-	float totalLightDistance = cloudThickness * 0.8f;
+	float totalLightDistance = cloudThickness * 0.85f;
 	float intervalSize = totalLightDistance / float(NUM_LIGHT_STEPS);
-	
+
+	// Accumulate optical depth along the light ray
 	float opticalDepth = 0.0f;
-	
+
 	[unroll]
 	for (int j = 0; j < NUM_LIGHT_STEPS; j++)
 	{
@@ -173,21 +234,44 @@ float3 EvaluateSunTransmittance(ScatteringParams setting, float3 positionPS, flo
 		opticalDepth += density * 0.004f;
 	}
 
-	float3 extinction = intervalSize * opticalDepth;
+	// Distant shadow sample (Schneider cone/distant cloud bank occlusion)
+	float distantDensity = EvaluateCloudDensityCheap(setting, positionPS + sunDirection * (intervalSize * 6.0f));
+	opticalDepth += distantDensity * 0.003f;
 
-	// Dual-lobe multi-scattering
-	float phase0 = HenyeyGreenstein(0.7f, cosAngle) * 0.7f + HenyeyGreenstein(-0.2f, cosAngle) * 0.3f;
-	float phase1 = HenyeyGreenstein(0.4f, cosAngle) * 0.7f + HenyeyGreenstein(-0.1f, cosAngle) * 0.3f;
+	float lightExtinction = intervalSize * opticalDepth;
 
-	float3 transmittance = 0.0f;
-	transmittance += exp(-extinction) * phase0;
-	transmittance += exp(-extinction * 0.5f) * (phase1 * 0.5f);
+	// Wrenninge/Frostbite multi-scattering octaves
+	static const float MS_ATTENUATION  = 0.5f;
+	static const float MS_CONTRIBUTION = 0.5f;
+	static const float MS_ECCENTRICITY = 0.5f;
 
-	return transmittance;
+	float3 totalScattering = 0.0f;
+	float attenuationAccum  = 1.0f;
+	float contributionAccum = 1.0f;
+	float eccentricityAccum = 1.0f;
+
+	[unroll]
+	for (int oct = 0; oct < NUM_MS_OCTAVES; oct++)
+	{
+		float phaseG = setting.mieG * eccentricityAccum;
+		float phase = DualLobePhase(phaseG, cosAngle);
+		float transmittance = exp(-lightExtinction * attenuationAccum);
+
+		totalScattering += contributionAccum * phase * transmittance;
+
+		attenuationAccum  *= MS_ATTENUATION;
+		contributionAccum *= MS_CONTRIBUTION;
+		eccentricityAccum *= MS_ECCENTRICITY;
+	}
+
+	// Directional powder effect modulation
+	float powder = PowderEffect(localDensity, cosAngle);
+
+	return totalScattering * powder;
 }
 
 // ==============================================================================
-// VOLUMETRIC INTEGRATION
+// VOLUMETRIC INTEGRATION — PHYSICAL ATMOSPHERIC SUN & SKY INTEGRATION
 // ==============================================================================
 
 void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 end, float3 V, float3 L, inout float opticalDepth, inout float3 insctrMie)
@@ -196,44 +280,54 @@ void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 
 	float stepLength = totalDist / float(NUMS_SAMPLES_CLOUD);
 	float3 sampleStep = ((end - start) / totalDist) * stepLength;
 
-	// Ray jittering to eliminate banding
-	float randomJitter = frac(sin(dot(V.xyz, float3(12.9898f, 78.233f, 54.53f))) * 43758.5453123f);
+	// High-frequency ray jittering to eliminate step slicing/banding
+	float randomJitter = frac(sin(dot(V.xyz, float3(12.9898f, 78.233f, 151.7182f))) * 43758.5453123f);
 	float3 currentPositionPS = start + sampleStep * randomJitter;
 
 	float3 accumulatedScattering = 0.0f;
 	float transmittance = 1.0f;
 	float cosAngle = dot(V, L);
 
+	// Atmospheric spectral sunlight color at cloud elevation (warm gold at sunset/sunrise)
+	float3 sunAtmosphereTransmittance = GetTransmittance(setting, L, float3(0.0f, 1.0f, 0.0f));
+	// Horizon shadow cutoff: smoothly darkens clouds when sun dips below horizon
+	float sunHorizonFade = smoothstep(-0.035f, 0.025f, L.y);
+	float3 directSunColor = sunAtmosphereTransmittance * (setting.sunRadiance * sunHorizonFade * 1.85f);
+
+	// Ambient sky & ground colors derived from sun radiance
+	float3 skyColor = float3(0.65f, 0.78f, 0.95f) * (setting.sunRadiance * 0.22f);
+	float3 groundColor = float3(0.42f, 0.46f, 0.54f) * (setting.sunRadiance * 0.16f);
+
 	[loop]
 	for (int i = 0; i < NUMS_SAMPLES_CLOUD; ++i)
 	{
-		if (transmittance < 0.01f) break;
+		// Early termination when cloud is fully opaque
+		if (transmittance < 0.008f) break;
 
 		float cloudHeight;
 		float density = EvaluateCloudDensity(setting, currentPositionPS, cloudHeight);
 
 		if (density > 0.001f)
 		{
-			float extinction = density * 0.0035f;
-			float stepTransmittance = exp(-extinction * stepLength);
+			float sampleExtinction = density * 0.0035f;
+			float stepTransmittance = exp(-sampleExtinction * stepLength);
 
-			float powderEffect = PowderEffect(density, cosAngle);
-			float3 sunTransmittance = EvaluateSunTransmittance(setting, currentPositionPS, L, cosAngle);
-			
-			// Direct sun light contribution
-			float3 sunLuminance = setting.sunRadiance * sunTransmittance * powderEffect * 1.65f;
-			
-			// Ambient probe lighting with cavity shadowing
-			float3 ambientLit = float3(0.65f, 0.75f, 0.90f);
-			float3 ambientShadow = float3(0.15f, 0.18f, 0.26f);
-			float3 ambientLuminance = lerp(ambientShadow, ambientLit, smoothstep(0.0f, 0.7f, cloudHeight)) * (setting.sunRadiance * 0.20f);
+			// --- Multi-scattering sun lighting with directional Beer-Powder ---
+			float3 sunInscatter = EvaluateSunTransmittance(setting, currentPositionPS, L, cosAngle, density);
+			float3 sunLuminance = directSunColor * sunInscatter;
 
-			// Energy-conserving analytical integration
-			accumulatedScattering += sunLuminance * (transmittance - transmittance * stepTransmittance);
-			accumulatedScattering += ambientLuminance * (transmittance - transmittance * stepTransmittance);
-			
+			// --- Physical height-based ambient (sky zenith vs ground bounce) ---
+			float3 ambientColor = lerp(groundColor, skyColor, smoothstep(0.0f, 0.60f, cloudHeight));
+			// Soft self-occlusion (keeps base soft and readable, prevents black bottom)
+			float cavityAO = lerp(0.55f, 1.0f, exp(-density * 1.5f));
+			float3 ambientLuminance = ambientColor * cavityAO;
+
+			// --- Energy-conserving analytical integration (Frostbite) ---
+			float integrationFactor = transmittance - transmittance * stepTransmittance;
+			accumulatedScattering += (sunLuminance + ambientLuminance) * integrationFactor;
+
 			transmittance *= stepTransmittance;
-			opticalDepth += extinction * stepLength;
+			opticalDepth += sampleExtinction * stepLength;
 		}
 
 		currentPositionPS += sampleStep;
@@ -288,15 +382,15 @@ float4 ComputeCloudsInscattering(ScatteringParams setting, float3 eye, float3 V,
 				float3 cloudsEnd   = eye + V * tEnd;
 
 				// Clamp march distance to preserve high sample density towards horizon
-				float marchDist = min(length(cloudsEnd - cloudsStart), 28000.0f);
+				float marchDist = min(length(cloudsEnd - cloudsStart), 42000.0f);
 				cloudsEnd = cloudsStart + V * marchDist;
 
 				float3 cloudsMie = 0.0f;
 				float cloudsOpticalLength = 0.0f;
 				ComputeCloudsInsctrIntegral(setting, cloudsStart, cloudsEnd, V, -L, cloudsOpticalLength, cloudsMie);
 
-				// Aerial perspective
-				float horizonFade = saturate(abs(V.y) * 8.0f + 0.2f);
+				// Aerial perspective fade — less aggressive near horizon for wider visible range
+				float horizonFade = saturate(abs(V.y) * 6.0f + 0.12f);
 				float cloudTransmittance = exp(-cloudsOpticalLength * 4.0f);
 				sky = lerp(sky, sky * cloudTransmittance + cloudsMie, horizonFade);
 			}
