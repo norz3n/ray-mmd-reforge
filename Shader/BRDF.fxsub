@@ -141,15 +141,86 @@ float OrenNayarBRDF(float nl, float nv, float lv, float roughness)
 	return max(0, A + B * (s / t));
 }
 
+#ifndef DIFFUSE_BRDF_TYPE
+#define DIFFUSE_BRDF_TYPE 1
+#endif
+
+// Energy-preserving Oren-Nayar (EON) BRDF (Portsmouth, Kutz, Hill, JCGT 2025)
+// Closed-form analytical energy compensation for rough diffuse microfacets.
+static const float EON_CONSTANT1_FON = 0.5f - 2.0f / (3.0f * PI);        // ~0.287797f
+static const float EON_CONSTANT2_FON = 2.0f / 3.0f - 28.0f / (15.0f * PI); // ~0.073238f
+
+/**
+ * 4th-order polynomial approximation of the Fujii Oren-Nayar directional albedo E_FON(mu, r).
+ * Avoids transcendental acos/sqrt operations from the exact formulation while maintaining <0.3% error.
+ *
+ * @param mu Cosine of incident or outgoing angle (dot(N, L) or dot(N, V))
+ * @param r  Surface roughness in range [0, 1]
+ * @return Directional albedo ratio for single-scattering normalization
+ */
+float E_FON_approx(float mu, float r)
+{
+	float mucomp = 1.0f - mu;
+	const float g1 =  0.0571085289f;
+	const float g2 =  0.491881867f;
+	const float g3 = -0.332181442f;
+	const float g4 =  0.0714429953f;
+	float GoverPi = mucomp * (g1 + mucomp * (g2 + mucomp * (g3 + mucomp * g4)));
+	return (1.0f + r * GoverPi) / (1.0f + EON_CONSTANT1_FON * r);
+}
+
+/**
+ * Evaluates Energy-preserving Oren-Nayar (EON) diffuse BRDF.
+ * Evaluated with single-scattering albedo rho = 1.0 to integrate into ray-mmd's deferred lighting
+ * pipeline where texture albedo is modulated downstream. Under rho = 1.0, the multiple-scattering
+ * albedo rho_ms analytically reduces to 1.0, eliminating costly vector math and hue shifts.
+ *
+ * @param nl        Clamped cosine of angle between normal and light direction
+ * @param nv        Cosine of angle between normal and view direction
+ * @param lv        Dot product between light and view directions (unclamped [-1, 1])
+ * @param roughness Surface roughness in range [0, 1]
+ * @return Normalized diffuse reflectance factor (Lambert = 1.0 when roughness = 0)
+ */
+float EonBRDF(float nl, float nv, float lv, float roughness)
+{
+	float s = lv - nl * nv;
+	float sovertF = (s > 0.0f) ? (s / max(max(nl, nv), 1e-5f)) : s;
+
+	float AF = 1.0f / (1.0f + EON_CONSTANT1_FON * roughness);
+	float f_ss = AF * (1.0f + roughness * sovertF);
+
+	float EFo = E_FON_approx(nv, roughness);
+	float EFi = E_FON_approx(nl, roughness);
+	float avgEF = AF * (1.0f + EON_CONSTANT2_FON * roughness);
+
+	// Multi-scattering lobe compensation to ensure directional albedo integrates to 1.0
+	float f_ms = max(1e-5f, 1.0f - EFo) * max(1e-5f, 1.0f - EFi) / max(1e-5f, 1.0f - avgEF);
+
+	return max(0.0f, f_ss + f_ms);
+}
+
+/**
+ * Evaluates diffuse surface reflectance according to configured DIFFUSE_BRDF_TYPE.
+ *
+ * @param N         Surface normal vector
+ * @param L         Incident light direction vector
+ * @param V         Outgoing view direction vector
+ * @param roughness Surface roughness [0, 1]
+ * @return Normalized diffuse BRDF response factor
+ */
 float DiffuseBRDF(float3 N, float3 L, float3 V, float roughness)
 {
-	float3 H = normalize(V + L);
-
 	float nl = saturate(dot(N, L));
-	float vh = saturate(dot(V, H));
-	float nv = abs(dot(N, V));
+	float nv = max(abs(dot(N, V)), 1e-5f);
 
+#if (DIFFUSE_BRDF_TYPE == 1)
+	float lv = dot(L, V);
+	return EonBRDF(nl, nv, lv, roughness);
+#else
+	float3 H = normalize(V + L);
+	float vh = saturate(dot(V, H));
 	return BurleyBRDF(nl, nv, vh, roughness);
+#endif
 }
 
 // Rim knobs are floats, so they can't gate a preprocessor #if; defaults keep
@@ -553,9 +624,9 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 			diffuse = ToonBasedShading(nl, vh, nv, toonShadow, material.specular, shadow, roughness, material.customDataA);
 	}
 	else
-		diffuse = BurleyBRDF(nl, nv, vh, roughness) * nl * diffuseOcclusion;
+		diffuse = DiffuseBRDF(N, L, V, roughness) * nl * diffuseOcclusion;
 #else
-	float3 diffuse = BurleyBRDF(nl, nv, vh, roughness) * nl * diffuseOcclusion;
+	float3 diffuse = DiffuseBRDF(N, L, V, roughness) * nl * diffuseOcclusion;
 #endif
 
 	float3 specular = 0;
