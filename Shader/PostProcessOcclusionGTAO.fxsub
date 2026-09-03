@@ -68,16 +68,18 @@ float GTAOSampleHorizonCos(
 	float lowHorizonCos, float effectRadius,
 	float maxThickness, float maxBehind)
 {
-	float sampleDist = length(sampleDelta);
-	if (sampleDist < 1e-4f || sampleDist >= effectRadius)
+	float sampleDistSq = dot(sampleDelta, sampleDelta);
+	if (sampleDistSq < 1e-8f || sampleDistSq >= effectRadius * effectRadius)
 		return lowHorizonCos;
 
-	float3 hvec       = sampleDelta / sampleDist;
-	float falloff     = saturate(1.0f - (sampleDist / effectRadius) * (sampleDist / effectRadius));
-	float distInFront = max(0.0f, -sampleDelta.z);
-	float thickness   = saturate(1.0f - max(0.0f, distInFront - maxThickness * 0.2f) / maxThickness);
-	float behind      = saturate(1.0f - max(0.0f, sampleDelta.z) / maxBehind);
-	float weight      = falloff * thickness * behind;
+	float invSampleDist = rsqrt(sampleDistSq);
+	float sampleDist    = sampleDistSq * invSampleDist;
+	float3 hvec         = sampleDelta * invSampleDist;
+	float falloff       = saturate(1.0f - sampleDistSq / (effectRadius * effectRadius));
+	float distInFront   = max(0.0f, -sampleDelta.z);
+	float thickness     = saturate(1.0f - max(0.0f, distInFront - maxThickness * 0.2f) / maxThickness);
+	float behind        = saturate(1.0f - max(0.0f, sampleDelta.z) / maxBehind);
+	float weight        = falloff * thickness * behind;
 	return lerp(lowHorizonCos, dot(hvec, viewVec), weight);
 }
 
@@ -192,11 +194,14 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 		float dotOrtho = dot(orthoDirectionVec, projectedNormalVec);
 		float signNorm = (abs(dotOrtho) > 1e-4f) ? sign(dotOrtho) : 0.0f;
 		float cosNorm = clamp(dot(projectedNormalVec, viewVec) / projLength, -1.0f, 1.0f);
+		float sinNorm = sqrt(max(0.0f, 1.0f - cosNorm * cosNorm));
 		float n = signNorm * acos(cosNorm);
+		float sinN = signNorm * sinNorm;
 
 		// Tangent plane lower horizon cosine bounds (zero occlusion)
-		float lowHorizonCos0 = cos(n + HALF_PI);
-		float lowHorizonCos1 = cos(n - HALF_PI);
+		// Derived via trigonometric identities: cos(n +/- PI/2) = -/+ sin(n)
+		float lowHorizonCos0 = -sinN;
+		float lowHorizonCos1 =  sinN;
 
 		float horizonCos0 = lowHorizonCos0;
 		float horizonCos1 = lowHorizonCos1;
@@ -243,8 +248,8 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 		float h1 =  acos(horizonCos0);
 
 		// XeGTAO / Jimenez analytical slice visibility integral
-		float iarc0 = (cosNorm + 2.0f * h0 * sin(n) - cos(2.0f * h0 - n)) * 0.25f;
-		float iarc1 = (cosNorm + 2.0f * h1 * sin(n) - cos(2.0f * h1 - n)) * 0.25f;
+		float iarc0 = (cosNorm + 2.0f * h0 * sinN - cos(2.0f * h0 - n)) * 0.25f;
+		float iarc1 = (cosNorm + 2.0f * h1 * sinN - cos(2.0f * h1 - n)) * 0.25f;
 		float localVisibility = max(0.0f, projLength * (iarc0 + iarc1));
 		if (!isnan(localVisibility) && !isinf(localVisibility))
 		{
