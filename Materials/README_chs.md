@@ -406,6 +406,44 @@ Shading Model ID
 * ##### #define HEX_TILING_SHARPNESS 7.0f
     重心锐化指数（值越大，瓦片中心越清晰）。
 
+* ##### #define HEX_TILING_DISTANCE_LOD 0
+    启用六边形平铺的距离自适应 LOD 衰减。在远距离平滑过渡至 1 次贴图采样，节省显存带宽。
+    使用 `#define HEX_TILING_LOD_START 15.0f` 和 `#define HEX_TILING_LOD_END 35.0f` 设置距离区间。
+
+* ##### #define HEX_TILING_HEIGHT_BLEND 0
+    启用高度图位移置换混合（Frostbite/Unreal height-lerp）。利用高度图缝隙生成锐利、自然的材质分界。
+
+哈希抗锯齿透明裁剪 (Hashed Alpha Testing - Wyman & McGuire 2017):
+---------------------
+* ##### HASHED_ALPHA_TEST_ENABLE
+    在材质 `.fx` 文件中设置 `HASHED_ALPHA_TEST_ENABLE` 为 `1`，用尺度无关随机抖动替换生硬的像素阶梯裁剪。配合 TAA 可实现发丝、睫毛、树叶、蕾丝的柔和半透明边缘，同时保留完整的 G-Buffer 深度和投影接收。
+
+    `0` . 禁用（标准二值剪切）  
+    `1` . 启用哈希透明裁剪  
+
+* ##### #define HASHED_ALPHA_SCALE 1.0f
+    空间哈希频率缩放因子。
+
+细节法线微表面 (Detail Normal Map):
+---------------------
+* ##### DETAIL_MAP_ENABLE
+    设置为 `1` 以通过重新定向法线映射 (RNM) 叠加高频微观法线贴图（皮肤毛孔、布料纹理、石头颗粒），随视距平滑淡出。
+
+    `0` . 禁用  
+    `1` . 启用细节法线贴图  
+
+* ##### #define DETAIL_NORMAL_MAP_FILE "detail_normal.png"
+    微细节法线贴图文件路径。
+
+* ##### const float detailNormalScale = 1.0;
+    细节法线强度缩放。
+
+* ##### const float detailNormalLoopNum = 20.0;
+    微观细节层的 UV 重复次数。
+
+* ##### const float detailFadeDistance = 15.0;
+    细节法线平滑淡出至完全消失的世界距离（米）。
+
 FAQ:
 --------------------
 * What is sRGB-color and Gamma

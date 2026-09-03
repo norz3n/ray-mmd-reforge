@@ -124,9 +124,24 @@ const float customAMapLoopNum = 1.0;
 const float3 customB = 0.0;
 const float2 customBMapLoopNum = 1.0;
 
+// Hex-Tiling (Mikkelsen 2022) — Stochastic seamless texture repetition
 #define HEX_TILING_ENABLE 0
 #define HEX_TILING_ROTATION 1.0f
 #define HEX_TILING_CONTRAST 0.6f
 #define HEX_TILING_SHARPNESS 7.0f
+#define HEX_TILING_DISTANCE_LOD 0
+#define HEX_TILING_LOD_START 15.0f
+#define HEX_TILING_LOD_END 35.0f
+
+// Hashed Alpha Testing (Wyman & McGuire 2017) — Soft anti-aliased hair/foliage cutouts with TAA
+#define HASHED_ALPHA_TEST_ENABLE 0
+#define HASHED_ALPHA_SCALE 1.0f
+
+// Detail Normal Map — Micro-surface relief (skin pores, fabric weave, stone grain)
+#define DETAIL_MAP_ENABLE 0
+#define DETAIL_NORMAL_MAP_FILE "detail_normal.png"
+const float detailNormalScale = 1.0;
+const float detailNormalLoopNum = 20.0;
+const float detailFadeDistance = 15.0;
 
 #include "material_common_2.0.fxsub"

@@ -432,6 +432,44 @@ Hex-Tiling (Mikkelsen 2022):
 * ##### #define HEX_TILING_SHARPNESS 7.0f
     Barycentric sharpening exponent (higher values keep tile centers crisp).
 
+* ##### #define HEX_TILING_DISTANCE_LOD 0
+    Enable distance-adaptive LOD fade for Hex-Tiling. Smoothly transitions from 3 texture samples to 1 sample at distance to save memory bandwidth.
+    Configure fade range with `#define HEX_TILING_LOD_START 15.0f` and `#define HEX_TILING_LOD_END 35.0f`.
+
+* ##### #define HEX_TILING_HEIGHT_BLEND 0
+    Enable height-based displacement blending (Frostbite/Unreal height-lerp). Uses physical relief crevices from height/normal maps for razor-sharp tile boundaries.
+
+Hashed Alpha Testing (Wyman & McGuire 2017):
+---------------------
+* ##### HASHED_ALPHA_TEST_ENABLE
+    Set `HASHED_ALPHA_TEST_ENABLE` to `1` in your material `.fx` file to replace hard cutout alpha testing (`clip`) with scale-invariant stochastic dither. When combined with TAA, produces smooth, soft, anti-aliased transparency on hair, eyelashes, foliage, and cloth while preserving full G-buffer depth and shadow reception.
+
+    `0` . Disabled (standard binary cutout)  
+    `1` . Enable Hashed Alpha Testing  
+
+* ##### #define HASHED_ALPHA_SCALE 1.0f
+    Frequency scaling factor for the spatial hash.
+
+Detail Normal Map (Micro-Surface Layer):
+---------------------
+* ##### DETAIL_MAP_ENABLE
+    Set `DETAIL_MAP_ENABLE` to `1` to overlay a high-frequency micro-normal map (skin pores, fabric weave, stone grain) via Reoriented Normal Mapping (RNM) that smoothly fades out with camera distance.
+
+    `0` . Disabled  
+    `1` . Enable Detail Normal Map  
+
+* ##### #define DETAIL_NORMAL_MAP_FILE "detail_normal.png"
+    Path to the micro-detail normal texture file.
+
+* ##### const float detailNormalScale = 1.0;
+    Intensity scaling factor for the detail normal.
+
+* ##### const float detailNormalLoopNum = 20.0;
+    UV repetition rate for the micro-detail layer.
+
+* ##### const float detailFadeDistance = 15.0;
+    World distance in meters over which the detail normal smoothly fades out to prevent moiré.
+
 FAQ:
 --------------------
 * What is sRGB-color and Gamma

@@ -475,6 +475,17 @@ shared texture Gbuffer8RT: RENDERCOLORTARGET;
 	};
 #endif
 
+#if DETAIL_MAP_ENABLE
+	texture DetailNormalMap<string ResourceName = DETAIL_NORMAL_MAP_FILE;>;
+	sampler DetailNormalMapSamp = sampler_state
+	{
+		texture = DetailNormalMap;
+		MAXANISOTROPY = TEXTURE_ANISOTROPY_LEVEL;
+		MINFILTER = TEXTURE_FILTER; MAGFILTER = TEXTURE_FILTER; MIPFILTER = TEXTURE_MIP_FILTER;
+		ADDRESSU = WRAP; ADDRESSV = WRAP;
+	};
+#endif
+
 struct MaterialParam
 {
 	float3 normal;
@@ -584,6 +595,79 @@ float3 ColorSynthesis(float3 diffuse, float3 m)
 #ifndef OCCLUSION_MAP_HEX_TILING
 #define OCCLUSION_MAP_HEX_TILING HEX_TILING_ENABLE
 #endif
+
+#ifndef HEX_TILING_DISTANCE_LOD
+#define HEX_TILING_DISTANCE_LOD 0
+#endif
+
+#ifndef HEX_TILING_LOD_START
+#define HEX_TILING_LOD_START 15.0f
+#endif
+
+#ifndef HEX_TILING_LOD_END
+#define HEX_TILING_LOD_END 35.0f
+#endif
+
+#ifndef HEX_TILING_HEIGHT_BLEND
+#define HEX_TILING_HEIGHT_BLEND 0
+#endif
+
+#ifndef HEX_TILING_HEIGHT_CONTRAST
+#define HEX_TILING_HEIGHT_CONTRAST 0.2f
+#endif
+
+#ifndef HASHED_ALPHA_TEST_ENABLE
+#define HASHED_ALPHA_TEST_ENABLE 0
+#endif
+
+#ifndef HASHED_ALPHA_SCALE
+#define HASHED_ALPHA_SCALE 1.0f
+#endif
+
+#ifndef DETAIL_MAP_ENABLE
+#define DETAIL_MAP_ENABLE 0
+#endif
+
+#ifndef DETAIL_NORMAL_MAP_FILE
+#define DETAIL_NORMAL_MAP_FILE "detail_normal.png"
+#endif
+
+#ifndef DETAIL_NORMAL_MAP_SCALE
+#define DETAIL_NORMAL_MAP_SCALE 1.0f
+#endif
+
+#ifndef DETAIL_NORMAL_MAP_LOOP_NUM
+#define DETAIL_NORMAL_MAP_LOOP_NUM 20.0f
+#endif
+
+#ifndef DETAIL_MAP_FADE_DIST
+#define DETAIL_MAP_FADE_DIST 15.0f
+#endif
+
+// Wyman & McGuire (I3D 2017): Hashed Alpha Testing
+float HashedAlphaThreshold(float3 pos, float scale)
+{
+	float3 p = pos * scale;
+	float maxDeriv = max(length(ddx(p)), length(ddy(p)));
+	float pixScale = 1.0f / (maxDeriv + 1e-5f);
+	float3 cell = floor(p * pixScale);
+	float h = frac(sin(dot(cell, float3(127.1f, 311.7f, 74.7f))) * 43758.5453f);
+	return clamp(h, 0.001f, 0.999f);
+}
+
+float3 HexHeightBlendWeights(float3 weights, float3 heights, float contrast = 0.2f)
+{
+	float3 combined = weights + heights;
+	float maxH = max(max(combined.x, combined.y), combined.z);
+	float3 blended = max(0.0f, combined - (maxH - contrast));
+	return blended / (blended.x + blended.y + blended.z + 1e-6f);
+}
+
+float3 HexDistanceFadeWeights(float3 weights, float dist, float startDist = 15.0f, float endDist = 35.0f)
+{
+	float fade = saturate((dist - startDist) / max(endDist - startDist, 1e-4f));
+	return lerp(weights, float3(1.0f, 0.0f, 0.0f), fade);
+}
 
 #if HEX_TILING_ENABLE || ALBEDO_MAP_HEX_TILING || NORMAL_MAP_HEX_TILING || NORMAL_SUB_MAP_HEX_TILING || SMOOTHNESS_MAP_HEX_TILING || METALNESS_MAP_HEX_TILING || OCCLUSION_MAP_HEX_TILING
 
@@ -1304,7 +1388,29 @@ float3 GetMainNormal(float3 N, float3 P, float2 coord)
 		tangentNormal = normalize(tangentNormal);
 	#endif
 
+#if DETAIL_MAP_ENABLE
+	float detailDist = distance(P, CameraPosition);
+	float detailFade = saturate(1.0f - detailDist / max(DETAIL_MAP_FADE_DIST, 1e-3f));
+	if (detailFade > 0.0f)
+	{
+		float3 detailN = tex2D(DetailNormalMapSamp, coord * DETAIL_NORMAL_MAP_LOOP_NUM).rgb * 2.0f - 1.0f;
+		detailN.xy *= DETAIL_NORMAL_MAP_SCALE * detailFade;
+		detailN = normalize(detailN);
+		tangentNormal = RNMBlendUnpacked(tangentNormal, detailN);
+	}
+#endif
+
 	return tangentNormal;
+#elif DETAIL_MAP_ENABLE
+	float detailDist = distance(P, CameraPosition);
+	float detailFade = saturate(1.0f - detailDist / max(DETAIL_MAP_FADE_DIST, 1e-3f));
+	if (detailFade > 0.0f)
+	{
+		float3 detailN = tex2D(DetailNormalMapSamp, coord * DETAIL_NORMAL_MAP_LOOP_NUM).rgb * 2.0f - 1.0f;
+		detailN.xy *= DETAIL_NORMAL_MAP_SCALE * detailFade;
+		return normalize(detailN);
+	}
+	return float3(0, 0, 1);
 #else
 	return float3(0, 0, 1);
 #endif
@@ -2014,7 +2120,12 @@ GbufferParam MaterialPS(
 
 	// ponytail: perform early alpha clip before expensive POM raymarching
 	float alpha = GetAlpha(coord0);
+#if HASHED_ALPHA_TEST_ENABLE
+	float hashedThreshold = HashedAlphaThreshold(worldPos.xyz, HASHED_ALPHA_SCALE);
+	clip(alpha - hashedThreshold);
+#else
 	clip(alpha - ALPHA_THRESHOLD);
+#endif
 #if ALPHA_MAP_FROM == 2
 	clip(-1);
 #endif
@@ -2095,7 +2206,12 @@ GbufferParam Material2PS(
 
 	// ponytail: perform early alpha clip before expensive POM raymarching
 	float alpha = GetAlpha(coord0);
+#if HASHED_ALPHA_TEST_ENABLE
+	float hashedThreshold2 = HashedAlphaThreshold(worldPos.xyz, HASHED_ALPHA_SCALE);
+	clip(alpha - hashedThreshold2);
+#else
 	clip(alpha - 0.01);
+#endif
 
 #if PARALLAX_MAP_FROM
 	#if PARALLAX_MAP_UV_FLIP
@@ -2161,7 +2277,9 @@ GbufferParam Material2PS(
 	material.visibility = GetOcclusion(coord0) * pomShadow2;
 #endif
 	material.lightModel = GetLightMode(material);
-#if ALPHA_MAP_FROM == 2
+#if HASHED_ALPHA_TEST_ENABLE
+	material.alpha = alpha > hashedThreshold2 ? 0 : alpha;
+#elif ALPHA_MAP_FROM == 2
 	material.alpha = alpha;
 #else
 	material.alpha = alpha > ALPHA_THRESHOLD ? 0 : alpha;

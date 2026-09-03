@@ -194,6 +194,43 @@ HexTilingContext MakeHexTilingContext(float2 st, float rotStrength = 1.0f)
 }
 
 /**
+ * Height-blend weight calculator for displacement-based tile transitions.
+ *
+ * Implements height-lerp (Frostbite/Unreal style):
+ * Combines barycentric weights with local height field values to produce sharp, crevice-following seams.
+ *
+ * @param weights 3-component barycentric weight vector.
+ * @param heights 3-component heightfield sample values [0, 1].
+ * @param contrast Transition contrast width in (0, 1]. Smaller = sharper transition.
+ * @return float3 Normalized height-blended weights.
+ */
+float3 HexHeightBlendWeights(float3 weights, float3 heights, float contrast = 0.2f)
+{
+    float3 combined = weights + heights;
+    float maxH = max(max(combined.x, combined.y), combined.z);
+    float3 blended = max(0.0f, combined - (maxH - contrast));
+    return blended / (blended.x + blended.y + blended.z + 1e-6f);
+}
+
+/**
+ * Distance-adaptive LOD fade for Hex-Tiling weights.
+ *
+ * As distance from camera increases from startDist to endDist, smoothly collapses
+ * the barycentric weights towards the dominant primary cell (weights.x).
+ *
+ * @param weights Initial 3-component barycentric weights.
+ * @param dist Distance from surface point to camera in world units.
+ * @param startDist Distance where fade begins.
+ * @param endDist Distance where fade finishes (collapses to 1-tap sampling).
+ * @return float3 Distance-attenuated barycentric weights.
+ */
+float3 HexDistanceFadeWeights(float3 weights, float dist, float startDist = 15.0f, float endDist = 35.0f)
+{
+    float fade = saturate((dist - startDist) / max(endDist - startDist, 1e-4f));
+    return lerp(weights, float3(1.0f, 0.0f, 0.0f), fade);
+}
+
+/**
  * Samples a color, albedo, or packed roughness/metallic/AO map with Hex-Tiling using a precomputed context.
  *
  * Uses luminance-weighted blending to give higher influence to high-contrast features, avoiding muddy seams.
