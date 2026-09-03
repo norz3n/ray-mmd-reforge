@@ -24,11 +24,12 @@ Requirement :
 * Direct3D 9 With Shader Model 3.0 (ps_3_0)
 * **Powerful GPU recommended** due to advanced shading techniques.
 
-Reforge Exclusive Features (through v1.17.0) :
+Reforge Exclusive Features (through v1.19.0) :
 ------------
 
 **Direct Screen-Space Core**
-* **Direct 1:1 Screen-Space Architecture**: eliminated the heavy 11-pass hierarchical depth pyramid (Hi-Z), freeing 11 RenderTarget textures in VRAM and removing per-frame downsampling passes in favor of direct G-buffer raymarching and Newton root-finding.
+* **Direct 1:1 Screen-Space Architecture**: eliminated the heavy 11-pass hierarchical depth pyramid (Hi-Z), freeing 11 RenderTarget textures in VRAM and removing per-frame downsampling passes in favor of direct G-buffer raymarching, McGuire 2014 2D DDA, and Newton root-finding.
+* **Octahedral Normal Encoding**: compact and high-precision octahedral representation for unit normal vectors in G-buffer and math pipelines.
 
 **Global Illumination**
 * **Screen Space Global Illumination (SSGI)**: rewritten modular architecture using hybrid linear-quadratic raymarching at full 1:1 resolution, replacing both legacy VXGI and Hi-Z dependent traces.
@@ -38,36 +39,38 @@ Reforge Exclusive Features (through v1.17.0) :
 * **Photometric Compression**: Reinhard soft-knee curve for natural dynamic range in lit scenes.
 
 **Reflections & Occlusion**
-* **PBR Screen-Space Reflections**: binary-search refinement, depth-aware bilateral blur, edge fade, and energy-conserving BRDF integration.
+* **McGuire 2014 2D DDA Screen-Space Reflections**: full-featured screen-space ray tracing engine with hybrid bisection & secant root-finding, subpixel binary refinement, and LOD-0 mirror gloss resolve without jitter or contact gaps.
+* **Ground-Truth Ambient Occlusion (GTAO / GTSO)**: reference XeGTAO cosine horizon integration, Jimenez multi-bounce approximation, temporal history stabilization, and directional bent normals.
 * **Hybrid HBAO / SSDO**: horizon-based and directional occlusion for accurate contact shading.
 * **Contact Shadows**: screen-space contact shadows with depth-discontinuity artifact fixes.
-* **Directional Bent Normals**: occlusion-aware normal bending for more believable indirect shading.
 
 **Lighting & Shadows**
+* **Percentage-Closer Soft Shadows (PCSS)**: contact-hardening soft shadows for cascaded directional sun lights with world-space continuity, dynamic blocker search, and soft penumbra filtering.
+* **Directional Water Caustics**: real-time focused underwater light bands and wave curvature flux concentration with chromatic dispersion and a dedicated controller (`CausticsController.pmx`).
 * **Variance Shadow Maps**: ultra-clean high-resolution sun shadows, completely grain-free on character faces, with rotated Vogel-disk PCF filtering to eliminate staircasing and acne.
 * **Screen-Space Global Shadows (SSGS)**: long-range directional raymarched shadows with distance-adaptive soft penumbra expansion, grounding characters and geometry without shadow map dependence.
-* **Dithered Volumetrics**: interleaved gradient noise for godrays and volumetric fog — smooth gradients without banding.
+* **Volumetric Atmosphere & Dynamic Clouds**: SA_DirectX 3.0 cumulus cloudscapes with Frostbite/Nubis lighting, Beer-Powder scattering, Silver Lining, planetary horizon curvature, and anti-tiling domain warping.
 
-**Materials**
-* **Dual-Lobe Skin Specular**: physically based dermal reflectance with strict light absorption for natural skin tone under GI.
-* **Analytic Pre-Integrated Skin Shading**: dynamic-curvature subsurface scattering, screen-space depth-thickness measurement, and physical forward transmission for organic translucency. Scale-invariant, so miniature models scatter correctly too.
+**Materials & BRDF**
+* **Energy-Preserving Oren-Nayar (EON) BRDF**: exact Portsmouth, Kutz & Hill (JCGT 2025) diffuse model preserving energy across all roughness levels.
+* **Dual-Lobe Skin Specular & Multi-Spectral SSS**: physically based dermal reflectance with auto-absorption subsurface scattering and chromatic dispersion along the shadow terminator.
+* **Procedural Eye Cornea Parallax & Micro-Glitter**: true refractive cornea dome with iris parallax depth mapping (`material_eye_anime.fx`) and multi-layer procedural micro-glitter sparkle presets (`material_glitter.fx`).
 * **Procedural Hair Materials**: mathematical anisotropic hair normals plus Kajiya-Kay highlights — ported hbee hair presets with no heavy static textures.
-* **Physical Cloth & ClearCoat**: rewritten BRDFs with cloth-DFG and Charlie Sheen distribution.
-* **Procedural Eyes**: spherical corneal dome normal generation with limbal ring, UV-atlas safe, and CONVEX_NORMAL inversion mode for concave eye meshes. Dedicated Cornea ClearCoat eye materials included.
-* **Glass Pipeline**: tinted glass presets inheriting MMD diffuse color, chromatic-dispersion refraction, and ultrafast Newton's method screen-space refraction root-finding (Mayer et al. 2026) converging in 3–4 iterations directly against the G-buffer.
+* **Physical Cloth & ClearCoat**: rewritten BRDFs with cloth-DFG and upgraded Charlie Sheen distribution.
+* **Ultrafast Glass Refraction**: Newton's method screen-space refraction root-finding (Mayer et al. 2026) converging in 3–4 iterations directly against the G-buffer with chromatic dispersion.
 * **Forced Transparency Presets**: make an opaque PMX material transparent without editing the model — plain and glass (SHADINGMODELID_GLASS refraction) variants, shaded through the alpha gbuffer with the model's own texture and MMD diffuse.
 * **Wetness Special-Case Material**: now with ordered-dither alpha clipping; alpha cutout threshold unified at 0.5 across all passes.
 * **Procedural Foliage Wind**: vertex wind animation engine with four vegetation presets.
-* **Advanced Surface Detail**: thin-film iridescence, specular geometric anti-aliasing, Ultra Quality bump maps, and expanded Auto-Normal material presets.
+* **Advanced Surface Detail**: thin-film iridescence, specular geometric anti-aliasing (LEAN/CLEAN), Ultra Quality bump maps, and expanded Auto-Normal material presets.
 
-**Post-Processing**
-* **AgX Tone Mapping**: exact 6th-order polynomial implementation of the official Blender 4.0 AgX mapper (default), with an ACES-fitted option.
-* **Camera Motion Blur**: cinematic screen-space velocity motion blur reconstructed from camera view-projection history, universal across all AA modes with 12-tap linear accumulation and shutter control.
-* **Spectral / Chromatic Bloom**: physical radial wavelength dispersion across bloom tiers simulating anamorphic/optical lens dispersion.
+**Post-Processing & Anti-Aliasing**
+* **G-DLAA Anti-Aliasing**: hybrid geometric and directionally adaptive anti-aliasing (`AA_QUALITY 7`) preserving sharp silhouette edges.
 * **Temporal Anti-Aliasing (TAA)**: 5-tap Catmull-Rom bicubic history reconstruction, Karis luma weighting, variance clipping, and depth-validated history.
-* **Cinematic Bokeh DOF**: clean-room hexagonal and cinematic bokeh with blade count control.
-* **Anti-Firefly Bloom**: Karis 13-tap downsampling filter with a soft-knee curve.
-* **Image Enhancement**: AMD FidelityFX CAS sharpening, procedural cinematic film grain, and a Panavision anamorphic lens flare profile.
+* **AgX Tone Mapping**: exact 6th-order polynomial implementation of the official Blender 4.0 AgX mapper (default), with an ACES-fitted option.
+* **Camera & Object Motion Blur**: cinematic screen-space velocity motion blur reconstructed from camera view-projection history and animated mesh velocity maps.
+* **Spectral / Chromatic Bloom & Halation**: physical radial wavelength dispersion and 35mm film halation (Kodak Vision3 emulsion bleed).
+* **Cinematic Bokeh DOF**: hexagonal and cinematic bokeh with Cat's Eye optical mechanical vignetting deformation.
+* **Anti-Firefly Bloom & FidelityFX CAS**: Karis 13-tap downsampling filter and AMD FidelityFX Contrast Adaptive Sharpening.
 * **2-Band Cel-Shading**: optional stylized ramp integrated into the lighting path.
 
 **Toon Rendering**
@@ -159,13 +162,25 @@ Credits :
 --------
 * PBR Screen-Space Reflections based on Morgan McGuire & Michael Mara (2014) 2D DDA ray traversal.
 * Ultrafast Screen-Space Refractions via Newton's Method based on Chase Mayer, Ulf Assarsson & Erik Sintorn (JCGT 2026).
+* Energy-Preserving Oren-Nayar (EON) diffuse BRDF based on Jamie Portsmouth, Peter Kutz & Stephen Hill (JCGT 2025).
+* Percentage-Closer Soft Shadows (PCSS) based on Randima Fernando (NVIDIA 2005).
+* Ground-Truth Ambient Occlusion (GTAO) based on Jorge Jimenez, Xian-Chun Wu, Angelo Pesce, Adrian Jarabo (Activision 2016).
+* Directionally Adaptive Anti-Aliasing (DLAA / G-DLAA) based on Dmitry Andreev (LucasArts / Game Developer 2011).
+* Volumetric Cumulus Cloud Modeling & Lighting based on SA_DirectX 3.0 and Frostbite/Nubis (Decima Engine / Guerrilla Games).
 * HBSSDO rendering concepts referenced from [dendewa](https://dendewa.vercel.app/).
 * AgX Tone Mapping per the official Blender 4.0 implementation ([link](https://github.com/EaryChow/AgX)).
 * Karis anti-firefly downsampling and luma weighting from Brian Karis' "Next Generation Post Processing in Call of Duty: Advanced Warfare".
 
 References :
 --------
+* An Energy-Preserving Oren-Nayar Diffuse BRDF (Portsmouth, Kutz, Hill) \[[link](https://jcgt.org/published/0014/01/01/) | [PDF](./ref-docs/Portsmouth2025EON.pdf)\].
 * Ultrafast Screen-Space Refractions and Caustics via Newton's Method \[[link](https://jcgt.org/published/0015/01/03/)\].
+* Efficient GPU Screen-Space Ray Tracing (McGuire & Mara) \[[link](https://jcgt.org/published/0003/03/04/)\].
+* Percentage-Closer Soft Shadows (Fernando, NVIDIA) \[[link](https://developer.download.nvidia.com/shaderlibrary/docs/shadow_PCSS.pdf)\].
+* Practical Real-Time Strategies for Accurate Indirect Occlusion (GTAO, Jimenez et al.) \[[link](https://www.activision.com/cdn/research/Practical_Real_Time_Strategies_for_Accurate_Indirect_Occlusion_NEW%20VERSION_一提.pdf)\].
+* Directionally Adaptive Anti-Aliasing (Andreev) \[[link](https://www.gamedeveloper.com/programming/directionally-adaptive-anti-aliasing-dlaa-)\].
+* Real-Time Volumetric Cloudscapes (Nubis / Decima) \[[link](https://advances.realtimerendering.com/s2017/Nubis%20-%20Authoring%20Realtime%20Volumetric%20Cloudscapes%20with%20the%20Decima%20Engine%20-%20Final%20.pdf)\].
+* A Survey of Efficient Representations for Independent Unit Vectors \[[link](https://jcgt.org/published/0003/02/01/)\].
 * Moving to the Next Generation - The Rendering Technology of Ryse \[[link](http://www.crytek.com/download/2014_03_25_CRYENGINE_GDC_Schultz.pdf)\].
 * ACES Filmic Tone Mapping Curve \[[link](https://knarkowicz.wordpress.com/2016/08/31/hdr-display-first-steps/)\].
 * Compact Normal Storage for small G-Buffers \[[link](http://aras-p.info/texts/CompactNormalStorage.html)\].
