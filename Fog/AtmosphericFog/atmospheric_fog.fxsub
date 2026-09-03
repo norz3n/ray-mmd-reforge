@@ -77,6 +77,12 @@ float4 AtmosphericFogPS(
 	clip(MRT8.x - 1e-5);
 
 	float linearDepth = MRT8.x;
+	int lightModel = DecodeLightModel(MRT8);
+	if (lightModel == SHADINGMODELID_GLASS)
+	{
+		float bgDepth = tex2Dlod(Gbuffer4Map, float4(coord, 0, 0)).r;
+		linearDepth = (bgDepth > 1e-4f) ? bgDepth : 0.0f;
+	}
 
 	float3 V = normalize(viewdir);
 	float3 L = mul(SunDirection, (float3x3)matView);
@@ -155,7 +161,14 @@ float4 AtmosphericScatteringPS(
 
 	float3 V = normalize(viewdir);
 	float3 L = mul(SunDirection, (float3x3)matView);
-	float3 fogAmount = ComputeSkyFogRayleigh(V, L, mieLambda, rayleight, mFogMiePhase, mFogRange, mFogDensity, material.linearDepth) * mFogIntensity;
+	float fogDepth = material.linearDepth;
+	if (material.lightModel == SHADINGMODELID_GLASS)
+	{
+		float bgDepth = tex2Dlod(Gbuffer4Map, float4(coord, 0, 0)).r;
+		fogDepth = (bgDepth > 1e-4f) ? bgDepth : 0.0f;
+	}
+
+	float3 fogAmount = ComputeSkyFogRayleigh(V, L, mieLambda, rayleight, mFogMiePhase, mFogRange, mFogDensity, fogDepth) * mFogIntensity;
 
 #if FOG_DISCARD_SKY
 	if (sum(material.albedo + material.specular) <= 1e-5)
@@ -163,7 +176,7 @@ float4 AtmosphericScatteringPS(
 #endif
 
 	float4 fogBlur = tex2Dlod(FogBlurMapSamp, float4(coord + ViewportOffset, 0, 0));
-	return float4(fogAmount + fogBlur, luminance(mWaveLength) * material.linearDepth * mFogDensity);
+	return float4(fogAmount + fogBlur, luminance(mWaveLength) * fogDepth * mFogDensity);
 }
 
 const float4 BackColor = 0.0;

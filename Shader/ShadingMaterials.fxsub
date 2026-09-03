@@ -417,6 +417,14 @@ bool NewtonRefractionTrace(
 }
 #endif
 
+float3 SampleBackgroundScene(float2 sampleUV)
+{
+	float bgDepth = tex2Dlod(Gbuffer4Map, float4(sampleUV, 0.0f, 0.0f)).r;
+	float3 bgOpaque = tex2Dlod(ShadingMapTempPointSamp, float4(sampleUV, 0.0f, 0.0f)).rgb;
+	float3 bgSky = srgb2linear(tex2Dlod(ScnSamp, float4(sampleUV, 0.0f, 0.0f)).rgb);
+	return (bgDepth <= 1e-4f) ? bgSky : (any(bgOpaque) ? bgOpaque : bgSky);
+}
+
 float4 ShadingTransparentPS(
 	in float2 coord: TEXCOORD0, 
 	in float3 viewdir: TEXCOORD1, 
@@ -433,6 +441,11 @@ float4 ShadingTransparentPS(
 	DecodeGbuffer(MRT5, MRT6, MRT7, MRT8, material);
 
 	float3 V = normalize(viewdir);
+	// Two-sided normal for transparent thin surfaces (windshields, windows):
+	// If viewed from inside (backface), flip normal so it points towards the camera
+	if (dot(material.normal, V) < 0.0f)
+		material.normal = -material.normal;
+
 	float3 L = mul(-SunDirection, (float3x3)matView);
 
 	float3 lighting = 0;
@@ -467,13 +480,9 @@ float4 ShadingTransparentPS(
 		float2 iorG = ior * 1.00f;
 		float2 iorB = ior * 1.10f;
 
-		float3 bgR = tex2Dlod(ShadingMapTempPointSamp, float4(coord + iorR, 0, 0)).rgb;
-		float3 bgG = tex2Dlod(ShadingMapTempPointSamp, float4(coord + iorG, 0, 0)).rgb;
-		float3 bgB = tex2Dlod(ShadingMapTempPointSamp, float4(coord + iorB, 0, 0)).rgb;
-
-		bgR = any(bgR) ? bgR : srgb2linear(tex2Dlod(ScnSamp, float4(coord + iorR, 0, 0)).rgb);
-		bgG = any(bgG) ? bgG : srgb2linear(tex2Dlod(ScnSamp, float4(coord + iorG, 0, 0)).rgb);
-		bgB = any(bgB) ? bgB : srgb2linear(tex2Dlod(ScnSamp, float4(coord + iorB, 0, 0)).rgb);
+		float3 bgR = SampleBackgroundScene(coord + iorR);
+		float3 bgG = SampleBackgroundScene(coord + iorG);
+		float3 bgB = SampleBackgroundScene(coord + iorB);
 
 		prefilteredRefract = float3(bgR.r, bgG.g, bgB.b);
 
@@ -484,50 +493,50 @@ float4 ShadingTransparentPS(
 			float2 o1 = float2(0.7071f, 0.7071f) * blurRadius;
 			float2 o2 = float2(-0.7071f, 0.7071f) * blurRadius;
 			float3 blurBg = prefilteredRefract * 0.36f;
-			blurBg += tex2Dlod(ShadingMapTempPointSamp, float4(coord + ior + o1, 0, 0)).rgb * 0.16f;
-			blurBg += tex2Dlod(ShadingMapTempPointSamp, float4(coord + ior - o1, 0, 0)).rgb * 0.16f;
-			blurBg += tex2Dlod(ShadingMapTempPointSamp, float4(coord + ior + o2, 0, 0)).rgb * 0.16f;
-			blurBg += tex2Dlod(ShadingMapTempPointSamp, float4(coord + ior - o2, 0, 0)).rgb * 0.16f;
+			blurBg += SampleBackgroundScene(coord + ior + o1) * 0.16f;
+			blurBg += SampleBackgroundScene(coord + ior - o1) * 0.16f;
+			blurBg += SampleBackgroundScene(coord + ior + o2) * 0.16f;
+			blurBg += SampleBackgroundScene(coord + ior - o2) * 0.16f;
 			prefilteredRefract = blurBg;
 		}
 
 #if GLASS_REFRACTION
-		// Newton's Method Screen-Space Refraction (Mayer et al. 2026, JCGT).
-		// Solves root finding along the refracted ray with quadratic convergence in 3-4 steps.
-		// Directly queries 1:1 G-buffer without hierarchical Hi-Z DDA raymarching overhead.
-		float4 projConstant = GetProjConstant();
-		float3 posVS = viewdir * (material.linearDepth / viewdir.z);
-		float3 refractDir = refract(-V, material.normal, eta);
-		if (dot(refractDir, refractDir) > 1e-4f)
+		// Newton screen-space trace for thick solid geometry (customDataA > 1.5).
+		// Planar surfaces (windshields, windows) use thin-sheet chromatic refraction above.
+		if (material.customDataA > 1.5f)
 		{
-			float3 refrOrigin = posVS + refractDir * (mSSROffset * 2.0f);
-			float2 hitUV;
-			if (NewtonRefractionTrace(refrOrigin, refractDir, coord, material.linearDepth, projConstant, hitUV))
+			float4 projConstant = GetProjConstant();
+			float3 posVS = viewdir * (material.linearDepth / viewdir.z);
+			float3 refractDir = refract(-V, material.normal, eta);
+			if (dot(refractDir, refractDir) > 1e-4f)
 			{
-				float2 deltaUV = hitUV - coord;
-				float2 uvR = coord + deltaUV * 0.95f;
-				float2 uvG = hitUV;
-				float2 uvB = coord + deltaUV * 1.05f;
+				float3 refrOrigin = posVS + refractDir * (mSSROffset * 2.0f);
+				float2 hitUV;
+				if (NewtonRefractionTrace(refrOrigin, refractDir, coord, material.linearDepth, projConstant, hitUV))
+				{
+					float2 deltaUV = clamp(hitUV - coord, -0.04f, 0.04f);
+					float2 uvR = coord + deltaUV * 0.95f;
+					float2 uvG = coord + deltaUV;
+					float2 uvB = coord + deltaUV * 1.05f;
 
-				float3 tracedR = tex2Dlod(ShadingMapTempPointSamp, float4(uvR, 0, 0)).rgb;
-				float3 tracedG = tex2Dlod(ShadingMapTempPointSamp, float4(uvG, 0, 0)).rgb;
-				float3 tracedB = tex2Dlod(ShadingMapTempPointSamp, float4(uvB, 0, 0)).rgb;
+					float3 tracedR = SampleBackgroundScene(uvR);
+					float3 tracedG = SampleBackgroundScene(uvG);
+					float3 tracedB = SampleBackgroundScene(uvB);
 
-				tracedR = any(tracedR) ? tracedR : srgb2linear(tex2Dlod(ScnSamp, float4(uvR, 0, 0)).rgb);
-				tracedG = any(tracedG) ? tracedG : srgb2linear(tex2Dlod(ScnSamp, float4(uvG, 0, 0)).rgb);
-				tracedB = any(tracedB) ? tracedB : srgb2linear(tex2Dlod(ScnSamp, float4(uvB, 0, 0)).rgb);
-
-				float3 tracedBg = float3(tracedR.r, tracedG.g, tracedB.b);
-				prefilteredRefract = lerp(tracedBg, prefilteredRefract, glassRoughness * 0.5f);
+					float3 tracedBg = float3(tracedR.r, tracedG.g, tracedB.b);
+					prefilteredRefract = lerp(tracedBg, prefilteredRefract, glassRoughness * 0.5f);
+				}
 			}
 		}
 #endif
 
-		float3 dielectricColor = max(0.02, material.albedo);
+		// Guard against dark/black PMX diffuse textures authored as transparency hacks in MMD
+		float3 dielectricColor = (luminance(material.albedo) <= 0.05f) ? float3(1.0f, 1.0f, 1.0f) : material.albedo;
 		float3 trans = lerp(material.specular, 1.0, (1 - saturate(dot(normalize((L + V) / 2), -L))));
 		float3 fresnel = FresnelSchlickGlass(material.normal, V, material.smoothness, material.specular);
 
-		lighting = lerp(prefilteredRefract * dielectricColor, lighting, fresnel * material.alpha);
+		// Physical Fresnel reflection for EnvLight and specular (not attenuated by internal alpha flag)
+		lighting = lerp(prefilteredRefract * dielectricColor, lighting, fresnel);
 		lighting += material.customDataA * material.customDataB * trans * saturate(dot(material.normal, -L));
 	}
 	else
@@ -538,7 +547,8 @@ float4 ShadingTransparentPS(
 	}
 
 #if FOG_ENABLE
-	if (material.lightModel != SHADINGMODELID_GLASS)
+	float bgDepth = tex2Dlod(Gbuffer4Map, float4(coord, 0, 0)).r;
+	if (bgDepth > 1e-4f)
 	{
 		float4 fog = tex2Dlod(FogMapSamp, float4(coord, 0, 0));
 		lighting *= exp(-fog.a);

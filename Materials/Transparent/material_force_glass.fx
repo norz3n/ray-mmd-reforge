@@ -13,7 +13,7 @@
 #define ALBEDO_MAP_FROM 3 // model's own texture (no albedo.png needed)
 #define ALBEDO_MAP_UV_FLIP 0
 #define ALBEDO_MAP_APPLY_SCALE 0
-#define ALBEDO_MAP_APPLY_DIFFUSE 1
+#define ALBEDO_MAP_APPLY_DIFFUSE 0
 #define ALBEDO_MAP_APPLY_MORPH_COLOR 0
 #define ALBEDO_MAP_FILE "albedo.png"
 
@@ -121,7 +121,7 @@ const float2 emissiveMapLoopNum = 1.0;
 #define CUSTOM_A_MAP_APPLY_SCALE 0
 #define CUSTOM_A_MAP_FILE "custom.png"
 
-const float customA = 8.0; // refraction strength (screen-space bend); 1 = barely visible, raise for thicker glass
+const float customA = 0.3; // subtle, natural thin-glass refraction (no warping)
 const float customAMapLoopNum = 1.0;
 
 #define CUSTOM_B_MAP_FROM 0
