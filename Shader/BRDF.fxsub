@@ -100,7 +100,8 @@ float3 SubsurfaceShadingPreIntegratedSkin(MaterialParam material, float3 N, floa
 	float curvature = max(material.customDataA, 0.01f);
 	float scatter = saturate(curvature * 2.5f);
 	
-	float3 wrap = float3(0.6f, 0.2f, 0.05f) * scatter;
+	// Wavelength-dependent wrap: red penetrates deepest (0.40), green moderately (0.18), blue minimally (0.06)
+	float3 wrap = float3(0.40f, 0.18f, 0.06f) * scatter;
 	float3 ndotl_wrap = saturate((ndotl + wrap) / (1.0f + wrap));
 	float3 scatter_profile = ndotl_wrap * ndotl_wrap;
 	
@@ -108,13 +109,13 @@ float3 SubsurfaceShadingPreIntegratedSkin(MaterialParam material, float3 N, floa
 	float edge_mask = saturate(1.0f - abs(ndotl));
 	float3 blood_scatter = float3(0.35f, 0.04f, 0.01f) * edge_mask * scatter * energy_normalization;
 	
-	// Chromatic dispersion fringe along terminator
+	// Saturated chromatic dispersion fringe along the shadow boundary (Penner terminator glow)
 	float terminatorFringe = exp(-pow2(ndotl / max(curvature * 0.35f, 0.08f))) * scatter;
-	float3 chromaticBlood = float3(0.40f, 0.08f, 0.01f) * terminatorFringe;
+	float3 chromaticBlood = float3(0.45f, 0.08f, 0.015f) * terminatorFringe;
 
 	float3 brdf = (scatter_profile * energy_normalization) + blood_scatter + chromaticBlood;
 	float3 sssColor = ComputeSpectralSubsurfaceColor(material.albedo, material.customDataB);
-	return sssColor * brdf;
+	return lerp(brdf, brdf * sssColor, 0.5f);
 }
 
 float BurleyBRDF(float nl, float nv, float vh, float roughness)
@@ -578,9 +579,8 @@ float3 SubsurfaceShading(MaterialParam material, float3 N, float3 L, float3 V, f
 	[branch]
 	if (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE)
 	{
-		float3 forwardSSS = SubsurfaceShadingPennerSkin(material, N, L);
 		float3 transmittance = SubsurfaceTranslucency(material, N, L, V, coord);
-		return forwardSSS + transmittance;
+		return transmittance;
 	}
 	else
 		return 0;
@@ -589,13 +589,15 @@ float3 SubsurfaceShading(MaterialParam material, float3 N, float3 L, float3 V, f
 float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, float shadow, float normalizeFactor = 1.0)
 {
 	float nl = dot(N, L);
+	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
+
 #if TOON_ENABLE
-	// Half-Lambert cel ramps are defined on the back side too (deep shadow band);
-	// only the PBR path early-outs at the terminator
-	if (nl <= 0.0f && material.lightModel != SHADINGMODELID_CEL)
+	// Half-Lambert cel ramps and skin wrap are defined into shadow;
+	// only standard PBR hard-terminates at nl <= 0
+	if (nl <= (isSkin ? -0.35f : 0.0f) && material.lightModel != SHADINGMODELID_CEL)
 		return (float2x3)0;
 #else
-	if (nl <= 0.0f)
+	if (nl <= (isSkin ? -0.35f : 0.0f))
 		return (float2x3)0;
 #endif
 
@@ -610,7 +612,6 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 	roughness = FilterGeometricRoughness(roughness, N);
 	float occlusion = ComputeAmbientMicroOcclusion(saturate(nl), material.visibility) * shadow;
 
-	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
 	float diffuseOcclusion = isSkin ? lerp(1.0f, occlusion, SKIN_AO_STRENGTH) : occlusion;
 
 #if TOON_ENABLE
@@ -629,10 +630,21 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 			// Same as CEL: terminator from the geometry shadow only, AO must not shift the ramp edge
 			diffuse = ToonBasedShading(nl, vh, nv, toonShadow, material.specular, shadow, roughness, material.customDataA);
 	}
+	else if (isSkin)
+	{
+		diffuse = SubsurfaceShadingPreIntegratedSkin(material, N, L) * diffuseOcclusion;
+	}
 	else
-		diffuse = DiffuseBRDF(N, L, V, roughness) * nl * diffuseOcclusion;
+	{
+		diffuse = DiffuseBRDF(N, L, V, roughness) * max(nl, 0.0f) * diffuseOcclusion;
+	}
 #else
-	float3 diffuse = DiffuseBRDF(N, L, V, roughness) * nl * diffuseOcclusion;
+	float3 diffuse = 0;
+	[branch]
+	if (isSkin)
+		diffuse = SubsurfaceShadingPreIntegratedSkin(material, N, L) * diffuseOcclusion;
+	else
+		diffuse = DiffuseBRDF(N, L, V, roughness) * max(nl, 0.0f) * diffuseOcclusion;
 #endif
 
 	float3 specular = 0;
