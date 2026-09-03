@@ -7,6 +7,109 @@ float3 ComputeSunIntensity(float zenithAngleCos, float EE = 10)
 	return EE * saturate(1.0f - exp(-((cutoffAngle - acos(zenithAngleCos)) / steepness))) / PI;
 }
 
+#if WATER_CAUSTICS_ENABLE
+/**
+ * Analytical Screen-Space Directional Water Caustics.
+ *
+ * Back-projects submerged scene fragments along SunDirection to the water surface plane.
+ * Evaluates the light deflection Jacobian matrix det(J) = det(I - d * (n - 1) * H)
+ * from the Hessian curvature tensor of dual-scale Gerstner wave harmonics.
+ * Focus lines (det(J) -> 0) form physical caustic networks (Wallace / Renou area ratio).
+ *
+ * Includes:
+ * - Multi-harmonic Gerstner wave curvature and Jacobian determinant calculation.
+ * - Tri-band chromatic dispersion (wavelength-dependent focal divergence for R/G/B).
+ * - Exponential Beer-Lambert depth absorption (denser absorption of red wavelengths in water).
+ * - Direct solar shadow gating from ShadowMapSamp.
+ *
+ * @param worldPos      Reconstructed fragment position in World Space.
+ * @param normalVS      Surface normal in View Space.
+ * @param shadow        Sun shadow factor (0 = full shadow, 1 = unshadowed).
+ * @param lightColor    Incident direct sun irradiance.
+ * @return Spectral caustics radiance to be added to diffuse lighting.
+ */
+float3 ComputeWaterCaustics(float3 worldPos, float3 normalVS, float shadow, float3 lightColor)
+{
+	if (mCausticsIntensity <= 1e-4f || shadow <= 1e-3f)
+		return 0;
+
+	float depth = mWaterHeight - worldPos.y;
+	if (depth <= 0.01f)
+		return 0;
+
+	float sunCos = -SunDirection.y;
+	if (sunCos <= 0.02f)
+		return 0;
+
+	float3 L = mul(-SunDirection, (float3x3)matView);
+	float NdotL = saturate(dot(normalVS, L));
+	if (NdotL <= 1e-4f)
+		return 0;
+
+	// Back-project ray along sunlight direction to water surface plane
+	float tSun = depth / sunCos;
+	float3 waterHitWS = worldPos - SunDirection * tSun;
+
+	// 4 harmonic wave octaves with irrational directional offsets to eliminate periodicity
+	static const float2 WAVE_DIR[4] = {
+		float2( 0.8660f,  0.5000f),
+		float2(-0.4384f,  0.8988f),
+		float2( 0.3126f, -0.9499f),
+		float2(-0.8090f, -0.5878f)
+	};
+	static const float WAVE_FREQ[4]  = { 1.10f, 1.85f, 2.70f, 4.10f };
+	static const float WAVE_SPEED[4] = { 1.20f, 1.55f, 2.05f, 2.45f };
+	static const float WAVE_AMP[4]   = { 0.055f, 0.030f, 0.015f, 0.007f };
+
+	float2 uv = waterHitWS.xz * mCausticsFreqScale;
+
+	float Hxx = 0.0f;
+	float Hzz = 0.0f;
+	float Hxz = 0.0f;
+
+	[unroll]
+	for (int i = 0; i < 4; ++i)
+	{
+		float phase = dot(uv, WAVE_DIR[i]) * WAVE_FREQ[i] + time * (WAVE_SPEED[i] * mCausticsSpeedScale);
+		float s = sin(phase);
+		float k2A = WAVE_AMP[i] * (WAVE_FREQ[i] * WAVE_FREQ[i]);
+
+		Hxx -= k2A * (WAVE_DIR[i].x * WAVE_DIR[i].x) * s;
+		Hzz -= k2A * (WAVE_DIR[i].y * WAVE_DIR[i].y) * s;
+		Hxz -= k2A * (WAVE_DIR[i].x * WAVE_DIR[i].y) * s;
+	}
+
+	// Physical water refractance dispersion coefficients (n - 1) for R, G, B wavelengths
+	static const float3 ETA_DISP_BASE = float3(0.331f, 0.333f, 0.338f);
+	float3 etaDisp = lerp(float3(0.333f, 0.333f, 0.333f), ETA_DISP_BASE, mCausticsDispScale);
+	float effDepth = clamp(depth, 0.05f, 30.0f);
+
+	float3 causticColor = 0;
+
+	[unroll]
+	for (int c = 0; c < 3; ++c)
+	{
+		float alpha = effDepth * etaDisp[c];
+		float Jxx = 1.0f - alpha * Hxx;
+		float Jzz = 1.0f - alpha * Hzz;
+		float Jxz = -alpha * Hxz;
+		float detJ = Jxx * Jzz - Jxz * Jxz;
+
+		// Regularized flux concentration with finite sun angular disc damping
+		float flux = 1.0f / sqrt(detJ * detJ + 0.09f);
+		float sharp = saturate(flux - 0.75f);
+		causticColor[c] = pow(sharp, 2.2f) * 2.8f;
+	}
+
+	// Beer-Lambert physical water absorption (preferential red attenuation)
+	static const float3 WATER_ABSORPTION = float3(0.30f, 0.07f, 0.02f);
+	float waterPath = depth / max(sunCos, 0.1f);
+	float3 transmittance = exp(-WATER_ABSORPTION * waterPath);
+
+	return causticColor * transmittance * lightColor * (shadow * NdotL * mCausticsIntensity);
+}
+#endif
+
 void ShadingMaterial(MaterialParam material, float3 V, float3 L, float2 coord, out float3 diffuse, out float3 specular)
 {
 	float shadow = 1;
@@ -38,6 +141,16 @@ void ShadingMaterial(MaterialParam material, float3 V, float3 L, float2 coord, o
 
 	bool isSkinMat = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
 	diffuse = (energy[0] + subsurface * (isSkinMat ? lerp(1.0f, shadow, SKIN_AO_STRENGTH) : shadow)) * lightColor;
+
+#if WATER_CAUSTICS_ENABLE
+	if (material.lightModel != SHADINGMODELID_GLASS)
+	{
+		float4 projConstant = GetProjConstant();
+		float3 posVS = GetViewPosition(projConstant, coord, material.linearDepth);
+		float3 posWS = mul(float4(posVS, 1.0f), matViewInverse).xyz;
+		diffuse += ComputeWaterCaustics(posWS, material.normal, shadow, lightColor);
+	}
+#endif
 
 	// Energy-budget cap: Lambert + additive SSS (wrap/translucency) may not exceed the incident
 	// sun irradiance — dermal reflectance is applied once later, so any excess here would make

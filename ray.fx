@@ -59,6 +59,33 @@ float mColBalanceBM : CONTROLOBJECT<string name="ray_controller.pmx"; string ite
 float mTemperatureP : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "Temperature+";>;
 float mTemperatureM : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "Temperature-";>;
 
+#if WATER_CAUSTICS_ENABLE
+// CausticsController.pmx (Dedicated separate controller)
+float mCstIntensityP1   : CONTROLOBJECT<string name="CausticsController.pmx"; string item = "Intensity+";>;
+float mCstIntensityM1   : CONTROLOBJECT<string name="CausticsController.pmx"; string item = "Intensity-";>;
+float mCstWaterHeightP1 : CONTROLOBJECT<string name="CausticsController.pmx"; string item = "WaterHeight+";>;
+float mCstWaterHeightM1 : CONTROLOBJECT<string name="CausticsController.pmx"; string item = "WaterHeight-";>;
+float mCstScaleP1       : CONTROLOBJECT<string name="CausticsController.pmx"; string item = "Scale+";>;
+float mCstScaleM1       : CONTROLOBJECT<string name="CausticsController.pmx"; string item = "Scale-";>;
+float mCstSpeedP1       : CONTROLOBJECT<string name="CausticsController.pmx"; string item = "Speed+";>;
+float mCstSpeedM1       : CONTROLOBJECT<string name="CausticsController.pmx"; string item = "Speed-";>;
+float mCstDispersionP1  : CONTROLOBJECT<string name="CausticsController.pmx"; string item = "Dispersion+";>;
+float mCstDispersionM1  : CONTROLOBJECT<string name="CausticsController.pmx"; string item = "Dispersion-";>;
+float3 mCstWaterPos1    : CONTROLOBJECT<string name="CausticsController.pmx"; string item = "Position";>;
+
+float mCstIntensityP2   : CONTROLOBJECT<string name="CausticsController"; string item = "Intensity+";>;
+float mCstIntensityM2   : CONTROLOBJECT<string name="CausticsController"; string item = "Intensity-";>;
+float mCstWaterHeightP2 : CONTROLOBJECT<string name="CausticsController"; string item = "WaterHeight+";>;
+float mCstWaterHeightM2 : CONTROLOBJECT<string name="CausticsController"; string item = "WaterHeight-";>;
+float mCstScaleP2       : CONTROLOBJECT<string name="CausticsController"; string item = "Scale+";>;
+float mCstScaleM2       : CONTROLOBJECT<string name="CausticsController"; string item = "Scale-";>;
+float mCstSpeedP2       : CONTROLOBJECT<string name="CausticsController"; string item = "Speed+";>;
+float mCstSpeedM2       : CONTROLOBJECT<string name="CausticsController"; string item = "Speed-";>;
+float mCstDispersionP2  : CONTROLOBJECT<string name="CausticsController"; string item = "Dispersion+";>;
+float mCstDispersionM2  : CONTROLOBJECT<string name="CausticsController"; string item = "Dispersion-";>;
+float3 mCstWaterPos2    : CONTROLOBJECT<string name="CausticsController"; string item = "Position";>;
+#endif
+
 float mDbgSSGIIntensity1 : CONTROLOBJECT<string name="DebugController.pmx"; string item = "SSGIIntensity";>;
 float mDbgSSGIConeAngle1 : CONTROLOBJECT<string name="DebugController.pmx"; string item = "SSGIConeAngle";>;
 float mDbgSSGIBias1      : CONTROLOBJECT<string name="DebugController.pmx"; string item = "SSGIBias";>;
@@ -103,6 +130,25 @@ static float mBladeCount = lerp(10, 5, mBladeCountM);
 static float3 mColorShadowSunP = pow(float3(mSunShadowRP, mSunShadowGP, mSunShadowBP), 2);
 static float3 mColorBalanceP = float3(mColBalanceRP, mColBalanceGP, mColBalanceBP);
 static float3 mColorBalanceM = float3(mColBalanceRM, mColBalanceGM, mColBalanceBM);
+#if WATER_CAUSTICS_ENABLE
+static float mCstIntensityP   = max(mCstIntensityP1, mCstIntensityP2);
+static float mCstIntensityM   = max(mCstIntensityM1, mCstIntensityM2);
+static float mCstWaterHeightP = max(mCstWaterHeightP1, mCstWaterHeightP2);
+static float mCstWaterHeightM = max(mCstWaterHeightM1, mCstWaterHeightM2);
+static float mCstScaleP       = max(mCstScaleP1, mCstScaleP2);
+static float mCstScaleM       = max(mCstScaleM1, mCstScaleM2);
+static float mCstSpeedP       = max(mCstSpeedP1, mCstSpeedP2);
+static float mCstSpeedM       = max(mCstSpeedM1, mCstSpeedM2);
+static float mCstDispersionP  = max(mCstDispersionP1, mCstDispersionP2);
+static float mCstDispersionM  = max(mCstDispersionM1, mCstDispersionM2);
+static float3 mCstWaterPos    = any(mCstWaterPos1) ? mCstWaterPos1 : mCstWaterPos2;
+
+static float mCausticsIntensity  = lerp(lerp(WATER_CAUSTICS_INTENSITY, WATER_CAUSTICS_INTENSITY * 3.0f, mCstIntensityP), 0.0f, mCstIntensityM);
+static float mWaterHeight        = WATER_CAUSTICS_SURFACE_Y + mCstWaterPos.y + lerp(lerp(0.0f, 30.0f, mCstWaterHeightP), -30.0f, mCstWaterHeightM);
+static float mCausticsFreqScale  = lerp(lerp(1.15f, 3.0f, mCstScaleP), 0.3f, mCstScaleM);
+static float mCausticsSpeedScale = lerp(lerp(1.0f, 2.5f, mCstSpeedP), 0.1f, mCstSpeedM);
+static float mCausticsDispScale  = lerp(lerp(1.0f, 3.0f, mCstDispersionP), 0.0f, mCstDispersionM);
+#endif
 
 #include "shader/math.fxsub"
 #include "shader/common.fxsub"
