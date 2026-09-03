@@ -94,30 +94,37 @@ float3 ComputeFilmicHalation(float3 baseColor, float2 uv)
 {
 #if FILMIC_HALATION_MODE > 0
 #if HDR_BLOOM_MODE > 0
-	float3 tightBloom = tex2Dlod(BloomSamp2nd, float4(uv, 0, 0)).rgb;
+	float3 bloomTight = tex2Dlod(BloomSamp2nd, float4(uv, 0, 0)).rgb;
+	float3 bloomWide  = tex2Dlod(BloomSamp3rd, float4(uv, 0, 0)).rgb;
+	float3 tightBloom = bloomTight * 0.65f + bloomWide * 0.35f;
 #else
 	float3 tightBloom = baseColor;
 #endif
 
-	// Edge difference between local scattered light and high-frequency foreground
-	float3 diff = max(0.0f, tightBloom * 1.6f - baseColor);
-	float edgeLuma = dot(diff, float3(0.299f, 0.587f, 0.114f));
-	
-	// Non-linear thresholding for bright silhouette boundaries
-	float halationFactor = smoothstep(0.05f, 0.65f, edgeLuma);
-	
-	// Kodak Vision3 warm red/amber spectral emulsion response
-	const float3 kHalationColor = float3(1.0f, 0.22f, 0.04f);
-	
+	// Luminance of scattered highlight vs baseline color
+	float bloomLum = dot(tightBloom, float3(0.299f, 0.587f, 0.114f));
+	float baseLum  = dot(baseColor, float3(0.299f, 0.587f, 0.114f));
+
+	// Film emulsion overexposure response: starts where highlight begins to clip
+	float overexposure = smoothstep(0.20f, 1.10f, bloomLum);
+	// Contrast edge bleed: stronger when bright light spills onto darker surroundings
+	float edgeBleed = saturate((bloomLum * 1.35f - baseLum) / max(bloomLum, 0.1f));
+	float halationFactor = overexposure * (edgeBleed * 0.70f + 0.30f);
+
+	// CineStill 800T / Kodak Vision3 iconic warm crimson-amber halation color
+	const float3 kHalationColor = float3(1.0f, 0.18f, 0.035f);
+
 #if FILMIC_HALATION_MODE == 1
-	float intensity = 0.40f;
+	float intensity = 0.65f;
 #elif FILMIC_HALATION_MODE == 2
-	float intensity = 0.85f;
+	float intensity = 1.35f;
+#elif FILMIC_HALATION_MODE == 3
+	float intensity = 2.20f;
 #else
-	float intensity = 0.40f;
+	float intensity = 0.65f;
 #endif
 
-	return kHalationColor * (halationFactor * intensity * saturate(luminance(tightBloom) * 1.5f));
+	return kHalationColor * (halationFactor * intensity * saturate(bloomLum));
 #else
 	return 0.0f;
 #endif
