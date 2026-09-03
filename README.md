@@ -49,11 +49,12 @@ Reforge Exclusive Features (through v1.20.0) :
 * **Directional Water Caustics**: real-time focused underwater light bands and wave curvature flux concentration with chromatic dispersion and a dedicated controller (`CausticsController.pmx`).
 * **Variance Shadow Maps**: ultra-clean high-resolution sun shadows, completely grain-free on character faces, with rotated Vogel-disk PCF filtering to eliminate staircasing and acne.
 * **Screen-Space Global Shadows (SSGS)**: long-range directional raymarched shadows with distance-adaptive soft penumbra expansion, grounding characters and geometry without shadow map dependence.
-* **Volumetric Atmosphere & Dynamic Clouds**: SA_DirectX 3.0 cumulus cloudscapes with Frostbite/Nubis lighting, Beer-Powder scattering, Silver Lining, planetary horizon curvature, and anti-tiling domain warping.
+* **Volumetric Atmosphere & Dynamic Clouds 2.0**: SA_DirectX 3.0 cumulus cloudscapes with Frostbite/Nubis lighting, Beer-Powder scattering, Silver Lining, planetary horizon curvature, and **Adaptive Empty Space Skipping** (2.25x stride with 0.75x boundary refinement) for high-framerate rendering in clear sky regions without edge slicing or visual quality loss.
 
 **Materials & BRDF**
 * **Energy-Preserving Oren-Nayar (EON) BRDF**: exact Portsmouth, Kutz & Hill (JCGT 2025) diffuse model preserving energy across all roughness levels.
-* **Dual-Lobe Skin Specular & Multi-Spectral SSS**: physically based dermal reflectance with auto-absorption subsurface scattering and chromatic dispersion along the shadow terminator.
+* **Pre-Integrated Skin Curvature SSS & Dual-Lobe GGX Specular**: physically based multi-spectral skin diffusion wrapping light smoothly into shadow ($N \cdot L \le -0.35$) with wavelength-separated penetration ($w_r = 0.40, w_g = 0.18, w_b = 0.06$), saturated chromatic blood terminator bleeding, and dual-layer dermal/epidermal specular reflections.
+* **Expanded 48-Preset Material Library**: comprehensive PBR and Toon material suites across Architecture (parquet, wet asphalt, tiles, rough wood, brick, concrete, polished marble), Cloth (leather, latex, denim, wool, stockings, lace), Nature (dirt, mud, snow with micro-glitter, ice, sand, tree bark), and Sci-Fi (anisotropic carbon fiber, hologram with hashed alpha, cyber grid, diamond).
 * **Procedural Eye Cornea Parallax & Micro-Glitter**: true refractive cornea dome with iris parallax depth mapping (`material_eye_anime.fx`) and multi-layer procedural micro-glitter sparkle presets (`material_glitter.fx`).
 * **Procedural Hair Materials**: mathematical anisotropic hair normals plus Kajiya-Kay highlights — ported hbee hair presets with no heavy static textures.
 * **Physical Cloth & ClearCoat**: rewritten BRDFs with cloth-DFG and upgraded Charlie Sheen distribution.
@@ -71,9 +72,10 @@ Reforge Exclusive Features (through v1.20.0) :
 * **Temporal Anti-Aliasing (TAA)**: 5-tap Catmull-Rom bicubic history reconstruction, Karis luma weighting, variance clipping, and depth-validated history.
 * **AgX Tone Mapping**: exact 6th-order polynomial implementation of the official Blender 4.0 AgX mapper (default), with an ACES-fitted option.
 * **Camera & Object Motion Blur**: cinematic screen-space velocity motion blur reconstructed from camera view-projection history and animated mesh velocity maps.
-* **Spectral / Chromatic Bloom & Halation**: physical radial wavelength dispersion and 35mm film halation (Kodak Vision3 emulsion bleed).
+* **CineStill 800T Multi-Scale Halation & Spectral Bloom**: physical radial wavelength dispersion and multi-octave red-amber emulsion highlight bleed simulating real 35mm film base back-scattering (`FILMIC_HALATION_MODE 2`).
 * **Cinematic Bokeh DOF**: hexagonal and cinematic bokeh with Cat's Eye optical mechanical vignetting deformation.
 * **Anti-Firefly Bloom & FidelityFX CAS**: Karis 13-tap downsampling filter and AMD FidelityFX Contrast Adaptive Sharpening.
+* **Core Engine Performance Optimizations**: hoisted matrix projections in contact shadows, XeGTAO square-root horizon identity, point/spot light distance clipping, pre-scaled Vogel-disk PCF rotation, SSGI rsqrt ray steps, and Gerstner wave Hessian constant precomputations.
 * **2-Band Cel-Shading**: optional stylized ramp integrated into the lighting path.
 
 **Toon Rendering**
