@@ -139,4 +139,8 @@ const float  windFrequency = 0.45;                  // Spatial wave length acros
 const float3 windDirection = float3(1.0, 0.15, 0.4);// Prevailing wind direction
 const float  windTurbulence = 0.35;                 // High-frequency individual leaf flutter
 
+// Hashed Alpha Testing (Wyman & McGuire 2017) — Soft anti-aliased leaf cutouts with TAA
+#define HASHED_ALPHA_TEST_ENABLE 0
+#define HASHED_ALPHA_SCALE 1.0f
+
 #include "../../material_common_2.0.fxsub"

@@ -475,6 +475,26 @@ shared texture Gbuffer8RT: RENDERCOLORTARGET;
 	};
 #endif
 
+#ifndef DETAIL_MAP_ENABLE
+#define DETAIL_MAP_ENABLE 0
+#endif
+
+#ifndef DETAIL_NORMAL_MAP_FILE
+#define DETAIL_NORMAL_MAP_FILE "detail_normal.png"
+#endif
+
+#ifndef DETAIL_NORMAL_MAP_SCALE
+#define DETAIL_NORMAL_MAP_SCALE 1.0f
+#endif
+
+#ifndef DETAIL_NORMAL_MAP_LOOP_NUM
+#define DETAIL_NORMAL_MAP_LOOP_NUM 20.0f
+#endif
+
+#ifndef DETAIL_MAP_FADE_DIST
+#define DETAIL_MAP_FADE_DIST 15.0f
+#endif
+
 #if DETAIL_MAP_ENABLE
 	texture DetailNormalMap<string ResourceName = DETAIL_NORMAL_MAP_FILE;>;
 	sampler DetailNormalMapSamp = sampler_state
@@ -622,26 +642,6 @@ float3 ColorSynthesis(float3 diffuse, float3 m)
 
 #ifndef HASHED_ALPHA_SCALE
 #define HASHED_ALPHA_SCALE 1.0f
-#endif
-
-#ifndef DETAIL_MAP_ENABLE
-#define DETAIL_MAP_ENABLE 0
-#endif
-
-#ifndef DETAIL_NORMAL_MAP_FILE
-#define DETAIL_NORMAL_MAP_FILE "detail_normal.png"
-#endif
-
-#ifndef DETAIL_NORMAL_MAP_SCALE
-#define DETAIL_NORMAL_MAP_SCALE 1.0f
-#endif
-
-#ifndef DETAIL_NORMAL_MAP_LOOP_NUM
-#define DETAIL_NORMAL_MAP_LOOP_NUM 20.0f
-#endif
-
-#ifndef DETAIL_MAP_FADE_DIST
-#define DETAIL_MAP_FADE_DIST 15.0f
 #endif
 
 // Wyman & McGuire (I3D 2017): Hashed Alpha Testing
