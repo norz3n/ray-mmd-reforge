@@ -1350,36 +1350,38 @@ float3 GetMainNormal(float3 N, float3 P, float2 coord)
 		coord = 1 - coord;
 	#endif
 
-	#if NORMAL_MAP_FROM == 3
-		#if NORMAL_MAP_HEX_TILING
-			float3 tangentNormal = use_texture ? SampleNormalMapHexTiled(NormalMapSamp, coord * normalMapLoopNum, HEX_TILING_ROTATION, 0.5f, HEX_TILING_CONTRAST, HEX_TILING_SHARPNESS) : float3(0, 0, 1);
-		#else
-			float3 tangentNormal = use_texture ? tex2D(NormalMapSamp, coord * normalMapLoopNum).rgb * 2 - 1 : float3(0, 0, 1);
-		#endif
-	#elif NORMAL_MAP_FROM == 4
-		float3 tangentNormal = use_spheremap ? tex2D(NormalMapSamp, coord * normalMapLoopNum).rgb * 2 - 1 : float3(0, 0, 1);
-	#elif NORMAL_MAP_FROM == 5
-		float3 tangentNormal = use_toon ? tex2D(NormalMapSamp, coord * normalMapLoopNum).rgb * 2 - 1 : float3(0, 0, 1);
-	#elif NORMAL_MAP_FROM == 7 || NORMAL_MAP_FROM == 8 || NORMAL_MAP_FROM == 9
-		#error Unsupported options 7, 8, 9.
-	#else
-		#if NORMAL_MAP_HEX_TILING
-			float3 tangentNormal = SampleNormalMapHexTiled(NormalMapSamp, coord * normalMapLoopNum, HEX_TILING_ROTATION, 0.5f, HEX_TILING_CONTRAST, HEX_TILING_SHARPNESS);
-		#else
-			float3 tangentNormal = tex2D(NormalMapSamp, coord * normalMapLoopNum).rgb * 2 - 1;
-		#endif
-	#endif
-
-	#if NORMAL_MAP_TYPE == 1
-		tangentNormal.z = sqrt(1.0 - tangentNormal.x * tangentNormal.x - tangentNormal.y * tangentNormal.y);
-	#elif NORMAL_MAP_TYPE == 3
-		tangentNormal = PerturbNormalHQ(NormalMapSamp, coord * normalMapLoopNum);
+	#if NORMAL_MAP_TYPE == 3
+		float3 tangentNormal = PerturbNormalHQ(NormalMapSamp, coord * normalMapLoopNum);
 	#elif NORMAL_MAP_TYPE == 5
-		tangentNormal = PerturbNormalUltra(NormalMapSamp, coord * normalMapLoopNum);
-	#elif NORMAL_MAP_TYPE == 2
-		tangentNormal = PerturbNormalLQ(N, P, tangentNormal.x * normalMapScale);
-		#if NORMAL_SUB_MAP_FROM
-			#error Unsupported bump map (Low Quality) with second normal map. Please set NORMAL_SUB_MAP_FROM to 0.
+		float3 tangentNormal = PerturbNormalUltra(NormalMapSamp, coord * normalMapLoopNum);
+	#else
+		#if NORMAL_MAP_FROM == 3
+			#if NORMAL_MAP_HEX_TILING
+				float3 tangentNormal = use_texture ? SampleNormalMapHexTiled(NormalMapSamp, coord * normalMapLoopNum, HEX_TILING_ROTATION, 0.5f, HEX_TILING_CONTRAST, HEX_TILING_SHARPNESS) : float3(0, 0, 1);
+			#else
+				float3 tangentNormal = use_texture ? tex2D(NormalMapSamp, coord * normalMapLoopNum).rgb * 2 - 1 : float3(0, 0, 1);
+			#endif
+		#elif NORMAL_MAP_FROM == 4
+			float3 tangentNormal = use_spheremap ? tex2D(NormalMapSamp, coord * normalMapLoopNum).rgb * 2 - 1 : float3(0, 0, 1);
+		#elif NORMAL_MAP_FROM == 5
+			float3 tangentNormal = use_toon ? tex2D(NormalMapSamp, coord * normalMapLoopNum).rgb * 2 - 1 : float3(0, 0, 1);
+		#elif NORMAL_MAP_FROM == 7 || NORMAL_MAP_FROM == 8 || NORMAL_MAP_FROM == 9
+			#error Unsupported options 7, 8, 9.
+		#else
+			#if NORMAL_MAP_HEX_TILING
+				float3 tangentNormal = SampleNormalMapHexTiled(NormalMapSamp, coord * normalMapLoopNum, HEX_TILING_ROTATION, 0.5f, HEX_TILING_CONTRAST, HEX_TILING_SHARPNESS);
+			#else
+				float3 tangentNormal = tex2D(NormalMapSamp, coord * normalMapLoopNum).rgb * 2 - 1;
+			#endif
+		#endif
+
+		#if NORMAL_MAP_TYPE == 1
+			tangentNormal.z = sqrt(1.0 - tangentNormal.x * tangentNormal.x - tangentNormal.y * tangentNormal.y);
+		#elif NORMAL_MAP_TYPE == 2
+			tangentNormal = PerturbNormalLQ(N, P, tangentNormal.x * normalMapScale);
+			#if NORMAL_SUB_MAP_FROM
+				#error Unsupported bump map (Low Quality) with second normal map. Please set NORMAL_SUB_MAP_FROM to 0.
+			#endif
 		#endif
 	#endif
 
