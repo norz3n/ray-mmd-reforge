@@ -1,6 +1,6 @@
 // Toon (cel-shaded) duplicate of: Cloth/material_denim.fx
 // Woven denim blue jeans with Ashikhmin-Premoze cloth sheen and Hex-Tiling
-#define HEX_TILING_ENABLE 1
+#define HEX_TILING_ENABLE 0
 #define ALBEDO_MAP_FROM 3
 #define ALBEDO_MAP_UV_FLIP 0
 #define ALBEDO_MAP_APPLY_SCALE 0
@@ -8,7 +8,7 @@
 #define ALBEDO_MAP_APPLY_MORPH_COLOR 0
 #define ALBEDO_MAP_FILE "albedo.png"
 
-const float3 albedo = float3(0.12, 0.18, 0.32);
+const float3 albedo = 1.0;
 const float2 albedoMapLoopNum = 1.0;
 
 #define ALBEDO_SUB_ENABLE 0
