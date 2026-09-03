@@ -51,15 +51,19 @@ float3 ComputeWaterCaustics(float3 worldPos, float3 normalVS, float shadow, floa
 	float3 waterHitWS = worldPos - SunDirection * tSun;
 
 	// 4 harmonic wave octaves with irrational directional offsets to eliminate periodicity
-	static const float2 WAVE_DIR[4] = {
-		float2( 0.8660f,  0.5000f),
-		float2(-0.4384f,  0.8988f),
-		float2( 0.3126f, -0.9499f),
-		float2(-0.8090f, -0.5878f)
+	static const float2 WAVE_DIR_FREQ[4] = {
+		float2( 0.95260f,  0.55000f),
+		float2(-0.81104f,  1.66278f),
+		float2( 0.84402f, -2.56473f),
+		float2(-3.31690f, -2.40998f)
 	};
-	static const float WAVE_FREQ[4]  = { 1.10f, 1.85f, 2.70f, 4.10f };
 	static const float WAVE_SPEED[4] = { 1.20f, 1.55f, 2.05f, 2.45f };
-	static const float WAVE_AMP[4]   = { 0.055f, 0.030f, 0.015f, 0.007f };
+	static const float3 WAVE_HESSIAN_K2A[4] = {
+		float3(0.049910f, 0.016638f,  0.028816f), // (k2A * dir.x^2, k2A * dir.y^2, k2A * dir.x * dir.y)
+		float3(0.019734f, 0.082945f, -0.040457f),
+		float3(0.010686f, 0.098668f, -0.032470f),
+		float3(0.077013f, 0.040656f,  0.055956f)
+	};
 
 	float2 uv = waterHitWS.xz * mCausticsFreqScale;
 
@@ -70,13 +74,12 @@ float3 ComputeWaterCaustics(float3 worldPos, float3 normalVS, float shadow, floa
 	[unroll]
 	for (int i = 0; i < 4; ++i)
 	{
-		float phase = dot(uv, WAVE_DIR[i]) * WAVE_FREQ[i] + time * (WAVE_SPEED[i] * mCausticsSpeedScale);
+		float phase = dot(uv, WAVE_DIR_FREQ[i]) + time * (WAVE_SPEED[i] * mCausticsSpeedScale);
 		float s = sin(phase);
-		float k2A = WAVE_AMP[i] * (WAVE_FREQ[i] * WAVE_FREQ[i]);
 
-		Hxx -= k2A * (WAVE_DIR[i].x * WAVE_DIR[i].x) * s;
-		Hzz -= k2A * (WAVE_DIR[i].y * WAVE_DIR[i].y) * s;
-		Hxz -= k2A * (WAVE_DIR[i].x * WAVE_DIR[i].y) * s;
+		Hxx -= WAVE_HESSIAN_K2A[i].x * s;
+		Hzz -= WAVE_HESSIAN_K2A[i].y * s;
+		Hxz -= WAVE_HESSIAN_K2A[i].z * s;
 	}
 
 	// Physical water refractance dispersion coefficients (n - 1) for R, G, B wavelengths
