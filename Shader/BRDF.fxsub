@@ -158,7 +158,7 @@ static const float EON_CONSTANT2_FON = 2.0f / 3.0f - 28.0f / (15.0f * PI); // ~0
  * @param r  Surface roughness in range [0, 1]
  * @return Directional albedo ratio for single-scattering normalization
  */
-float E_FON_approx(float mu, float r)
+float E_FON_approx(float mu, float r, float AF)
 {
 	float mucomp = 1.0f - mu;
 	const float g1 =  0.0571085289f;
@@ -166,7 +166,13 @@ float E_FON_approx(float mu, float r)
 	const float g3 = -0.332181442f;
 	const float g4 =  0.0714429953f;
 	float GoverPi = mucomp * (g1 + mucomp * (g2 + mucomp * (g3 + mucomp * g4)));
-	return (1.0f + r * GoverPi) / (1.0f + EON_CONSTANT1_FON * r);
+	return (1.0f + r * GoverPi) * AF;
+}
+
+float E_FON_approx(float mu, float r)
+{
+	float AF = 1.0f / (1.0f + EON_CONSTANT1_FON * r);
+	return E_FON_approx(mu, r, AF);
 }
 
 /**
@@ -189,8 +195,8 @@ float EonBRDF(float nl, float nv, float lv, float roughness)
 	float AF = 1.0f / (1.0f + EON_CONSTANT1_FON * roughness);
 	float f_ss = AF * (1.0f + roughness * sovertF);
 
-	float EFo = E_FON_approx(nv, roughness);
-	float EFi = E_FON_approx(nl, roughness);
+	float EFo = E_FON_approx(nv, roughness, AF);
+	float EFi = E_FON_approx(nl, roughness, AF);
 	float avgEF = AF * (1.0f + EON_CONSTANT2_FON * roughness);
 
 	// Multi-scattering lobe compensation to ensure directional albedo integrates to 1.0
