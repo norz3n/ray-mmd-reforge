@@ -111,6 +111,10 @@ float TraceScreenSpaceShadow(
 	float occlusion = 0.0f;
 	float hitT = 1.0f;
 
+	float3 rayEnd = rayOrigin + lightDirection * maxDistance;
+	float4 clipStart = mul(float4(rayOrigin, 1.0f), matProject);
+	float4 clipEnd = mul(float4(rayEnd, 1.0f), matProject);
+
 	[loop]
 	for (int stepIndex = 0; stepIndex < CONTACT_SHADOW_STEP_COUNT; ++stepIndex)
 	{
@@ -118,8 +122,9 @@ float TraceScreenSpaceShadow(
 		// the origin itself and converts banding into TAA-friendly noise.
 		float rayT = ((float)stepIndex + 0.5f + 0.5f * frac(jitter)) /
 			(float)CONTACT_SHADOW_STEP_COUNT;
-		float3 rayPosition = rayOrigin + lightDirection * (rayT * maxDistance);
-		float2 sampleUV = ContactShadowProject(rayPosition);
+		float rayZ = rayOrigin.z + lightDirection.z * (rayT * maxDistance);
+		float4 clipPos = lerp(clipStart, clipEnd, rayT);
+		float2 sampleUV = clipPos.xy / clipPos.w * float2(0.5f, -0.5f) + 0.5f;
 
 		if (any(sampleUV < 0.0f) || any(sampleUV > 1.0f))
 			break;
@@ -132,8 +137,8 @@ float TraceScreenSpaceShadow(
 		// surfaces.  Its penetration is then limited by the thickness heuristic;
 		// overly deep samples are skipped so foreground silhouettes do not become
 		// 2.5D "false walls" on the background.
-		float behindSurface = rayPosition.z - farthestDepth;
-		float penetration = rayPosition.z - nearestDepth;
+		float behindSurface = rayZ - farthestDepth;
+		float penetration = rayZ - nearestDepth;
 		if (behindSurface > 0.0f && penetration <= thickness)
 		{
 			// Fractional occlusion by penetration depth gives the edge a real
@@ -237,13 +242,18 @@ float TraceScreenSpaceGlobalShadow(
 	float occlusion = 0.0f;
 	float hitT = 1.0f;
 
+	float3 rayEnd = rayOrigin + lightDirection * SSGS_MAX_DISTANCE;
+	float4 clipStart = mul(float4(rayOrigin, 1.0f), matProject);
+	float4 clipEnd = mul(float4(rayEnd, 1.0f), matProject);
+
 	[loop]
 	for (int stepIndex = 0; stepIndex < SSGS_STEP_COUNT; ++stepIndex)
 	{
 		float rayT = ((float)stepIndex + 0.5f + 0.5f * frac(jitter)) /
 			(float)SSGS_STEP_COUNT;
-		float3 rayPosition = rayOrigin + lightDirection * (rayT * SSGS_MAX_DISTANCE);
-		float2 sampleUV = ContactShadowProject(rayPosition);
+		float rayZ = rayOrigin.z + lightDirection.z * (rayT * SSGS_MAX_DISTANCE);
+		float4 clipPos = lerp(clipStart, clipEnd, rayT);
+		float2 sampleUV = clipPos.xy / clipPos.w * float2(0.5f, -0.5f) + 0.5f;
 
 		if (any(sampleUV < 0.0f) || any(sampleUV > 1.0f))
 			break;
@@ -257,8 +267,8 @@ float TraceScreenSpaceGlobalShadow(
 		float nearestDepth = min(sceneDepth.x, sceneDepth.y);
 		float farthestDepth = max(sceneDepth.x, sceneDepth.y);
 
-		float behindSurface = rayPosition.z - farthestDepth;
-		float penetration = rayPosition.z - nearestDepth;
+		float behindSurface = rayZ - farthestDepth;
+		float penetration = rayZ - nearestDepth;
 		if (behindSurface > 0.0f && penetration <= thickness)
 		{
 			// Soft penumbra: occlusion ramps from 0 to 1 across the thickness band,
