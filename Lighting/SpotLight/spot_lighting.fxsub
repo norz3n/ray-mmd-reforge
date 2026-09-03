@@ -199,6 +199,10 @@ void LightSourcePS(
 	float3 P1 = viewdir * (material.linearDepth * rcpZ);
 	float3 P2 = viewdir * (materialAlpha.linearDepth * rcpZ);
 
+	float3 L1 = viewLightPosition - P1;
+	float3 L2 = viewLightPosition - P2;
+	clip(LightRange * LightRange - min(dot(L1, L1), dot(L2, L2)));
+
 	float shadow = 1;
 #if SHADOW_MAP_FROM
 	shadow = ShadingShadow(materialAlpha, P2, texcoord.xy / texcoord.w);
@@ -240,6 +244,10 @@ void LightSourceShadowlessPS(
 	
 	float3 P1 = viewdir * (material.linearDepth * rcpZ);
 	float3 P2 = viewdir * (materialAlpha.linearDepth * rcpZ);
+
+	float3 L1 = viewLightPosition - P1;
+	float3 L2 = viewLightPosition - P2;
+	clip(LightRange * LightRange - min(dot(L1, L1), dot(L2, L2)));
 
 	float3 diffuse = 0, specular = 0;
 	ShadingMaterial(material, P1, V, 1, diffuse, specular);
