@@ -278,11 +278,13 @@ void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 
 {
 	float totalDist = length(end - start);
 	float stepLength = totalDist / float(NUMS_SAMPLES_CLOUD);
-	float3 sampleStep = ((end - start) / totalDist) * stepLength;
+	float3 rayDir = (end - start) / totalDist;
+	float3 sampleStep = rayDir * stepLength;
 
 	// High-frequency ray jittering to eliminate step slicing/banding
 	float randomJitter = frac(sin(dot(V.xyz, float3(12.9898f, 78.233f, 151.7182f))) * 43758.5453123f);
 	float3 currentPositionPS = start + sampleStep * randomJitter;
+	float marchedDistance = stepLength * randomJitter;
 
 	float3 accumulatedScattering = 0.0f;
 	float transmittance = 1.0f;
@@ -301,17 +303,28 @@ void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 
 	float3 skyColor = skyAmbient * 0.45f;
 	float3 groundColor = skyAmbient * float3(0.50f, 0.45f, 0.40f) * 0.40f;
 
+	int zeroConsecutive = 0;
+
 	[loop]
 	for (int i = 0; i < NUMS_SAMPLES_CLOUD; ++i)
 	{
-		// Early termination when cloud is fully opaque
-		if (transmittance < 0.008f) break;
+		// Early termination when cloud is fully opaque or ray has traversed cloud layer
+		if (transmittance < 0.008f || marchedDistance >= totalDist) break;
 
 		float cloudHeight;
 		float density = EvaluateCloudDensity(setting, currentPositionPS, cloudHeight);
 
 		if (density > 0.001f)
 		{
+			// Refine boundary if entering cloud after large empty-space strides
+			if (zeroConsecutive >= 2)
+			{
+				currentPositionPS -= sampleStep * 0.75f;
+				marchedDistance -= stepLength * 0.75f;
+				density = EvaluateCloudDensity(setting, currentPositionPS, cloudHeight);
+			}
+			zeroConsecutive = 0;
+
 			float sampleExtinction = density * 0.0035f;
 			float stepTransmittance = exp(-sampleExtinction * stepLength);
 
@@ -331,9 +344,18 @@ void ComputeCloudsInsctrIntegral(ScatteringParams setting, float3 start, float3 
 
 			transmittance *= stepTransmittance;
 			opticalDepth += sampleExtinction * stepLength;
-		}
 
-		currentPositionPS += sampleStep;
+			currentPositionPS += sampleStep;
+			marchedDistance += stepLength;
+		}
+		else
+		{
+			zeroConsecutive++;
+			// Empty space acceleration: after 2 empty steps, advance with 2.25x stride
+			float emptyStepScale = (zeroConsecutive >= 2) ? 2.25f : 1.0f;
+			currentPositionPS += sampleStep * emptyStepScale;
+			marchedDistance += stepLength * emptyStepScale;
+		}
 	}
 
 	insctrMie = accumulatedScattering;
