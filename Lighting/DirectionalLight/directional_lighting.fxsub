@@ -160,12 +160,13 @@ static const float2 ShadowPCFDisk[SHADOW_PCF_SAMPLES] =
 float2 ShadowPCF(sampler source, float2 coord, float receiverDepth, float2 rotation)
 {
 	float2 shadow = 0.0;
+	float2 rotScale = rotation * (2.0 * ShadowMapOffset2);
 
 	[unroll]
 	for (int i = 0; i < SHADOW_PCF_SAMPLES; i++)
 	{
 		// Disk radius 2.0 matches the +/-2 texel span of the old radius-2 grid.
-		float2 pos = coord + RotateSample(ShadowPCFDisk[i] * 2.0 * ShadowMapOffset2, rotation);
+		float2 pos = coord + RotateSample(ShadowPCFDisk[i], rotScale);
 		shadow += tex2Dlod(source, float4(pos, 0, 0)).rg * (1.0 / SHADOW_PCF_SAMPLES);
 	}
 
