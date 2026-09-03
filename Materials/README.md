@@ -415,6 +415,23 @@ Triplanar Projection:
 * ##### const float triplanarScale = 0.1;
     Tile scaling factor in world-space coordinates.
 
+Hex-Tiling (Mikkelsen 2022):
+---------------------
+* ##### HEX_TILING_ENABLE
+    Set `HEX_TILING_ENABLE` to `1` in your material `.fx` file to eliminate repetitive tiling patterns (grid effect) on large surfaces (floors, walls, terrain, fabrics) using real-time stochastic hex-tiling.
+
+    `0` . Disabled (default UV tiling)  
+    `1` . Enable Hex-Tiling across material textures  
+
+* ##### #define HEX_TILING_ROTATION 1.0f
+    Rotational randomization strength between 0.0 (aligned) and 1.0 (full random orientation).
+
+* ##### #define HEX_TILING_CONTRAST 0.6f
+    Contrast falloff for luminance- and slope-weighted blending.
+
+* ##### #define HEX_TILING_SHARPNESS 7.0f
+    Barycentric sharpening exponent (higher values keep tile centers crisp).
+
 FAQ:
 --------------------
 * What is sRGB-color and Gamma

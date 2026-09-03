@@ -120,6 +120,7 @@ Financially supported on [Patreon](http://www.patreon.com/cubizer):
 
 引用:
 -----------
+* Practical Real-Time Hex-Tiling (Mikkelsen) \[[link](https://jcgt.org/published/0011/02/01/) | [PDF](./ref-docs/Mikkelsen2022Hex.pdf)\].
 * Moving to the Next Generation - The Rendering Technology of Ryse \[[link](http://www.crytek.com/download/2014_03_25_CRYENGINE_GDC_Schultz.pdf)\].
 * ACES Filmic Tone Mapping Curve \[[link](https://knarkowicz.wordpress.com/2016/08/31/hdr-display-first-steps/)\].
 * Compact Normal Storage for small G-Buffers \[[link](http://aras-p.info/texts/CompactNormalStorage.html)\].

@@ -62,6 +62,7 @@ Reforge Exclusive Features (through v1.19.0) :
 * **Wetness Special-Case Material**: now with ordered-dither alpha clipping; alpha cutout threshold unified at 0.5 across all passes.
 * **Procedural Foliage Wind**: vertex wind animation engine with four vegetation presets.
 * **Advanced Surface Detail**: thin-film iridescence, specular geometric anti-aliasing (LEAN/CLEAN), Ultra Quality bump maps, and expanded Auto-Normal material presets.
+* **Practical Real-Time Hex-Tiling**: stochastic equilateral triangle lattice tiling (Mikkelsen 2022) with slope-weighted normal blending and luminance contrast adjustment, eliminating visible tiling grid repetition on terrain, floors, and fabrics without precomputed LUTs.
 
 **Post-Processing & Anti-Aliasing**
 * **G-DLAA Anti-Aliasing**: hybrid geometric and directionally adaptive anti-aliasing (`AA_QUALITY 7`) preserving sharp silhouette edges.
@@ -163,6 +164,7 @@ Credits :
 * PBR Screen-Space Reflections based on Morgan McGuire & Michael Mara (2014) 2D DDA ray traversal.
 * Ultrafast Screen-Space Refractions via Newton's Method based on Chase Mayer, Ulf Assarsson & Erik Sintorn (JCGT 2026).
 * Energy-Preserving Oren-Nayar (EON) diffuse BRDF based on Jamie Portsmouth, Peter Kutz & Stephen Hill (JCGT 2025).
+* Practical Real-Time Hex-Tiling based on Morten S. Mikkelsen (JCGT 2022).
 * Percentage-Closer Soft Shadows (PCSS) based on Randima Fernando (NVIDIA 2005).
 * Ground-Truth Ambient Occlusion (GTAO) based on Jorge Jimenez, Xian-Chun Wu, Angelo Pesce, Adrian Jarabo (Activision 2016).
 * Directionally Adaptive Anti-Aliasing (DLAA / G-DLAA) based on Dmitry Andreev (LucasArts / Game Developer 2011).
@@ -174,6 +176,7 @@ Credits :
 References :
 --------
 * An Energy-Preserving Oren-Nayar Diffuse BRDF (Portsmouth, Kutz, Hill) \[[link](https://jcgt.org/published/0014/01/01/) | [PDF](./ref-docs/Portsmouth2025EON.pdf)\].
+* Practical Real-Time Hex-Tiling (Mikkelsen) \[[link](https://jcgt.org/published/0011/02/01/) | [PDF](./ref-docs/Mikkelsen2022Hex.pdf)\].
 * Ultrafast Screen-Space Refractions and Caustics via Newton's Method \[[link](https://jcgt.org/published/0015/01/03/)\].
 * Efficient GPU Screen-Space Ray Tracing (McGuire & Mara) \[[link](https://jcgt.org/published/0003/03/04/)\].
 * Percentage-Closer Soft Shadows (Fernando, NVIDIA) \[[link](https://developer.download.nvidia.com/shaderlibrary/docs/shadow_PCSS.pdf)\].

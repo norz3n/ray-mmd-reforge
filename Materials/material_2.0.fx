@@ -124,4 +124,9 @@ const float customAMapLoopNum = 1.0;
 const float3 customB = 0.0;
 const float2 customBMapLoopNum = 1.0;
 
+#define HEX_TILING_ENABLE 0
+#define HEX_TILING_ROTATION 1.0f
+#define HEX_TILING_CONTRAST 0.6f
+#define HEX_TILING_SHARPNESS 7.0f
+
 #include "material_common_2.0.fxsub"

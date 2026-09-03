@@ -389,6 +389,23 @@ Shading Model ID
 * ##### const float triplanarScale = 0.1;
     世界坐标系中的平铺缩放系数。
 
+六边形平铺 (Hex-Tiling - Mikkelsen 2022):
+---------------------
+* ##### HEX_TILING_ENABLE
+    在材质 `.fx` 文件中设置 `HEX_TILING_ENABLE` 为 `1`，可消除大面积表面（地面、墙壁、地形、布料等）上因 UV 平铺重复而产生的网格重复感。
+
+    `0` . 禁用（默认 UV 平铺）  
+    `1` . 启用六边形平铺消除重复网格  
+
+* ##### #define HEX_TILING_ROTATION 1.0f
+    瓦片旋转随机化强度（0.0 为完全对齐，1.0 为全角度随机）。
+
+* ##### #define HEX_TILING_CONTRAST 0.6f
+    亮度与坡度加权混合的对比度衰减。
+
+* ##### #define HEX_TILING_SHARPNESS 7.0f
+    重心锐化指数（值越大，瓦片中心越清晰）。
+
 FAQ:
 --------------------
 * What is sRGB-color and Gamma

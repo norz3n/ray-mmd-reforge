@@ -1,0 +1,294 @@
+#ifndef _HEX_TILING_FXSUB_
+#define _HEX_TILING_FXSUB_
+
+/**
+ * Practical Real-Time Hex-Tiling (Mikkelsen 2022) — Direct3D 9 / HLSL SM 3.0
+ *
+ * Reference: Morten S. Mikkelsen, "Practical Real-Time Hex-Tiling", JCGT Vol. 11, No. 2, 2022.
+ * Eliminates repetitive texture tiling patterns without precomputed LUTs or compute shaders.
+ */
+
+#ifndef M_PI
+#define M_PI 3.14159265359f
+#endif
+
+/**
+ * 2D hash without trigonometric functions.
+ *
+ * Uses a polynomial fractional hash (Dave Hoskins style) instead of `sin(dot(...)) * large_val`
+ * to avoid floating point precision degradation on Direct3D 9 / SM 3.0 hardware at large UV coordinates.
+ *
+ * @param p 2D input coordinates (typically integer lattice vertex coordinates).
+ * @return float2 Pseudo-random vector uniformly distributed in [0, 1).
+ */
+float2 HexHash(float2 p)
+{
+    float2 p2 = frac(p * float2(443.8975f, 397.2973f));
+    p2 += dot(p2, p2.yx + 19.19f);
+    return frac((p2.xx + p2.yy) * p2.xy);
+}
+
+/**
+ * Partitions 2D texture coordinate space into an equilateral triangle lattice.
+ *
+ * Maps orthogonal 2D space into a 60-degree skewed coordinate system, determines the base cell,
+ * and calculates barycentric weights along with integer vertex IDs without dynamic branching.
+ *
+ * @param w1 Output barycentric weight for vertex 1.
+ * @param w2 Output barycentric weight for vertex 2.
+ * @param w3 Output barycentric weight for vertex 3.
+ * @param vertex1 Output integer coordinate of grid vertex 1.
+ * @param vertex2 Output integer coordinate of grid vertex 2.
+ * @param vertex3 Output integer coordinate of grid vertex 3.
+ * @param st Input 2D texture coordinates.
+ */
+void HexTriangleGrid(out float w1, out float w2, out float w3,
+                     out int2 vertex1, out int2 vertex2, out int2 vertex3,
+                     float2 st)
+{
+    st *= 2.0f * sqrt(3.0f);
+    const float2x2 gridToSkewedGrid = float2x2(1.0f, -0.57735027f, 0.0f, 1.15470054f);
+    float2 skewedCoord = mul(gridToSkewedGrid, st);
+
+    int2 baseId = int2(floor(skewedCoord));
+    float3 temp = float3(frac(skewedCoord), 0.0f);
+    temp.z = 1.0f - temp.x - temp.y;
+
+    float s = step(0.0f, -temp.z);
+    float s2 = 2.0f * s - 1.0f;
+
+    w1 = -temp.z * s2;
+    w2 = s - temp.y * s2;
+    w3 = s - temp.x * s2;
+
+    vertex1 = baseId + int2(s, s);
+    vertex2 = baseId + int2(s, 1 - s);
+    vertex3 = baseId + int2(1 - s, s);
+}
+
+/**
+ * Calculates the center of a hexagonal cell in original UV space.
+ *
+ * @param vertex Integer coordinates of the lattice vertex.
+ * @return float2 Center of the hex cell in unskewed UV space.
+ */
+float2 HexMakeCenST(int2 vertex)
+{
+    const float2x2 invSkewMat = float2x2(1.0f, 0.5f, 0.0f, 0.8660254f); // 1.0 / 1.15470054 = sqrt(3)/2
+    return mul(invSkewMat, (float2)vertex) / (2.0f * sqrt(3.0f));
+}
+
+/**
+ * Constructs a 2x2 rotation matrix for a given grid vertex using hash-derived rotation angle.
+ *
+ * Generates an isotropic uniform angle in [-pi, pi] * rotStrength.
+ * Note: When applied to UV offsets via `mul(deltaUV, rot)`, this applies an inverse (pull) rotation by -angle.
+ * When applied to normal derivatives via `mul(rot, deriv)`, it transforms forward by +angle.
+ *
+ * @param idx Lattice vertex integer coordinates.
+ * @param rotStrength Rotation randomization intensity in [0, 1].
+ * @return float2x2 2D rotation matrix.
+ */
+float2x2 HexLoadRot2x2(int2 idx, float rotStrength)
+{
+    float2 h = HexHash((float2)idx);
+    float angle = (h.x * 2.0f - 1.0f) * M_PI * rotStrength;
+
+    float cs = cos(angle);
+    float si = sin(angle);
+    return float2x2(cs, -si, si, cs);
+}
+
+/**
+ * Perlin gain S-curve contrast ramp for barycentric weights.
+ *
+ * Sharpens the transition between triangle vertices to avoid muddy blending.
+ *
+ * @param x Input 3-component barycentric weight vector.
+ * @param r Gain shape control parameter in (0, 1).
+ * @return float3 Contrast-adjusted and normalized weight vector.
+ */
+float3 HexGain3(float3 x, float r)
+{
+    float k = log(1.0f - r) / log(0.5f);
+    float3 s = 2.0f * step(0.5f, x);
+    float3 m = 2.0f * (1.0f - s);
+    float3 res = 0.5f * s + 0.25f * m * pow(max(0.0f, s + x * m), k);
+    return res.xyz / (res.x + res.y + res.z + 1e-6f);
+}
+
+/**
+ * Converts a tangent space normal vector [-1, 1] to a surface heightfield partial derivative dHduv.
+ *
+ * Follows Mikkelsen's derivation: dH/du = -Nx / Nz, dH/dv = -Ny / Nz, clamped against grazing angles.
+ *
+ * @param vM Tangent space normal vector [-1, 1].
+ * @return float2 Surface height derivatives (dH/du, dH/dv).
+ */
+float2 TspaceNormalToDerivative(float3 vM)
+{
+    const float scale = 1.0f / 128.0f;
+    const float3 vMa = abs(vM);
+    const float z_ma = max(vMa.z, scale * max(vMa.x, vMa.y));
+    return -float2(vM.x, vM.y) / z_ma;
+}
+
+/**
+ * Shared precomputed context for Hex-Tiling.
+ *
+ * Encapsulates the geometry of the triangle lattice, vertex centers, rotated UV coordinates,
+ * and rotated anisotropic screen-space derivatives. Computing this once per pixel avoids duplicating
+ * expensive ALUs when sampling multiple material textures (Albedo, Normal, Smoothness, Metalness, AO).
+ */
+struct HexTilingContext
+{
+    float3 weights;
+    float2 st1, st2, st3;
+    float2 dSTdx1, dSTdy1;
+    float2 dSTdx2, dSTdy2;
+    float2 dSTdx3, dSTdy3;
+    float2x2 rot1, rot2, rot3;
+};
+
+/**
+ * Constructs and initializes a HexTilingContext for a given UV coordinate.
+ *
+ * Evaluates the triangle grid, cell centers, pseudo-random rotations and offsets, and prepares
+ * explicit screen-space gradients (`ddx`/`ddy`) rotated into each tile's local frame to eliminate
+ * mipmap bleeding across cell boundaries.
+ *
+ * @param st Input 2D texture coordinates.
+ * @param rotStrength Rotation randomization intensity (0.0 to disable rotation, 1.0 for full randomization).
+ * @return HexTilingContext Initialized context ready for texture sampling.
+ */
+HexTilingContext MakeHexTilingContext(float2 st, float rotStrength = 1.0f)
+{
+    HexTilingContext ctx;
+
+    float2 dSTdx = ddx(st);
+    float2 dSTdy = ddy(st);
+
+    int2 vertex1, vertex2, vertex3;
+    HexTriangleGrid(ctx.weights.x, ctx.weights.y, ctx.weights.z, vertex1, vertex2, vertex3, st);
+
+    ctx.rot1 = HexLoadRot2x2(vertex1, rotStrength);
+    ctx.rot2 = HexLoadRot2x2(vertex2, rotStrength);
+    ctx.rot3 = HexLoadRot2x2(vertex3, rotStrength);
+
+    float2 cen1 = HexMakeCenST(vertex1);
+    float2 cen2 = HexMakeCenST(vertex2);
+    float2 cen3 = HexMakeCenST(vertex3);
+
+    ctx.st1 = mul(st - cen1, ctx.rot1) + cen1 + HexHash((float2)vertex1);
+    ctx.st2 = mul(st - cen2, ctx.rot2) + cen2 + HexHash((float2)vertex2);
+    ctx.st3 = mul(st - cen3, ctx.rot3) + cen3 + HexHash((float2)vertex3);
+
+    ctx.dSTdx1 = mul(dSTdx, ctx.rot1);
+    ctx.dSTdy1 = mul(dSTdy, ctx.rot1);
+    ctx.dSTdx2 = mul(dSTdx, ctx.rot2);
+    ctx.dSTdy2 = mul(dSTdy, ctx.rot2);
+    ctx.dSTdx3 = mul(dSTdx, ctx.rot3);
+    ctx.dSTdy3 = mul(dSTdy, ctx.rot3);
+
+    return ctx;
+}
+
+/**
+ * Samples a color, albedo, or packed roughness/metallic/AO map with Hex-Tiling using a precomputed context.
+ *
+ * Uses luminance-weighted blending to give higher influence to high-contrast features, avoiding muddy seams.
+ *
+ * @param tex 2D texture sampler.
+ * @param ctx Precomputed HexTilingContext.
+ * @param r Gain shape control parameter (default 0.75).
+ * @param fallOffContrast Contrast falloff for luminance weighting (default 0.6).
+ * @param gExp Barycentric sharpening exponent (default 7.0).
+ * @return float4 Blended texture color.
+ */
+float4 SampleColorHexTiled(sampler2D tex, HexTilingContext ctx, float r = 0.75f, float fallOffContrast = 0.6f, float gExp = 7.0f)
+{
+    float4 c1 = tex2Dgrad(tex, ctx.st1, ctx.dSTdx1, ctx.dSTdy1);
+    float4 c2 = tex2Dgrad(tex, ctx.st2, ctx.dSTdx2, ctx.dSTdy2);
+    float4 c3 = tex2Dgrad(tex, ctx.st3, ctx.dSTdx3, ctx.dSTdy3);
+
+    const float3 Lw = float3(0.299f, 0.587f, 0.114f);
+    float3 Dw = float3(dot(c1.rgb, Lw), dot(c2.rgb, Lw), dot(c3.rgb, Lw));
+    Dw = lerp(1.0f, Dw, fallOffContrast);
+
+    float3 W = Dw * pow(max(0.0f, ctx.weights), gExp);
+    W /= (W.x + W.y + W.z + 1e-6f);
+    if (r != 0.5f) W = HexGain3(W, r);
+
+    return W.x * c1 + W.y * c2 + W.z * c3;
+}
+
+/**
+ * Samples a tangent space normal map with Hex-Tiling using a precomputed context.
+ *
+ * Converts normal vectors to surface heightfield derivatives, blends them with slope weighting,
+ * and reconstructs the normalized tangent space normal.
+ *
+ * @param nmap 2D normal map sampler.
+ * @param ctx Precomputed HexTilingContext.
+ * @param r Gain shape control parameter (default 0.5).
+ * @param fallOffContrast Contrast falloff for slope weighting (default 0.6).
+ * @param gExp Barycentric sharpening exponent (default 7.0).
+ * @return float3 Blended normalized tangent space normal vector [-1, 1].
+ */
+float3 SampleNormalMapHexTiled(sampler2D nmap, HexTilingContext ctx, float r = 0.5f, float fallOffContrast = 0.6f, float gExp = 7.0f)
+{
+    float3 n1 = tex2Dgrad(nmap, ctx.st1, ctx.dSTdx1, ctx.dSTdy1).rgb * 2.0f - 1.0f;
+    float3 n2 = tex2Dgrad(nmap, ctx.st2, ctx.dSTdx2, ctx.dSTdy2).rgb * 2.0f - 1.0f;
+    float3 n3 = tex2Dgrad(nmap, ctx.st3, ctx.dSTdx3, ctx.dSTdy3).rgb * 2.0f - 1.0f;
+
+    float2 d1 = mul(ctx.rot1, TspaceNormalToDerivative(n1));
+    float2 d2 = mul(ctx.rot2, TspaceNormalToDerivative(n2));
+    float2 d3 = mul(ctx.rot3, TspaceNormalToDerivative(n3));
+
+    float3 D = float3(dot(d1, d1), dot(d2, d2), dot(d3, d3));
+    float3 Dw = sqrt(D / (1.0f + D));
+    Dw = lerp(1.0f, Dw, fallOffContrast);
+
+    float3 W = Dw * pow(max(0.0f, ctx.weights), gExp);
+    W /= (W.x + W.y + W.z + 1e-6f);
+    if (r != 0.5f) W = HexGain3(W, r);
+
+    float2 blendedDeriv = W.x * d1 + W.y * d2 + W.z * d3;
+    return normalize(float3(-blendedDeriv.xy, 1.0f));
+}
+
+/**
+ * Standalone overload for sampling a color texture when context reuse is not required.
+ *
+ * @param tex 2D texture sampler.
+ * @param st Input 2D texture coordinates.
+ * @param rotStrength Rotation randomization intensity (default 0.0 for directional textures).
+ * @param r Gain shape control parameter (default 0.75).
+ * @param fallOffContrast Contrast falloff for luminance weighting (default 0.6).
+ * @param gExp Barycentric sharpening exponent (default 7.0).
+ * @return float4 Blended texture color.
+ */
+float4 SampleColorHexTiled(sampler2D tex, float2 st, float rotStrength = 0.0f, float r = 0.75f, float fallOffContrast = 0.6f, float gExp = 7.0f)
+{
+    HexTilingContext ctx = MakeHexTilingContext(st, rotStrength);
+    return SampleColorHexTiled(tex, ctx, r, fallOffContrast, gExp);
+}
+
+/**
+ * Standalone overload for sampling a normal map when context reuse is not required.
+ *
+ * @param nmap 2D normal map sampler.
+ * @param st Input 2D texture coordinates.
+ * @param rotStrength Rotation randomization intensity (default 1.0 for isotropic normal maps).
+ * @param r Gain shape control parameter (default 0.5).
+ * @param fallOffContrast Contrast falloff for slope weighting (default 0.6).
+ * @param gExp Barycentric sharpening exponent (default 7.0).
+ * @return float3 Blended normalized tangent space normal vector [-1, 1].
+ */
+float3 SampleNormalMapHexTiled(sampler2D nmap, float2 st, float rotStrength = 1.0f, float r = 0.5f, float fallOffContrast = 0.6f, float gExp = 7.0f)
+{
+    HexTilingContext ctx = MakeHexTilingContext(st, rotStrength);
+    return SampleNormalMapHexTiled(nmap, ctx, r, fallOffContrast, gExp);
+}
+
+#endif // _HEX_TILING_FXSUB_
