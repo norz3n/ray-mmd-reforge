@@ -361,15 +361,19 @@ float4 ComputeHexagonalBlur(sampler _MainTex, float4 _MainTex_TexelSize, float C
 
 	uv += offset * 0.5f;
 
+	float dist = length(offset);
+	float margin = _MainTex_TexelSize.y * 2.0f;
+	float invMargin = 1.0f / margin;
+	float preBias = (margin - dist) * invMargin;
+	float minCoC = _MainTex_TexelSize.y * -2.0f;
+
 	[unroll]
 	for (int i = 0; i < DOF_BLUR_RADIUS; ++i, uv += offset)
 	{
 		float4 samp = tex2Dlod(_MainTex, float4(uv, 0, 0));
 
-		float farCoC = max(min(CoC, samp.a), _MainTex_TexelSize.y * -2.0f);
-		float dist = length(offset);
-		float margin = _MainTex_TexelSize.y * 2.0f;
-		float farWeight = saturate((farCoC - dist + margin) / margin);
+		float farCoC = max(min(CoC, samp.a), minCoC);
+		float farWeight = saturate(farCoC * invMargin + preBias);
 
 		colors += samp * farWeight;
 		weight += farWeight;
