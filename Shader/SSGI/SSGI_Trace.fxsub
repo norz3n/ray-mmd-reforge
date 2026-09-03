@@ -162,8 +162,9 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 				// Reject self-sampling (bias check)
 				if (distSq > minDistanceSq)
 				{
-					float dist = sqrt(distSq);
-					float3 lightVector = diff / dist;
+					float invDist = rsqrt(distSq);
+					float dist = distSq * invDist;
+					float3 lightVector = diff * invDist;
 
 					// Receiver cosine factor (strictly positive hemisphere prevents coplanar floor self-illumination rings)
 					float NdotL = dot(nOrigin, lightVector);
