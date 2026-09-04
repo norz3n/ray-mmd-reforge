@@ -5,7 +5,7 @@
  * https://colinbarrebrisebois.com/2017/04/18/hexagonal-bokeh-blur-revisited/
  */
 
-#define DOF_BLUR_RADIUS 8
+#define DOF_BLUR_RADIUS 12
 #define DOF_POSSION_RADIUS 20
 #define DOF_POSSION_RINGS 5
 #define DOF_POSSION_POINT_PER_RING 8
@@ -555,12 +555,12 @@ float4 ComputeBilinearBlurPS(
 float4 ComputeBokehFinalPS(in float2 uv : TEXCOORD0) : COLOR
 {
 	float4 color = tex2Dlod(ShadingMapPointSamp, float4(uv + ViewportOffset, 0, 0));
-	float4 farColor = tex2D_bicubic(FocalHexBokehMapPointSamp, uv + _FocalBokehMap_TexelSize.xy * 0.5f, _FocalBokehMap_TexelSize.zw);
+	float4 farColor = tex2D_bicubic(FocalHexBokehMapLinearSamp, uv + _FocalBokehMap_TexelSize.xy * 0.5f, _FocalBokehMap_TexelSize.zw);
 	float4 nearColor = tex2D_bicubic(FocalBlur1MapLinearSamp, uv + _FocalBokehMap_TexelSize.xy * 0.5f, _FocalBokehMap_TexelSize.zw);
 
 	float4 dof = float4(lerp(lerp(color.rgb, farColor.rgb, farColor.a), nearColor.rgb, nearColor.a), nearColor.a);
 
-	float coc = tex2Dlod(FocalCoCMapPointSamp, float4(uv + ViewportOffset, 0, 0)).r;
+	float coc = tex2Dlod(FocalCoCMapLinearSamp, float4(uv + ViewportOffset, 0, 0)).r;
 
 	float ffa = smoothstep(_FocalBokehMap_TexelSize.y * 2.0f, _FocalBokehMap_TexelSize.y * 4.0f, abs(coc) * GetMaxBokehRadius(DOF_POSSION_RADIUS));
 	float alpha = ffa + dof.a - ffa * dof.a;
