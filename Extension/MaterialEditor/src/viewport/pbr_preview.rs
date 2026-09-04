@@ -51,6 +51,25 @@ impl ViewportDisplayMode {
     }
 }
 
+/// Lighting and environment mood preset for the 3D material previewer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum EnvironmentPreset {
+    #[default]
+    NeutralStudio,
+    WarmSunset,
+    CyberpunkNeon,
+}
+
+impl EnvironmentPreset {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::NeutralStudio => "⚪ Neutral Studio",
+            Self::WarmSunset => "🌅 Warm Sunset",
+            Self::CyberpunkNeon => "🌆 Cyberpunk Neon",
+        }
+    }
+}
+
 /// Camera and lighting parameters for the preview viewport.
 #[derive(Debug, Clone)]
 pub struct PreviewCamera {
@@ -63,6 +82,7 @@ pub struct PreviewCamera {
     pub light_intensity: f32,
     pub primitive: PreviewPrimitive,
     pub display_mode: ViewportDisplayMode,
+    pub environment: EnvironmentPreset,
 }
 
 impl Default for PreviewCamera {
@@ -77,6 +97,7 @@ impl Default for PreviewCamera {
             light_intensity: 1.5,
             primitive: PreviewPrimitive::Sphere,
             display_mode: ViewportDisplayMode::FullPbr,
+            environment: EnvironmentPreset::NeutralStudio,
         }
     }
 }
@@ -158,9 +179,23 @@ pub fn render_pbr_preview(
     )
     .normalize();
 
-    let light_color = Vec3::ONE * camera.light_intensity;
-    let ambient_sky = Vec3::new(0.2, 0.25, 0.35) * 0.4;
-    let ambient_ground = Vec3::new(0.12, 0.1, 0.08) * 0.4;
+    let (light_color, ambient_sky, ambient_ground) = match camera.environment {
+        EnvironmentPreset::NeutralStudio => (
+            Vec3::ONE * camera.light_intensity,
+            Vec3::new(0.25, 0.28, 0.35) * 0.45,
+            Vec3::new(0.14, 0.13, 0.11) * 0.45,
+        ),
+        EnvironmentPreset::WarmSunset => (
+            Vec3::new(1.2, 0.78, 0.48) * camera.light_intensity,
+            Vec3::new(0.45, 0.28, 0.22) * 0.55,
+            Vec3::new(0.18, 0.12, 0.08) * 0.55,
+        ),
+        EnvironmentPreset::CyberpunkNeon => (
+            Vec3::new(0.2, 1.05, 1.25) * camera.light_intensity,
+            Vec3::new(0.38, 0.12, 0.45) * 0.65,
+            Vec3::new(0.06, 0.06, 0.16) * 0.45,
+        ),
+    };
 
     out.as_flat_samples_mut()
         .as_mut_slice()

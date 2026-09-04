@@ -491,4 +491,28 @@ impl<'a> GraphEvaluator<'a> {
 
         mat
     }
+
+    /// Evaluates all nodes in the graph to populate the cache for thumbnails.
+    pub fn evaluate_all_nodes(&mut self) {
+        let node_ids: Vec<NodeId> = self.snarl.node_ids().map(|(id, _)| id).collect();
+        for id in node_ids {
+            let _ = self.eval_node_output(id, 0);
+        }
+    }
+
+    /// Extracts resized thumbnails (e.g. 56x56) for all evaluated nodes.
+    pub fn extract_thumbnails(&self, thumb_size: u32) -> HashMap<NodeId, U8Image> {
+        let mut thumbs = HashMap::new();
+        for (&(node_id, out_idx), img) in &self.cache {
+            if out_idx == 0 || !thumbs.contains_key(&node_id) {
+                let thumb = if img.width() > thumb_size || img.height() > thumb_size {
+                    image::imageops::resize(img, thumb_size, thumb_size, image::imageops::FilterType::Triangle)
+                } else {
+                    img.clone()
+                };
+                thumbs.insert(node_id, thumb);
+            }
+        }
+        thumbs
+    }
 }

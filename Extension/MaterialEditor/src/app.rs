@@ -11,7 +11,7 @@ use crate::graph::node::MaterialNode;
 use crate::graph::viewer::MaterialSnarlViewer;
 use crate::image_proc::*;
 use crate::material_export::RayMaterialConfig;
-use crate::viewport::{render_pbr_preview, PreviewCamera, PreviewPrimitive, ViewportDisplayMode};
+use crate::viewport::{render_pbr_preview, EnvironmentPreset, PreviewCamera, PreviewPrimitive, ViewportDisplayMode};
 
 /// Viewport display mode in the right panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,6 +95,7 @@ pub struct EvalResponse {
     pub evaluated: EvaluatedMaterial,
     pub eval_time_ms: f32,
     pub slot_index: Option<usize>,
+    pub node_thumbnails: HashMap<NodeId, U8Image>,
 }
 
 pub struct MaterialEditorApp {
@@ -119,6 +120,18 @@ pub struct MaterialEditorApp {
     pending_eval: bool,
     eval_tx: std::sync::mpsc::Sender<EvalRequest>,
     eval_rx: std::sync::mpsc::Receiver<EvalResponse>,
+
+    // Undo / Redo history
+    undo_stack: Vec<Snarl<MaterialNode>>,
+    redo_stack: Vec<Snarl<MaterialNode>>,
+
+    // Quick Node Search (Tab / Space)
+    show_node_search: bool,
+    node_search_query: String,
+    node_search_pos: egui::Pos2,
+
+    // Live Ray-MMD HLSL Code Inspector
+    show_hlsl_inspector: bool,
 
     // 2D Texture Map Viewer State
     viewport_mode: ViewportMode,
@@ -165,12 +178,15 @@ impl MaterialEditorApp {
                             let start = std::time::Instant::now();
                             let mut evaluator = GraphEvaluator::with_resolution(&latest_req.snarl, latest_req.working_resolution);
                             let evaluated = evaluator.evaluate_material();
+                            evaluator.evaluate_all_nodes();
+                            let node_thumbnails = evaluator.extract_thumbnails(64);
                             let eval_time_ms = start.elapsed().as_secs_f32() * 1000.0;
 
                             let _ = res_tx.send(EvalResponse {
                                 evaluated,
                                 eval_time_ms,
                                 slot_index: latest_req.slot_index,
+                                node_thumbnails,
                             });
                             ctx.request_repaint();
                             latest_req = newer;
@@ -180,12 +196,15 @@ impl MaterialEditorApp {
                     let start = std::time::Instant::now();
                     let mut evaluator = GraphEvaluator::with_resolution(&latest_req.snarl, latest_req.working_resolution);
                     let evaluated = evaluator.evaluate_material();
+                    evaluator.evaluate_all_nodes();
+                    let node_thumbnails = evaluator.extract_thumbnails(64);
                     let eval_time_ms = start.elapsed().as_secs_f32() * 1000.0;
 
                     let _ = res_tx.send(EvalResponse {
                         evaluated,
                         eval_time_ms,
                         slot_index: latest_req.slot_index,
+                        node_thumbnails,
                     });
                     ctx.request_repaint();
                 }
@@ -213,6 +232,13 @@ impl MaterialEditorApp {
             pending_eval: false,
             eval_tx,
             eval_rx,
+
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            show_node_search: false,
+            node_search_query: String::new(),
+            node_search_pos: egui::pos2(250.0, 200.0),
+            show_hlsl_inspector: false,
 
             viewport_mode: ViewportMode::Pbr3D,
             selected_map_name: "Albedo".to_string(),
@@ -354,6 +380,552 @@ impl MaterialEditorApp {
         self.connect(height_node, 0, output_node, 8);
 
         self.graph_dirty = true;
+    }
+
+    /// Saves current snarl state to undo stack.
+    pub fn push_undo_snapshot(&mut self) {
+        if self.undo_stack.len() >= 50 {
+            self.undo_stack.remove(0);
+        }
+        self.undo_stack.push(self.snarl.clone());
+        self.redo_stack.clear();
+    }
+
+    /// Reverts to the previous graph state.
+    pub fn undo(&mut self) {
+        if let Some(prev) = self.undo_stack.pop() {
+            self.redo_stack.push(self.snarl.clone());
+            self.snarl = prev;
+            self.graph_dirty = true;
+            self.status_message = "↶ Undo performed".to_string();
+        }
+    }
+
+    /// Reapplies an undone graph state.
+    pub fn redo(&mut self) {
+        if let Some(next) = self.redo_stack.pop() {
+            self.undo_stack.push(self.snarl.clone());
+            self.snarl = next;
+            self.graph_dirty = true;
+            self.status_message = "↷ Redo performed".to_string();
+        }
+    }
+
+    /// Sets up Anime Character Skin with PreIntegrated Subsurface Scattering (SSS).
+    pub fn load_anime_skin_preset(&mut self) {
+        self.push_undo_snapshot();
+        self.snarl = Snarl::new();
+
+        let color_node = self.snarl.insert_node(
+            egui::pos2(80.0, 100.0),
+            MaterialNode::ColorInput {
+                color: [0.98, 0.88, 0.82, 1.0], // Peach anime skin tone
+            },
+        );
+        let height_node = self.snarl.insert_node(
+            egui::pos2(320.0, 100.0),
+            MaterialNode::HeightGenerator {
+                contrast: 0.8,
+                brightness: 0.0,
+                invert: false,
+            },
+        );
+        let normal_node = self.snarl.insert_node(
+            egui::pos2(560.0, 60.0),
+            MaterialNode::NormalGenerator {
+                scale: 0.4,
+                filter: NormalFilter::Scharr,
+                orientation: NormalOrientation::DirectX,
+            },
+        );
+        let sss_node = self.snarl.insert_node(
+            egui::pos2(560.0, 240.0),
+            MaterialNode::CustomMapGenerator {
+                model: crate::graph::node::ShadingModel::Skin,
+                param_a: 0.8,
+                param_b_color: [1.0, 0.45, 0.32],
+                invert_a: false,
+                aniso_radial: false,
+            },
+        );
+        let rough_node = self.snarl.insert_node(
+            egui::pos2(560.0, 420.0),
+            MaterialNode::RoughnessGenerator {
+                invert: false,
+                contrast: 1.0,
+                min_val: 0.35,
+                max_val: 0.6,
+            },
+        );
+        let output_node = self.snarl.insert_node(
+            egui::pos2(860.0, 100.0),
+            MaterialNode::RayMaterialOutput {
+                material_name: "anime_skin_sss".to_string(),
+                shading_model: crate::graph::node::ShadingModel::Skin,
+                albedo_color: [1.0, 1.0, 1.0],
+                albedo_loop: [1.0, 1.0],
+                normal_scale: 1.0,
+                normal_loop: 1.0,
+                smoothness_val: 0.55,
+                is_roughness_mode: true,
+                metalness_val: 0.0,
+                specular_color: [0.35, 0.35, 0.35],
+                occlusion_val: 1.0,
+                parallax_scale: 0.0,
+                emissive_color: [0.0, 0.0, 0.0],
+                emissive_intensity: 0.0,
+                emissive_blink_mode: 0,
+                emissive_blink_freq: [1.0, 1.0, 1.0],
+                custom_a_val: 0.8,
+                custom_b_color: [1.0, 0.45, 0.32],
+                hex_tiling_enable: false,
+                hex_tiling_rotation: 0.0,
+                hex_tiling_contrast: 0.5,
+                hex_tiling_sharpness: 5.0,
+                hashed_alpha_enable: false,
+                hashed_alpha_scale: 1.0,
+                detail_map_enable: false,
+                detail_normal_scale: 1.0,
+                detail_normal_loop: 20.0,
+                detail_fade_distance: 15.0,
+            },
+        );
+
+        self.connect(color_node, 0, height_node, 0);
+        self.connect(height_node, 0, normal_node, 0);
+        self.connect(height_node, 0, rough_node, 0);
+        self.connect(color_node, 0, output_node, 0);
+        self.connect(normal_node, 0, output_node, 3);
+        self.connect(rough_node, 0, output_node, 4);
+        self.connect(sss_node, 0, output_node, 10);
+        self.connect(sss_node, 1, output_node, 11);
+
+        self.graph_dirty = true;
+        self.status_message = "Loaded recipe: Anime Skin (PreIntegrated SSS)".to_string();
+    }
+
+    /// Sets up Brushed Gold Anisotropic Metal recipe.
+    pub fn load_brushed_gold_preset(&mut self) {
+        self.push_undo_snapshot();
+        self.snarl = Snarl::new();
+
+        let color_node = self.snarl.insert_node(
+            egui::pos2(80.0, 100.0),
+            MaterialNode::ColorInput {
+                color: [1.0, 0.78, 0.28, 1.0], // Gold
+            },
+        );
+        let noise_node = self.snarl.insert_node(
+            egui::pos2(320.0, 100.0),
+            MaterialNode::ProceduralNoise {
+                noise_type: NoiseType::Perlin,
+                scale: 16.0,
+                octaves: 3,
+                lacunarity: 2.0,
+                gain: 0.5,
+            },
+        );
+        let normal_node = self.snarl.insert_node(
+            egui::pos2(560.0, 80.0),
+            MaterialNode::NormalGenerator {
+                scale: 0.6,
+                filter: NormalFilter::Scharr,
+                orientation: NormalOrientation::DirectX,
+            },
+        );
+        let aniso_node = self.snarl.insert_node(
+            egui::pos2(560.0, 260.0),
+            MaterialNode::CustomMapGenerator {
+                model: crate::graph::node::ShadingModel::Anisotropy,
+                param_a: 0.25,
+                param_b_color: [1.0, 1.0, 1.0],
+                invert_a: false,
+                aniso_radial: false,
+            },
+        );
+        let output_node = self.snarl.insert_node(
+            egui::pos2(860.0, 100.0),
+            MaterialNode::RayMaterialOutput {
+                material_name: "brushed_gold".to_string(),
+                shading_model: crate::graph::node::ShadingModel::Anisotropy,
+                albedo_color: [1.0, 1.0, 1.0],
+                albedo_loop: [1.0, 1.0],
+                normal_scale: 1.0,
+                normal_loop: 1.0,
+                smoothness_val: 0.82,
+                is_roughness_mode: false,
+                metalness_val: 1.0,
+                specular_color: [1.0, 0.85, 0.5],
+                occlusion_val: 1.0,
+                parallax_scale: 0.0,
+                emissive_color: [0.0, 0.0, 0.0],
+                emissive_intensity: 0.0,
+                emissive_blink_mode: 0,
+                emissive_blink_freq: [1.0, 1.0, 1.0],
+                custom_a_val: 0.25,
+                custom_b_color: [1.0, 1.0, 1.0],
+                hex_tiling_enable: false,
+                hex_tiling_rotation: 0.0,
+                hex_tiling_contrast: 0.5,
+                hex_tiling_sharpness: 5.0,
+                hashed_alpha_enable: false,
+                hashed_alpha_scale: 1.0,
+                detail_map_enable: false,
+                detail_normal_scale: 1.0,
+                detail_normal_loop: 20.0,
+                detail_fade_distance: 15.0,
+            },
+        );
+
+        self.connect(noise_node, 0, normal_node, 0);
+        self.connect(color_node, 0, output_node, 0);
+        self.connect(normal_node, 0, output_node, 3);
+        self.connect(aniso_node, 1, output_node, 11);
+
+        self.graph_dirty = true;
+        self.status_message = "Loaded recipe: Brushed Gold (Anisotropy)".to_string();
+    }
+
+    /// Sets up Silk & Velvet Cloth with Sheen micro-fuzz reflections.
+    pub fn load_silk_cloth_preset(&mut self) {
+        self.push_undo_snapshot();
+        self.snarl = Snarl::new();
+
+        let color_node = self.snarl.insert_node(
+            egui::pos2(80.0, 100.0),
+            MaterialNode::ColorInput {
+                color: [0.18, 0.22, 0.65, 1.0], // Royal Blue
+            },
+        );
+        let noise_node = self.snarl.insert_node(
+            egui::pos2(320.0, 100.0),
+            MaterialNode::ProceduralNoise {
+                noise_type: NoiseType::Voronoi,
+                scale: 24.0,
+                octaves: 2,
+                lacunarity: 2.0,
+                gain: 0.5,
+            },
+        );
+        let normal_node = self.snarl.insert_node(
+            egui::pos2(560.0, 80.0),
+            MaterialNode::NormalGenerator {
+                scale: 0.9,
+                filter: NormalFilter::Scharr,
+                orientation: NormalOrientation::DirectX,
+            },
+        );
+        let cloth_node = self.snarl.insert_node(
+            egui::pos2(560.0, 260.0),
+            MaterialNode::CustomMapGenerator {
+                model: crate::graph::node::ShadingModel::Cloth,
+                param_a: 1.0,
+                param_b_color: [0.65, 0.75, 1.0],
+                invert_a: false,
+                aniso_radial: false,
+            },
+        );
+        let output_node = self.snarl.insert_node(
+            egui::pos2(860.0, 100.0),
+            MaterialNode::RayMaterialOutput {
+                material_name: "silk_cloth".to_string(),
+                shading_model: crate::graph::node::ShadingModel::Cloth,
+                albedo_color: [1.0, 1.0, 1.0],
+                albedo_loop: [1.0, 1.0],
+                normal_scale: 1.0,
+                normal_loop: 1.0,
+                smoothness_val: 0.38,
+                is_roughness_mode: false,
+                metalness_val: 0.0,
+                specular_color: [0.5, 0.5, 0.5],
+                occlusion_val: 1.0,
+                parallax_scale: 0.0,
+                emissive_color: [0.0, 0.0, 0.0],
+                emissive_intensity: 0.0,
+                emissive_blink_mode: 0,
+                emissive_blink_freq: [1.0, 1.0, 1.0],
+                custom_a_val: 1.0,
+                custom_b_color: [0.65, 0.75, 1.0],
+                hex_tiling_enable: false,
+                hex_tiling_rotation: 0.0,
+                hex_tiling_contrast: 0.5,
+                hex_tiling_sharpness: 5.0,
+                hashed_alpha_enable: false,
+                hashed_alpha_scale: 1.0,
+                detail_map_enable: false,
+                detail_normal_scale: 1.0,
+                detail_normal_loop: 20.0,
+                detail_fade_distance: 15.0,
+            },
+        );
+
+        self.connect(noise_node, 0, normal_node, 0);
+        self.connect(color_node, 0, output_node, 0);
+        self.connect(normal_node, 0, output_node, 3);
+        self.connect(cloth_node, 0, output_node, 10);
+        self.connect(cloth_node, 1, output_node, 11);
+
+        self.graph_dirty = true;
+        self.status_message = "Loaded recipe: Silk & Velvet Cloth (Sheen)".to_string();
+    }
+
+    /// Sets up Clear Coat Automotive Lacquer Paint recipe.
+    pub fn load_clear_coat_preset(&mut self) {
+        self.push_undo_snapshot();
+        self.snarl = Snarl::new();
+
+        let color_node = self.snarl.insert_node(
+            egui::pos2(80.0, 100.0),
+            MaterialNode::ColorInput {
+                color: [0.85, 0.05, 0.08, 1.0], // Cherry Red
+            },
+        );
+        let coat_node = self.snarl.insert_node(
+            egui::pos2(320.0, 100.0),
+            MaterialNode::CustomMapGenerator {
+                model: crate::graph::node::ShadingModel::ClearCoat,
+                param_a: 0.95,
+                param_b_color: [1.0, 1.0, 1.0],
+                invert_a: false,
+                aniso_radial: false,
+            },
+        );
+        let output_node = self.snarl.insert_node(
+            egui::pos2(600.0, 100.0),
+            MaterialNode::RayMaterialOutput {
+                material_name: "car_clear_coat".to_string(),
+                shading_model: crate::graph::node::ShadingModel::ClearCoat,
+                albedo_color: [1.0, 1.0, 1.0],
+                albedo_loop: [1.0, 1.0],
+                normal_scale: 1.0,
+                normal_loop: 1.0,
+                smoothness_val: 0.75,
+                is_roughness_mode: false,
+                metalness_val: 0.15,
+                specular_color: [0.6, 0.6, 0.6],
+                occlusion_val: 1.0,
+                parallax_scale: 0.0,
+                emissive_color: [0.0, 0.0, 0.0],
+                emissive_intensity: 0.0,
+                emissive_blink_mode: 0,
+                emissive_blink_freq: [1.0, 1.0, 1.0],
+                custom_a_val: 0.95,
+                custom_b_color: [1.0, 1.0, 1.0],
+                hex_tiling_enable: false,
+                hex_tiling_rotation: 0.0,
+                hex_tiling_contrast: 0.5,
+                hex_tiling_sharpness: 5.0,
+                hashed_alpha_enable: false,
+                hashed_alpha_scale: 1.0,
+                detail_map_enable: false,
+                detail_normal_scale: 1.0,
+                detail_normal_loop: 20.0,
+                detail_fade_distance: 15.0,
+            },
+        );
+
+        self.connect(color_node, 0, output_node, 0);
+        self.connect(coat_node, 0, output_node, 10);
+
+        self.graph_dirty = true;
+        self.status_message = "Loaded recipe: Clear Coat Car Paint".to_string();
+    }
+
+    /// Sets up Cornea & Wet Glass refractive material recipe.
+    pub fn load_glass_preset(&mut self) {
+        self.push_undo_snapshot();
+        self.snarl = Snarl::new();
+
+        let color_node = self.snarl.insert_node(
+            egui::pos2(80.0, 100.0),
+            MaterialNode::ColorInput {
+                color: [0.92, 0.96, 1.0, 0.2],
+            },
+        );
+        let glass_node = self.snarl.insert_node(
+            egui::pos2(320.0, 100.0),
+            MaterialNode::CustomMapGenerator {
+                model: crate::graph::node::ShadingModel::Glass,
+                param_a: 0.9,
+                param_b_color: [0.9, 0.95, 1.0],
+                invert_a: false,
+                aniso_radial: false,
+            },
+        );
+        let output_node = self.snarl.insert_node(
+            egui::pos2(600.0, 100.0),
+            MaterialNode::RayMaterialOutput {
+                material_name: "glass_cornea".to_string(),
+                shading_model: crate::graph::node::ShadingModel::Glass,
+                albedo_color: [1.0, 1.0, 1.0],
+                albedo_loop: [1.0, 1.0],
+                normal_scale: 1.0,
+                normal_loop: 1.0,
+                smoothness_val: 0.98,
+                is_roughness_mode: false,
+                metalness_val: 0.0,
+                specular_color: [1.0, 1.0, 1.0],
+                occlusion_val: 1.0,
+                parallax_scale: 0.0,
+                emissive_color: [0.0, 0.0, 0.0],
+                emissive_intensity: 0.0,
+                emissive_blink_mode: 0,
+                emissive_blink_freq: [1.0, 1.0, 1.0],
+                custom_a_val: 0.9,
+                custom_b_color: [0.9, 0.95, 1.0],
+                hex_tiling_enable: false,
+                hex_tiling_rotation: 0.0,
+                hex_tiling_contrast: 0.5,
+                hex_tiling_sharpness: 5.0,
+                hashed_alpha_enable: false,
+                hashed_alpha_scale: 1.0,
+                detail_map_enable: false,
+                detail_normal_scale: 1.0,
+                detail_normal_loop: 20.0,
+                detail_fade_distance: 15.0,
+            },
+        );
+
+        self.connect(color_node, 0, output_node, 0);
+        self.connect(glass_node, 0, output_node, 10);
+
+        self.graph_dirty = true;
+        self.status_message = "Loaded recipe: Cornea / Wet Glass".to_string();
+    }
+
+    /// Sets up Sci-Fi Hex Glowing Circuit with animated emissive pulsing.
+    pub fn load_scifi_emissive_preset(&mut self) {
+        self.push_undo_snapshot();
+        self.snarl = Snarl::new();
+
+        let color_node = self.snarl.insert_node(
+            egui::pos2(80.0, 100.0),
+            MaterialNode::ColorInput {
+                color: [0.08, 0.09, 0.12, 1.0],
+            },
+        );
+        let emissive_node = self.snarl.insert_node(
+            egui::pos2(320.0, 100.0),
+            MaterialNode::EmissiveGenerator {
+                min_lum: 0.2,
+                max_lum: 1.0,
+                use_hue_filter: false,
+                target_hue: 190.0,
+                hue_tolerance: 45.0,
+                tint_color: [0.1, 0.85, 1.0],
+                intensity: 4.5,
+                invert: false,
+            },
+        );
+        let output_node = self.snarl.insert_node(
+            egui::pos2(620.0, 100.0),
+            MaterialNode::RayMaterialOutput {
+                material_name: "scifi_hex_emissive".to_string(),
+                shading_model: crate::graph::node::ShadingModel::Default,
+                albedo_color: [1.0, 1.0, 1.0],
+                albedo_loop: [1.0, 1.0],
+                normal_scale: 1.0,
+                normal_loop: 1.0,
+                smoothness_val: 0.85,
+                is_roughness_mode: false,
+                metalness_val: 0.8,
+                specular_color: [0.5, 0.5, 0.5],
+                occlusion_val: 1.0,
+                parallax_scale: 0.0,
+                emissive_color: [0.1, 0.85, 1.0],
+                emissive_intensity: 4.5,
+                emissive_blink_mode: 1,
+                emissive_blink_freq: [1.5, 1.5, 1.5],
+                custom_a_val: 0.0,
+                custom_b_color: [0.0, 0.0, 0.0],
+                hex_tiling_enable: true,
+                hex_tiling_rotation: 1.0,
+                hex_tiling_contrast: 0.7,
+                hex_tiling_sharpness: 8.0,
+                hashed_alpha_enable: false,
+                hashed_alpha_scale: 1.0,
+                detail_map_enable: false,
+                detail_normal_scale: 1.0,
+                detail_normal_loop: 20.0,
+                detail_fade_distance: 15.0,
+            },
+        );
+
+        self.connect(color_node, 0, output_node, 0);
+        self.connect(emissive_node, 0, output_node, 9);
+
+        self.graph_dirty = true;
+        self.status_message = "Loaded recipe: Sci-Fi Hex Glowing Emissive".to_string();
+    }
+
+    /// Generates current Ray-MMD material.fx HLSL code dynamically for live inspection.
+    pub fn generate_current_hlsl(&self) -> String {
+        let mut config = RayMaterialConfig::default();
+        for node in self.snarl.nodes() {
+            if let MaterialNode::RayMaterialOutput {
+                material_name,
+                shading_model,
+                albedo_color,
+                albedo_loop,
+                normal_scale,
+                normal_loop,
+                smoothness_val,
+                is_roughness_mode,
+                metalness_val,
+                specular_color,
+                occlusion_val,
+                parallax_scale,
+                emissive_color,
+                emissive_intensity,
+                emissive_blink_mode,
+                emissive_blink_freq,
+                custom_a_val,
+                custom_b_color,
+                hex_tiling_enable,
+                hex_tiling_rotation,
+                hex_tiling_contrast,
+                hex_tiling_sharpness,
+                hashed_alpha_enable,
+                hashed_alpha_scale,
+                detail_map_enable,
+                detail_normal_scale,
+                detail_normal_loop,
+                detail_fade_distance,
+            } = node
+            {
+                config.name = material_name.clone();
+                config.shading_model_id = shading_model.id();
+                config.custom_enabled = shading_model.id() > 0;
+                config.albedo_color = *albedo_color;
+                config.albedo_loop = *albedo_loop;
+                config.normal_scale = *normal_scale;
+                config.normal_loop = *normal_loop;
+                config.smoothness_val = *smoothness_val;
+                config.is_roughness_mode = *is_roughness_mode;
+                config.metalness_val = *metalness_val;
+                config.specular_color = *specular_color;
+                config.occlusion_val = *occlusion_val;
+                config.parallax_scale = *parallax_scale;
+                config.emissive_color = *emissive_color;
+                config.emissive_intensity = *emissive_intensity;
+                config.emissive_blink_mode = *emissive_blink_mode;
+                config.emissive_blink = *emissive_blink_freq;
+                config.custom_a_val = *custom_a_val;
+                config.custom_b_color = *custom_b_color;
+                config.hex_tiling_enable = *hex_tiling_enable;
+                config.hex_tiling_rotation = *hex_tiling_rotation;
+                config.hex_tiling_contrast = *hex_tiling_contrast;
+                config.hex_tiling_sharpness = *hex_tiling_sharpness;
+                config.hashed_alpha_enable = *hashed_alpha_enable;
+                config.hashed_alpha_scale = *hashed_alpha_scale;
+                config.detail_map_enable = *detail_map_enable;
+                config.detail_normal_scale = *detail_normal_scale;
+                config.detail_normal_loop = *detail_normal_loop;
+                config.detail_fade_distance = *detail_fade_distance;
+                break;
+            }
+        }
+        config.generate_fx_code()
     }
 
     /// Connects output pin to input pin.
@@ -1526,6 +2098,21 @@ impl eframe::App for MaterialEditorApp {
         while let Ok(res) = self.eval_rx.try_recv() {
             self.last_eval_time_ms = res.eval_time_ms;
             self.is_evaluating = false;
+
+            // Upload live node thumbnails into GPU textures
+            for (node_id, img) in res.node_thumbnails {
+                let ci = ColorImage::from_rgba_unmultiplied(
+                    [img.width() as usize, img.height() as usize],
+                    img.as_flat_samples().as_slice(),
+                );
+                let name = format!("thumb_{:?}", node_id);
+                if let Some(tex) = self.viewer.node_thumbnails.get_mut(&node_id) {
+                    tex.set(ci, TextureOptions::LINEAR);
+                } else {
+                    self.viewer.node_thumbnails.insert(node_id, ctx.load_texture(name, ci, TextureOptions::LINEAR));
+                }
+            }
+
             if let Some(slot_idx) = res.slot_index {
                 if let Some(slot) = self.pmx_slots.get_mut(slot_idx) {
                     slot.evaluated = Some(res.evaluated);
@@ -1536,6 +2123,47 @@ impl eframe::App for MaterialEditorApp {
                 self.evaluated = res.evaluated;
                 got_single_result = true;
             }
+        }
+
+        // Global Shortcuts: Undo (Ctrl+Z) / Redo (Ctrl+Y, Ctrl+Shift+Z)
+        if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Z) && !i.modifiers.shift) {
+            self.undo();
+        }
+        if ui.input(|i| (i.modifiers.command && i.key_pressed(egui::Key::Y)) || (i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::Z))) {
+            self.redo();
+        }
+
+        // Quick Node Search Shortcut (Tab / Space)
+        if ui.input(|i| i.key_pressed(egui::Key::Tab) || i.key_pressed(egui::Key::Space)) {
+            self.show_node_search = true;
+            self.node_search_query.clear();
+            self.node_search_pos = ui.input(|i| i.pointer.hover_pos().unwrap_or(egui::pos2(280.0, 240.0)));
+        }
+
+        // Drag & Drop from Windows Explorer
+        let dropped_files = ctx.input(|i| i.raw.dropped_files.clone());
+        for dropped in dropped_files {
+            let path = dropped.path();
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            if ext == "pmx" {
+                self.load_pmx_file(path, &ctx);
+            } else if matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "tga" | "bmp" | "dds") {
+                self.push_undo_snapshot();
+                self.auto_generate_pbr_from_image(&path.to_string_lossy());
+                self.status_message = format!("⚡ Auto-generated PBR from dropped image: {}", path.file_name().unwrap_or_default().to_string_lossy());
+            }
+        }
+
+        // Visual Drag & Drop Overlay
+        if !ctx.input(|i| i.raw.hovered_files.is_empty()) {
+            egui::Area::new(egui::Id::new("drag_drop_overlay"))
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .order(egui::Order::Foreground)
+                .show(&ctx, |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.label(egui::RichText::new("📥 Drop .PMX Model or Texture Image here").heading().color(Color32::from_rgb(80, 220, 255)));
+                    });
+                });
         }
 
         if got_single_result {
@@ -1695,39 +2323,69 @@ impl eframe::App for MaterialEditorApp {
                 });
 
                 ui.menu_button("Presets", |ui| {
-                    if ui.button("Standard PBR (Stone / Plastic)").clicked() {
+                    if ui.button("⚪ Standard PBR (Stone / Plastic)").on_hover_text("Balanced PBR surface with height, normal, roughness, and AO").clicked() {
                         self.load_default_preset();
                         ui.close();
                     }
-                    if ui.button("Polished Chrome / Metal").clicked() {
+                    if ui.button("🌸 Anime Character Skin (SSS)").on_hover_text("PreIntegrated Subsurface Scattering for realistic anime skin").clicked() {
+                        self.load_anime_skin_preset();
+                        ui.close();
+                    }
+                    if ui.button("🪙 Polished Chrome / Mirror").on_hover_text("Full metallic mirror reflection").clicked() {
                         self.load_default_preset();
                         for node in self.snarl.nodes_mut() {
                             if let MaterialNode::RayMaterialOutput { metalness_val, smoothness_val, .. } = node {
                                 *metalness_val = 1.0;
-                                *smoothness_val = 0.95;
+                                *smoothness_val = 0.98;
                             }
                         }
                         self.graph_dirty = true;
                         ui.close();
                     }
-                    if ui.button("Sci-Fi Hex Glowing Emissive").clicked() {
-                        self.load_default_preset();
-                        for node in self.snarl.nodes_mut() {
-                            if let MaterialNode::RayMaterialOutput {
-                                hex_tiling_enable,
-                                emissive_color,
-                                emissive_intensity,
-                                ..
-                            } = node {
-                                *hex_tiling_enable = true;
-                                *emissive_color = [0.1, 0.8, 1.0];
-                                *emissive_intensity = 3.5;
-                            }
-                        }
-                        self.graph_dirty = true;
+                    if ui.button("🪙 Brushed Gold (Anisotropy)").on_hover_text("Brushed anisotropic tangent flow for metals and hair").clicked() {
+                        self.load_brushed_gold_preset();
+                        ui.close();
+                    }
+                    if ui.button("👗 Silk Cloth & Velvet (Sheen)").on_hover_text("Microfiber sheen reflections for textiles and garments").clicked() {
+                        self.load_silk_cloth_preset();
+                        ui.close();
+                    }
+                    if ui.button("🚗 Clear Coat Automotive Paint").on_hover_text("Dual-layer specular lacquer coating").clicked() {
+                        self.load_clear_coat_preset();
+                        ui.close();
+                    }
+                    if ui.button("💎 Cornea / Wet Glass").on_hover_text("High gloss transparent / refractive dielectric").clicked() {
+                        self.load_glass_preset();
+                        ui.close();
+                    }
+                    if ui.button("⚡ Sci-Fi Hex Glowing Circuit").on_hover_text("Procedural hex-tiling with pulsing emissive glow").clicked() {
+                        self.load_scifi_emissive_preset();
                         ui.close();
                     }
                 });
+
+                ui.separator();
+
+                // Undo / Redo toolbar buttons
+                let can_undo = !self.undo_stack.is_empty();
+                if ui.add_enabled(can_undo, egui::Button::new("↶ Undo")).on_hover_text("Undo last change (Ctrl+Z)").clicked() {
+                    self.undo();
+                }
+                let can_redo = !self.redo_stack.is_empty();
+                if ui.add_enabled(can_redo, egui::Button::new("↷ Redo")).on_hover_text("Redo change (Ctrl+Y)").clicked() {
+                    self.redo();
+                }
+
+                ui.separator();
+                if ui.button("🔍 Add Node (Tab)").on_hover_text("Quick fuzzy search palette (Space / Tab)").clicked() {
+                    self.show_node_search = true;
+                    self.node_search_query.clear();
+                    self.node_search_pos = egui::pos2(300.0, 250.0);
+                }
+
+                if ui.selectable_label(self.show_hlsl_inspector, "📜 Ray-MMD Code").on_hover_text("View live generated HLSL .fx code").clicked() {
+                    self.show_hlsl_inspector = !self.show_hlsl_inspector;
+                }
 
                 ui.separator();
                 if ui.button("⚡ Export to Ray-MMD").clicked() {
@@ -2412,6 +3070,22 @@ impl eframe::App for MaterialEditorApp {
                                                 }
                                             }
                                         });
+
+                                    ui.separator();
+                                    ui.label("Mood:");
+                                    egui::ComboBox::from_id_salt("single_env_mode")
+                                        .selected_text(self.camera.environment.display_name())
+                                        .show_ui(ui, |ui| {
+                                            if ui.selectable_value(&mut self.camera.environment, EnvironmentPreset::NeutralStudio, "⚪ Neutral Studio").changed() {
+                                                self.preview_dirty = true;
+                                            }
+                                            if ui.selectable_value(&mut self.camera.environment, EnvironmentPreset::WarmSunset, "🌅 Warm Sunset").changed() {
+                                                self.preview_dirty = true;
+                                            }
+                                            if ui.selectable_value(&mut self.camera.environment, EnvironmentPreset::CyberpunkNeon, "🌆 Cyberpunk Neon").changed() {
+                                                self.preview_dirty = true;
+                                            }
+                                        });
                                 });
 
                                 if let Some(ref tex) = self.preview_texture {
@@ -2670,6 +3344,144 @@ impl eframe::App for MaterialEditorApp {
                 });
             if !open {
                 self.show_map_inspector_window = false;
+            }
+        }
+
+        // Quick Add Node Search Popup (Tab / Space)
+        if self.show_node_search {
+            let mut close_search = false;
+            egui::Window::new("🔍 Quick Add Node")
+                .fixed_pos(self.node_search_pos)
+                .collapsible(false)
+                .resizable(false)
+                .default_width(320.0)
+                .show(ui.ctx(), |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("🔍");
+                        let resp = ui.text_edit_singleline(&mut self.node_search_query);
+                        resp.request_focus();
+                    });
+
+                    let query = self.node_search_query.trim().to_lowercase();
+                    let mut chosen_node: Option<MaterialNode> = None;
+
+                    let items: [(&str, &str, &str, MaterialNode); 17] = [
+                        ("➕ Texture Image Input", "Load PNG/JPG/TGA image file", "texture image input file", MaterialNode::ImageInput { file_path: String::new(), is_srgb: true, cached_image: None }),
+                        ("➕ Color Value", "Uniform RGBA solid color", "color rgba solid tint", MaterialNode::ColorInput { color: [1.0, 1.0, 1.0, 1.0] }),
+                        ("➕ Float Value", "Single scalar float number", "float scalar value number", MaterialNode::FloatInput { value: 1.0, min: 0.0, max: 1.0 }),
+                        ("⚡ Procedural Noise", "Perlin fBm, Voronoi, White Noise", "noise perlin voronoi procedural", MaterialNode::ProceduralNoise { noise_type: NoiseType::Perlin, scale: 4.0, octaves: 4, lacunarity: 2.0, gain: 0.5 }),
+                        ("⚡ Height Generator", "Contrast, brightness, invert height", "height bump invert depth", MaterialNode::HeightGenerator { contrast: 1.0, brightness: 0.0, invert: false }),
+                        ("⚡ Normal Generator", "Tangent space normal map (DirectX/OpenGL)", "normal tangent bump height", MaterialNode::NormalGenerator { scale: 1.0, filter: NormalFilter::Scharr, orientation: NormalOrientation::DirectX }),
+                        ("🔀 Normal Blend (RNM)", "Reoriented Normal Mapping detail overlay", "normal blend rnm detail repeat", MaterialNode::NormalBlend { detail_scale: 1.0, detail_tile: 10.0 }),
+                        ("⚡ Ambient Occlusion (AO)", "Crevice and cavity contact shadows", "ao ambient occlusion shadow", MaterialNode::AOGenerator { radius: 16, samples: 16, intensity: 1.0, bias: 0.05 }),
+                        ("⚡ Curvature / Cavity", "Convex edge highlights & concave dirt crevices", "curvature cavity edge ridge wear", MaterialNode::CurvatureGenerator { radius: 2, intensity: 2.0, mode: CurvatureMode::Full }),
+                        ("⚡ Roughness Remap", "Remap and invert glossiness/roughness", "roughness glossiness smooth invert", MaterialNode::RoughnessGenerator { invert: false, contrast: 1.0, min_val: 0.0, max_val: 1.0 }),
+                        ("🪙 Metalness Generator", "Smart metallic isolation (Gold, Copper, Silver)", "metalness metallic chrome gold", MaterialNode::MetalnessGenerator { threshold: 0.5, falloff: 0.2, detect_metals: true, invert: false }),
+                        ("💡 Emissive Generator", "Luminance mask and color keying for glow", "emissive glow light neon blink", MaterialNode::EmissiveGenerator { min_lum: 0.5, max_lum: 1.0, use_hue_filter: false, target_hue: 180.0, hue_tolerance: 45.0, tint_color: [1.0, 1.0, 1.0], intensity: 2.0, invert: false }),
+                        ("🎭 Custom Map Generator", "Skin SSS, Hair Anisotropy, Cloth Sheen, Glass", "custom skin sss anisotropy cloth glass coat", MaterialNode::CustomMapGenerator { model: crate::graph::node::ShadingModel::Skin, param_a: 1.0, param_b_color: [1.0, 0.4, 0.25], invert_a: false, aniso_radial: false }),
+                        ("📦 Channel Packer (RGBA)", "Pack 4 grayscale maps into 1 RGBA texture", "pack channel rgba packer", MaterialNode::ChannelPacker { default_r: 128, default_g: 0, default_b: 255, default_a: 255 }),
+                        ("✂ Channel Splitter", "Extract R, G, B, A individual channels", "split channel r g b a separate", MaterialNode::ChannelSplitter),
+                        ("🎨 Color Blend", "Mix, Multiply, Screen, Overlay blend modes", "blend mix color multiply overlay", MaterialNode::ColorBlend { mode: crate::graph::node::BlendMode::Mix, factor: 0.5 }),
+                        ("🎯 Ray-MMD Master Output", "Master output connecting to Ray-MMD shader", "output master ray-mmd material", MaterialNode::RayMaterialOutput {
+                            material_name: "reforge_material".to_string(),
+                            shading_model: crate::graph::node::ShadingModel::Default,
+                            albedo_color: [1.0, 1.0, 1.0],
+                            albedo_loop: [1.0, 1.0],
+                            normal_scale: 1.0,
+                            normal_loop: 1.0,
+                            smoothness_val: 0.5,
+                            is_roughness_mode: false,
+                            metalness_val: 0.0,
+                            specular_color: [0.5, 0.5, 0.5],
+                            occlusion_val: 1.0,
+                            parallax_scale: 0.05,
+                            emissive_color: [1.0, 1.0, 1.0],
+                            emissive_intensity: 1.0,
+                            emissive_blink_mode: 0,
+                            emissive_blink_freq: [1.0, 1.0, 1.0],
+                            custom_a_val: 0.0,
+                            custom_b_color: [0.0, 0.0, 0.0],
+                            hex_tiling_enable: false,
+                            hex_tiling_rotation: 1.0,
+                            hex_tiling_contrast: 0.6,
+                            hex_tiling_sharpness: 7.0,
+                            hashed_alpha_enable: false,
+                            hashed_alpha_scale: 1.0,
+                            detail_map_enable: false,
+                            detail_normal_scale: 1.0,
+                            detail_normal_loop: 20.0,
+                            detail_fade_distance: 15.0,
+                        }),
+                    ];
+
+                    ui.separator();
+                    egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                        for (title, desc, keywords, node_template) in items {
+                            if query.is_empty() || title.to_lowercase().contains(&query) || desc.to_lowercase().contains(&query) || keywords.contains(&query) {
+                                if ui.button(title).on_hover_text(desc).clicked() {
+                                    chosen_node = Some(node_template.clone());
+                                }
+                            }
+                        }
+                    });
+
+                    if let Some(node) = chosen_node {
+                        self.push_undo_snapshot();
+                        let spawn_pos = self.node_search_pos;
+                        if self.app_mode == AppMode::SingleMaterial {
+                            self.snarl.insert_node(spawn_pos, node);
+                        } else if let Some(active_idx) = self.active_pmx_subset {
+                            if let Some(slot) = self.pmx_slots.get_mut(active_idx) {
+                                slot.snarl.insert_node(spawn_pos, node);
+                                slot.is_dirty = true;
+                                slot.has_custom_material = true;
+                            }
+                        }
+                        self.graph_dirty = true;
+                        close_search = true;
+                    }
+
+                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        close_search = true;
+                    }
+                });
+
+            if close_search {
+                self.show_node_search = false;
+            }
+        }
+
+        // Floating Live Ray-MMD HLSL Code Inspector Window
+        if self.show_hlsl_inspector {
+            let mut open = true;
+            let hlsl_code = self.generate_current_hlsl();
+            egui::Window::new("📜 Ray-MMD HLSL Code Inspector (Live Preview)")
+                .open(&mut open)
+                .default_size(Vec2::new(650.0, 500.0))
+                .resizable(true)
+                .show(ui.ctx(), |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Live preview of material.fx generated from current node graph:").weak());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("📋 Copy HLSL to Clipboard").clicked() {
+                                ui.ctx().copy_text(hlsl_code.clone());
+                                self.status_message = "Copied material.fx code to clipboard!".to_string();
+                            }
+                        });
+                    });
+                    ui.separator();
+
+                    let mut code_view = hlsl_code.clone();
+                    egui::ScrollArea::both().show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut code_view)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(f32::INFINITY)
+                        );
+                    });
+                });
+            if !open {
+                self.show_hlsl_inspector = false;
             }
         }
 

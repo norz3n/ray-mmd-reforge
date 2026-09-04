@@ -30,6 +30,8 @@ pub struct MaterialSnarlViewer {
     pub needs_rebuild: bool,
     /// List of nodes queued for deletion after frame rendering.
     pub nodes_to_remove: Vec<NodeId>,
+    /// Live node thumbnail textures for immediate in-node feedback.
+    pub node_thumbnails: std::collections::HashMap<NodeId, egui::TextureHandle>,
 }
 
 impl MaterialSnarlViewer {
@@ -37,6 +39,7 @@ impl MaterialSnarlViewer {
         Self {
             needs_rebuild: true,
             nodes_to_remove: Vec::new(),
+            node_thumbnails: std::collections::HashMap::new(),
         }
     }
 }
@@ -282,6 +285,19 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
         let node = &mut snarl[node_id];
         let mut changed = false;
 
+        // Render live node thumbnail if available
+        if !matches!(node, MaterialNode::RayMaterialOutput { .. }) {
+            if let Some(tex) = self.node_thumbnails.get(&node_id) {
+                ui.horizontal(|ui| {
+                    ui.image((tex.id(), egui::vec2(52.0, 52.0)));
+                    ui.vertical(|ui| {
+                        ui.label(egui::RichText::new("Live Preview").small().weak());
+                    });
+                });
+                ui.separator();
+            }
+        }
+
         match node {
             MaterialNode::ImageInput {
                 file_path,
@@ -334,7 +350,9 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
                 filter,
                 orientation,
             } => {
-                changed |= ui.add(Slider::new(scale, 0.05..=10.0).text("Bump Scale")).changed();
+                changed |= ui.add(Slider::new(scale, 0.05..=10.0).text("Bump Scale"))
+                    .on_hover_text("Perceived 3D depth and sharpness of normal map surface relief")
+                    .changed();
                 ui.horizontal(|ui| {
                     ui.label("Filter:");
                     egui::ComboBox::from_id_salt((node_id, "filt"))
@@ -355,8 +373,12 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
                             NormalOrientation::OpenGL => "OpenGL (Y+ Up)",
                         })
                         .show_ui(ui, |ui| {
-                            changed |= ui.selectable_value(orientation, NormalOrientation::DirectX, "DirectX (Y- Down)").changed();
-                            changed |= ui.selectable_value(orientation, NormalOrientation::OpenGL, "OpenGL (Y+ Up)").changed();
+                            changed |= ui.selectable_value(orientation, NormalOrientation::DirectX, "DirectX (Y- Down)")
+                                .on_hover_text("Standard for MMD, Ray-MMD, and DirectX games")
+                                .changed();
+                            changed |= ui.selectable_value(orientation, NormalOrientation::OpenGL, "OpenGL (Y+ Up)")
+                                .on_hover_text("Standard for Blender and OpenGL renderers")
+                                .changed();
                         });
                 });
             }
@@ -366,9 +388,13 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
                 intensity,
                 bias,
             } => {
-                changed |= ui.add(Slider::new(radius, 2..=64).text("Radius (px)")).changed();
+                changed |= ui.add(Slider::new(radius, 2..=64).text("Radius (px)"))
+                    .on_hover_text("Pixel distance for ambient shadowing in crevices")
+                    .changed();
                 changed |= ui.add(Slider::new(samples, 4..=32).text("Ray Directions")).changed();
-                changed |= ui.add(Slider::new(intensity, 0.0..=5.0).text("Intensity")).changed();
+                changed |= ui.add(Slider::new(intensity, 0.0..=5.0).text("Intensity"))
+                    .on_hover_text("Darkness strength of occluded contact shadows")
+                    .changed();
                 changed |= ui.add(Slider::new(bias, -0.2..=0.5).text("Horizon Bias")).changed();
             }
             MaterialNode::CurvatureGenerator {
@@ -387,9 +413,15 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
                             CurvatureMode::ConcaveOnly => "Concave (Cavities)",
                         })
                         .show_ui(ui, |ui| {
-                            changed |= ui.selectable_value(mode, CurvatureMode::Full, "Full (0.5 flat)").changed();
-                            changed |= ui.selectable_value(mode, CurvatureMode::ConvexOnly, "Convex (Ridges)").changed();
-                            changed |= ui.selectable_value(mode, CurvatureMode::ConcaveOnly, "Concave (Cavities)").changed();
+                            changed |= ui.selectable_value(mode, CurvatureMode::Full, "Full (0.5 flat)")
+                                .on_hover_text("Generates both bright ridge highlights and dark crevice shadows")
+                                .changed();
+                            changed |= ui.selectable_value(mode, CurvatureMode::ConvexOnly, "Convex (Ridges)")
+                                .on_hover_text("Only highlights sharp outer convex edges")
+                                .changed();
+                            changed |= ui.selectable_value(mode, CurvatureMode::ConcaveOnly, "Concave (Cavities)")
+                                .on_hover_text("Only isolates inner crevices and cavities for dirt/grime")
+                                .changed();
                         });
                 });
             }
@@ -399,17 +431,27 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
                 min_val,
                 max_val,
             } => {
-                changed |= ui.checkbox(invert, "Invert (Gloss <-> Rough)").changed();
+                changed |= ui.checkbox(invert, "Invert (Gloss <-> Rough)")
+                    .on_hover_text("Inverts between Glossiness (1 = shiny) and Roughness (0 = shiny)")
+                    .changed();
                 changed |= ui.add(Slider::new(contrast, 0.1..=5.0).text("Contrast")).changed();
-                changed |= ui.add(Slider::new(min_val, 0.0..=1.0).text("Min Output")).changed();
-                changed |= ui.add(Slider::new(max_val, 0.0..=1.0).text("Max Output")).changed();
+                changed |= ui.add(Slider::new(min_val, 0.0..=1.0).text("Min Output"))
+                    .on_hover_text("0.0 = mirror shine / smooth glass")
+                    .changed();
+                changed |= ui.add(Slider::new(max_val, 0.0..=1.0).text("Max Output"))
+                    .on_hover_text("1.0 = matte chalk / rough dry surface")
+                    .changed();
             }
             MaterialNode::NormalBlend {
                 detail_scale,
                 detail_tile,
             } => {
-                changed |= ui.add(Slider::new(detail_scale, 0.0..=5.0).text("Detail Scale")).changed();
-                changed |= ui.add(Slider::new(detail_tile, 1.0..=50.0).text("Detail Repeat")).changed();
+                changed |= ui.add(Slider::new(detail_scale, 0.0..=5.0).text("Detail Scale"))
+                    .on_hover_text("Micro-surface normal strength overlay")
+                    .changed();
+                changed |= ui.add(Slider::new(detail_tile, 1.0..=50.0).text("Detail Repeat"))
+                    .on_hover_text("Tile repetition rate across UV coordinates")
+                    .changed();
             }
             MaterialNode::ChannelPacker {
                 default_r,
