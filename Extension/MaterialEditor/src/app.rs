@@ -8,7 +8,7 @@ use egui_snarl::{InPinId, NodeId, OutPinId, Snarl};
 
 use crate::graph::eval::{EvaluatedMaterial, GraphEvaluator};
 use crate::graph::node::MaterialNode;
-use crate::graph::viewer::MaterialSnarlViewer;
+use crate::graph::viewer::{create_blender_snarl_style, MaterialSnarlViewer};
 use crate::image_proc::*;
 use crate::material_export::RayMaterialConfig;
 use crate::viewport::{render_pbr_preview, EnvironmentPreset, PreviewCamera, PreviewPrimitive, ViewportDisplayMode};
@@ -3345,7 +3345,9 @@ impl eframe::App for MaterialEditorApp {
         egui::CentralPanel::default().show(ui, |ui| {
             if self.app_mode == AppMode::SingleMaterial {
                 let state_before = self.current_undo_snapshot();
-                SnarlWidget::new().show(&mut self.snarl, &mut self.viewer, ui);
+                SnarlWidget::new()
+                    .style(create_blender_snarl_style())
+                    .show(&mut self.snarl, &mut self.viewer, ui);
 
                 let snaps: Vec<_> = self.viewer.undo_snapshots.drain(..).collect();
                 for snap in snaps {
@@ -3421,7 +3423,9 @@ impl eframe::App for MaterialEditorApp {
                         let mut removed_nodes = false;
 
                         if let Some(slot) = self.pmx_slots.get_mut(active_idx) {
-                            SnarlWidget::new().show(&mut slot.snarl, &mut self.viewer, ui);
+                            SnarlWidget::new()
+                                .style(create_blender_snarl_style())
+                                .show(&mut slot.snarl, &mut self.viewer, ui);
 
                             if self.viewer.needs_rebuild {
                                 slot.is_dirty = true;

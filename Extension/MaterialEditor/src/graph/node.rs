@@ -1,4 +1,5 @@
 use crate::image_proc::{CurvatureMode, NoiseType, NormalFilter, NormalOrientation, U8Image};
+use egui::Color32;
 use serde::{Deserialize, Serialize};
 
 /// Supported pin data types in the graph.
@@ -7,6 +8,7 @@ pub enum PinType {
     Rgba,
     Grayscale,
     Float,
+    Vector,
 }
 
 /// Node variants supported in the material graph.
@@ -193,31 +195,45 @@ impl ShadingModel {
         }
     }
 
+    pub fn short_name(&self) -> &'static str {
+        match self {
+            Self::Default => "0: Default",
+            Self::Skin => "1: Skin",
+            Self::Anisotropy => "3: Aniso",
+            Self::Glass => "4: Glass",
+            Self::Cloth => "5: Cloth",
+            Self::ClearCoat => "6: Clear Coat",
+            Self::Subsurface => "7: Subsurface",
+            Self::CelShading => "8: Cel Shading",
+            Self::ToonShading => "9: Toon Shading",
+        }
+    }
+
     pub fn custom_a_name(&self) -> &'static str {
         match self {
-            Self::Default => "Custom A (Subsurface / SSS)",
-            Self::Skin => "Curvature / SSS (Custom A)",
-            Self::Anisotropy => "Anisotropic Strength (Custom A)",
-            Self::Glass => "Curvature / Absorption (Custom A)",
-            Self::Cloth => "Sheen Weight (Custom A)",
-            Self::ClearCoat => "Clearcoat Smoothness (Custom A)",
-            Self::Subsurface => "Curvature / Opacity (Custom A)",
-            Self::CelShading => "Step Threshold (Custom A)",
-            Self::ToonShading => "Ramp Hardness (Custom A)",
+            Self::Default => "Custom A (SSS)",
+            Self::Skin => "Curvature / SSS",
+            Self::Anisotropy => "Aniso Strength",
+            Self::Glass => "Absorption",
+            Self::Cloth => "Sheen Weight",
+            Self::ClearCoat => "Coat Smoothness",
+            Self::Subsurface => "SSS Opacity",
+            Self::CelShading => "Step Threshold",
+            Self::ToonShading => "Ramp Hardness",
         }
     }
 
     pub fn custom_b_name(&self) -> &'static str {
         match self {
-            Self::Default => "Custom B (Transmittance / Tint)",
-            Self::Skin => "Transmittance Color (Custom B)",
-            Self::Anisotropy => "Tangent Flow (Custom B)",
-            Self::Glass => "Transmittance Color (Custom B)",
-            Self::Cloth => "Fuzz Color (Custom B)",
-            Self::ClearCoat => "Clearcoat Normal (Custom B)",
-            Self::Subsurface => "Transmittance Color (Custom B)",
-            Self::CelShading => "Shadow Tint (Custom B)",
-            Self::ToonShading => "Shadow Tint (Custom B)",
+            Self::Default => "Custom B (Tint)",
+            Self::Skin => "Transmittance",
+            Self::Anisotropy => "Tangent Flow",
+            Self::Glass => "Transmittance",
+            Self::Cloth => "Fuzz Color",
+            Self::ClearCoat => "Coat Normal",
+            Self::Subsurface => "Transmittance",
+            Self::CelShading => "Shadow Tint",
+            Self::ToonShading => "Shadow Tint",
         }
     }
 }
@@ -254,6 +270,42 @@ impl MaterialNode {
             Self::EmissiveGenerator { .. } => "Emissive Generator",
             Self::CustomMapGenerator { .. } => "Custom Map Generator",
             Self::RayMaterialOutput { .. } => "Ray-MMD Material Output",
+        }
+    }
+
+    /// Category header accent color matching Blender Shader Editor conventions.
+    pub fn category_color(&self) -> egui::Color32 {
+        match self {
+            // Blender Texture (Warm Orange)
+            Self::ProceduralNoise { .. } | Self::ImageInput { .. } => {
+                Color32::from_rgb(186, 92, 38)
+            }
+            // Blender Input (Slate / Charcoal)
+            Self::ColorInput { .. } | Self::FloatInput { .. } => {
+                Color32::from_rgb(80, 88, 98)
+            }
+            // Blender Vector / Normal (Purple)
+            Self::NormalGenerator { .. } | Self::NormalBlend { .. } => {
+                Color32::from_rgb(114, 72, 172)
+            }
+            // Blender Color / Converter (Deep Slate Blue)
+            Self::ChannelPacker { .. } | Self::ChannelSplitter | Self::ColorBlend { .. } => {
+                Color32::from_rgb(44, 102, 168)
+            }
+            // Blender Shader / Converter Filters (Teal)
+            Self::HeightGenerator { .. }
+            | Self::AOGenerator { .. }
+            | Self::CurvatureGenerator { .. }
+            | Self::RoughnessGenerator { .. }
+            | Self::MetalnessGenerator { .. }
+            | Self::EmissiveGenerator { .. }
+            | Self::CustomMapGenerator { .. } => {
+                Color32::from_rgb(40, 126, 124)
+            }
+            // Blender Material Output (Emerald Green)
+            Self::RayMaterialOutput { .. } => {
+                Color32::from_rgb(42, 132, 74)
+            }
         }
     }
 
@@ -312,8 +364,8 @@ impl MaterialNode {
             Self::CurvatureGenerator { .. } => ("Height", PinType::Grayscale),
             Self::RoughnessGenerator { .. } => ("Input", PinType::Grayscale),
             Self::NormalBlend { .. } => match index {
-                0 => ("Base Normal", PinType::Rgba),
-                _ => ("Detail Normal", PinType::Rgba),
+                0 => ("Base Normal", PinType::Vector),
+                _ => ("Detail Normal", PinType::Vector),
             },
             Self::ChannelPacker { .. } => match index {
                 0 => ("R", PinType::Grayscale),
@@ -336,19 +388,19 @@ impl MaterialNode {
                 _ => ("Guide / Color (Optional)", PinType::Rgba),
             },
             Self::RayMaterialOutput { shading_model, .. } => match index {
-                0 => ("Albedo (Base Color)", PinType::Rgba),
+                0 => ("Albedo", PinType::Rgba),
                 1 => ("Albedo Sub", PinType::Rgba),
                 2 => ("Alpha", PinType::Grayscale),
-                3 => ("Normal", PinType::Rgba),
-                4 => ("Smoothness / Roughness", PinType::Grayscale),
+                3 => ("Normal", PinType::Vector),
+                4 => ("Roughness", PinType::Grayscale),
                 5 => ("Metalness", PinType::Grayscale),
-                6 => ("Specular F0", PinType::Rgba),
-                7 => ("Occlusion (AO)", PinType::Grayscale),
-                8 => ("Height (Parallax)", PinType::Grayscale),
+                6 => ("Specular", PinType::Rgba),
+                7 => ("AO", PinType::Grayscale),
+                8 => ("Height", PinType::Grayscale),
                 9 => ("Emissive", PinType::Rgba),
                 10 => (shading_model.custom_a_name(), PinType::Grayscale),
                 11 => (shading_model.custom_b_name(), PinType::Rgba),
-                _ => ("Detail Normal", PinType::Rgba),
+                _ => ("Detail Normal", PinType::Vector),
             },
             _ => ("", PinType::Rgba),
         }
@@ -362,11 +414,11 @@ impl MaterialNode {
             Self::ColorInput { .. } => ("RGBA", PinType::Rgba),
             Self::FloatInput { .. } => ("Float", PinType::Float),
             Self::HeightGenerator { .. } => ("Height", PinType::Grayscale),
-            Self::NormalGenerator { .. } => ("Normal", PinType::Rgba),
+            Self::NormalGenerator { .. } => ("Normal", PinType::Vector),
             Self::AOGenerator { .. } => ("AO", PinType::Grayscale),
             Self::CurvatureGenerator { .. } => ("Curvature", PinType::Grayscale),
             Self::RoughnessGenerator { .. } => ("Roughness", PinType::Grayscale),
-            Self::NormalBlend { .. } => ("Blended Normal", PinType::Rgba),
+            Self::NormalBlend { .. } => ("Blended Normal", PinType::Vector),
             Self::ChannelPacker { .. } => ("Packed RGBA", PinType::Rgba),
             Self::ChannelSplitter => match index {
                 0 => ("R", PinType::Grayscale),
