@@ -223,6 +223,26 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
         node.output_count()
     }
 
+    fn connect(&mut self, from: &OutPin, to: &InPin, snarl: &mut Snarl<MaterialNode>) {
+        snarl.connect(from.id, to.id);
+        self.needs_rebuild = true;
+    }
+
+    fn disconnect(&mut self, from: &OutPin, to: &InPin, snarl: &mut Snarl<MaterialNode>) {
+        snarl.disconnect(from.id, to.id);
+        self.needs_rebuild = true;
+    }
+
+    fn drop_outputs(&mut self, pin: &OutPin, snarl: &mut Snarl<MaterialNode>) {
+        snarl.drop_outputs(pin.id);
+        self.needs_rebuild = true;
+    }
+
+    fn drop_inputs(&mut self, pin: &InPin, snarl: &mut Snarl<MaterialNode>) {
+        snarl.drop_inputs(pin.id);
+        self.needs_rebuild = true;
+    }
+
     fn show_input(
         &mut self,
         pin: &InPin,

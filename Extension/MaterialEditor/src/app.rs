@@ -148,9 +148,10 @@ pub struct MaterialEditorApp {
 }
 
 impl MaterialEditorApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let (eval_tx, req_rx) = std::sync::mpsc::channel::<EvalRequest>();
         let (res_tx, eval_rx) = std::sync::mpsc::channel::<EvalResponse>();
+        let ctx = cc.egui_ctx.clone();
 
         std::thread::Builder::new()
             .name("material-eval-worker".to_string())
@@ -171,6 +172,7 @@ impl MaterialEditorApp {
                                 eval_time_ms,
                                 slot_index: latest_req.slot_index,
                             });
+                            ctx.request_repaint();
                             latest_req = newer;
                         }
                     }
@@ -185,6 +187,7 @@ impl MaterialEditorApp {
                         eval_time_ms,
                         slot_index: latest_req.slot_index,
                     });
+                    ctx.request_repaint();
                 }
             })
             .expect("Failed to spawn material eval worker");
@@ -1357,6 +1360,8 @@ impl MaterialEditorApp {
                     slot.snarl = snarl;
                     slot.is_dirty = true;
                     slot.has_custom_material = true;
+                    self.graph_dirty = true;
+                    self.pmx_preview_dirty = true;
                 }
             }
         } else {
@@ -2546,6 +2551,7 @@ impl eframe::App for MaterialEditorApp {
 
                 if self.viewer.needs_rebuild {
                     self.graph_dirty = true;
+                    self.viewer.needs_rebuild = false;
                     ui.ctx().request_repaint();
                 }
 
@@ -2665,6 +2671,10 @@ impl eframe::App for MaterialEditorApp {
             if !open {
                 self.show_map_inspector_window = false;
             }
+        }
+
+        if self.graph_dirty || self.viewer.needs_rebuild || self.preview_dirty || self.pmx_preview_dirty {
+            ctx.request_repaint();
         }
     }
 }
