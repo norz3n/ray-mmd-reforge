@@ -35,3 +35,13 @@ Extension/Debug/add_morph.py
 wiki
 __pycache__/
 *.py[cod]
+
+# Rust / Cargo build artifacts
+target/
+**/target/
+**/*.rs.bk
+*.pdb
+
+# Allow distributed compiled editor executable
+!Extension/MaterialEditor/*.exe
+
