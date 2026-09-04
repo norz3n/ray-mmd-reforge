@@ -202,6 +202,17 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
             self.needs_rebuild = true;
             ui.close();
         }
+        if ui.button("⚡ Procedural Noise").clicked() {
+            snarl.insert_node(pos, MaterialNode::ProceduralNoise {
+                noise_type: crate::image_proc::NoiseType::Perlin,
+                scale: 4.0,
+                octaves: 4,
+                lacunarity: 2.0,
+                gain: 0.5,
+            });
+            self.needs_rebuild = true;
+            ui.close();
+        }
     }
 
     fn inputs(&mut self, node: &MaterialNode) -> usize {
@@ -423,6 +434,34 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
                         });
                 });
                 changed |= ui.add(Slider::new(factor, 0.0..=1.0).text("Blend Factor")).changed();
+            }
+            MaterialNode::ProceduralNoise {
+                noise_type,
+                scale,
+                octaves,
+                lacunarity,
+                gain,
+            } => {
+                ui.horizontal(|ui| {
+                    ui.label("Noise Type:");
+                    egui::ComboBox::from_id_salt((node_id, "noise_type_sel"))
+                        .selected_text(match noise_type {
+                            crate::image_proc::NoiseType::Perlin => "Perlin fBm",
+                            crate::image_proc::NoiseType::Voronoi => "Voronoi Cellular",
+                            crate::image_proc::NoiseType::WhiteNoise => "White Noise",
+                        })
+                        .show_ui(ui, |ui| {
+                            changed |= ui.selectable_value(noise_type, crate::image_proc::NoiseType::Perlin, "Perlin fBm").changed();
+                            changed |= ui.selectable_value(noise_type, crate::image_proc::NoiseType::Voronoi, "Voronoi Cellular").changed();
+                            changed |= ui.selectable_value(noise_type, crate::image_proc::NoiseType::WhiteNoise, "White Noise").changed();
+                        });
+                });
+                changed |= ui.add(Slider::new(scale, 0.1..=50.0).text("Scale / Frequency")).changed();
+                if *noise_type == crate::image_proc::NoiseType::Perlin {
+                    changed |= ui.add(Slider::new(octaves, 1..=8).text("Octaves")).changed();
+                    changed |= ui.add(Slider::new(lacunarity, 1.0..=4.0).text("Lacunarity")).changed();
+                    changed |= ui.add(Slider::new(gain, 0.0..=1.0).text("Gain (Persistence)")).changed();
+                }
             }
             MaterialNode::MetalnessGenerator {
                 threshold,

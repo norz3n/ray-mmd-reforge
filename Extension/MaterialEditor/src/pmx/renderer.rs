@@ -177,6 +177,9 @@ fn rasterize_screen_triangle(
     width: usize,
     z_buf: &mut [f32],
     pix_buf: &mut [u8],
+    id_buf: &mut [u16],
+    sub_idx: usize,
+    wireframe: bool,
     cam_pos: Vec3,
     light_dir: Vec3,
     light_color: Vec3,
@@ -212,6 +215,16 @@ fn rasterize_screen_triangle(
 
     let inv_det = 1.0 / det;
 
+    let (h0, h1, h2) = if wireframe {
+        let l12 = (v2.screen_pos - v1.screen_pos).length().max(1e-4);
+        let l20 = (v0.screen_pos - v2.screen_pos).length().max(1e-4);
+        let l01 = (v1.screen_pos - v0.screen_pos).length().max(1e-4);
+        let abs_det = det.abs();
+        (abs_det / l12, abs_det / l20, abs_det / l01)
+    } else {
+        (0.0, 0.0, 0.0)
+    };
+
     for y in start_y..end_y {
         let y_rel = y - y_start;
         let py = y as f32 + 0.5;
@@ -237,36 +250,58 @@ fn rasterize_screen_triangle(
                 let pix_idx = y_rel * width + x;
                 if depth < z_buf[pix_idx] {
                     z_buf[pix_idx] = depth;
+                    id_buf[pix_idx] = sub_idx as u16;
 
-
-
-                    let uv = (w0 * v0.uv * v0.inv_w + w1 * v1.uv * v1.inv_w + w2 * v2.uv * v2.inv_w) * w_persp;
-                    let normal = (w0 * v0.normal * v0.inv_w + w1 * v1.normal * v1.inv_w + w2 * v2.normal * v2.inv_w) * w_persp;
-                    let normal = normal.normalize_or_zero();
-                    let world_pos = (w0 * v0.world_pos * v0.inv_w + w1 * v1.world_pos * v1.inv_w + w2 * v2.world_pos * v2.inv_w) * w_persp;
-
-                    let final_rgba = shade_pmx_pixel(
-                        world_pos,
-                        normal,
-                        uv,
-                        cam_pos,
-                        light_dir,
-                        light_color,
-                        ambient_sky,
-                        ambient_ground,
-                        mat_eval,
-                        fallback_tex,
-                        subset,
-                        shading_model,
-                        display_mode,
-                        is_active,
-                    );
+                    let is_wire = if wireframe {
+                        let d0 = w0 * h0;
+                        let d1 = w1 * h1;
+                        let d2 = w2 * h2;
+                        d0.min(d1).min(d2) < 1.0
+                    } else {
+                        false
+                    };
 
                     let out_byte_idx = pix_idx * 4;
-                    pix_buf[out_byte_idx] = final_rgba[0];
-                    pix_buf[out_byte_idx + 1] = final_rgba[1];
-                    pix_buf[out_byte_idx + 2] = final_rgba[2];
-                    pix_buf[out_byte_idx + 3] = final_rgba[3];
+                    if is_wire {
+                        if is_active {
+                            pix_buf[out_byte_idx] = 0;
+                            pix_buf[out_byte_idx + 1] = 230;
+                            pix_buf[out_byte_idx + 2] = 255;
+                            pix_buf[out_byte_idx + 3] = 255;
+                        } else {
+                            pix_buf[out_byte_idx] = 30;
+                            pix_buf[out_byte_idx + 1] = 32;
+                            pix_buf[out_byte_idx + 2] = 40;
+                            pix_buf[out_byte_idx + 3] = 255;
+                        }
+                    } else {
+                        let uv = (w0 * v0.uv * v0.inv_w + w1 * v1.uv * v1.inv_w + w2 * v2.uv * v2.inv_w) * w_persp;
+                        let normal = (w0 * v0.normal * v0.inv_w + w1 * v1.normal * v1.inv_w + w2 * v2.normal * v2.inv_w) * w_persp;
+                        let normal = normal.normalize_or_zero();
+                        let world_pos = (w0 * v0.world_pos * v0.inv_w + w1 * v1.world_pos * v1.inv_w + w2 * v2.world_pos * v2.inv_w) * w_persp;
+
+                        let final_rgba = shade_pmx_pixel(
+                            world_pos,
+                            normal,
+                            uv,
+                            cam_pos,
+                            light_dir,
+                            light_color,
+                            ambient_sky,
+                            ambient_ground,
+                            mat_eval,
+                            fallback_tex,
+                            subset,
+                            shading_model,
+                            display_mode,
+                            is_active,
+                        );
+
+                        pix_buf[out_byte_idx] = final_rgba[0];
+                        pix_buf[out_byte_idx + 1] = final_rgba[1];
+                        pix_buf[out_byte_idx + 2] = final_rgba[2];
+                        pix_buf[out_byte_idx + 3] = final_rgba[3];
+                    }
                 }
             }
         }
@@ -286,6 +321,9 @@ fn clip_and_rasterize_triangle(
     width: usize,
     z_buf: &mut [f32],
     pix_buf: &mut [u8],
+    id_buf: &mut [u16],
+    sub_idx: usize,
+    wireframe: bool,
     cam_pos: Vec3,
     light_dir: Vec3,
     light_color: Vec3,
@@ -344,7 +382,8 @@ fn clip_and_rasterize_triangle(
         rasterize_screen_triangle(
             &sv0, &sv1, &sv2,
             y_start, y_end, width,
-            z_buf, pix_buf,
+            z_buf, pix_buf, id_buf,
+            sub_idx, wireframe,
             cam_pos, light_dir, light_color, ambient_sky, ambient_ground,
             mat_eval, fallback_tex, subset, shading_model, display_mode, is_active,
         );
@@ -362,12 +401,14 @@ pub fn render_pmx_model(
     display_mode: ViewportDisplayMode,
     active_subset_idx: Option<usize>,
     solo_active_subset: bool,
+    wireframe: bool,
     width: u32,
     height: u32,
-) -> U8Image {
+) -> (U8Image, Vec<u16>) {
     let mut out_img = U8Image::new(width, height);
+    let mut out_id_buf = vec![0xFFFFu16; (width * height) as usize];
     if model.vertices.is_empty() || model.indices.is_empty() {
-        return out_img;
+        return (out_img, out_id_buf);
     }
 
     let w_f = width as f32;
@@ -447,12 +488,13 @@ pub fn render_pmx_model(
         .collect();
 
     // Output raster bands
-    let rendered_bands: Vec<(usize, usize, Vec<u8>)> = bands
+    let rendered_bands: Vec<(usize, usize, Vec<u8>, Vec<u16>)> = bands
         .into_par_iter()
         .map(|(y_start, y_end)| {
             let b_height = y_end - y_start;
             let pixel_count = width as usize * b_height;
             let mut z_buf = vec![f32::MAX; pixel_count];
+            let mut id_buf = vec![0xFFFFu16; pixel_count];
             let mut pix_buf = vec![0u8; pixel_count * 4];
 
             // Fill background gradient for this band
@@ -518,6 +560,9 @@ pub fn render_pmx_model(
                                 width as usize,
                                 &mut z_buf,
                                 &mut pix_buf,
+                                &mut id_buf,
+                                sub_idx,
+                                wireframe,
                                 cam_pos,
                                 light_dir,
                                 light_color,
@@ -547,6 +592,9 @@ pub fn render_pmx_model(
                                 width as usize,
                                 &mut z_buf,
                                 &mut pix_buf,
+                                &mut id_buf,
+                                sub_idx,
+                                wireframe,
                                 cam_pos,
                                 light_dir,
                                 light_color,
@@ -564,21 +612,25 @@ pub fn render_pmx_model(
                 }
             }
 
-            (y_start, y_end, pix_buf)
+            (y_start, y_end, pix_buf, id_buf)
         })
         .collect();
 
-    // Step 3: Copy rendered bands to output image
+    // Step 3: Copy rendered bands to output image and ID buffer
     let mut flat = out_img.as_flat_samples_mut();
     let out_slice = flat.as_mut_slice();
-    for (y_start, y_end, band_bytes) in rendered_bands {
+    for (y_start, y_end, band_bytes, band_ids) in rendered_bands {
         let b_height = y_end - y_start;
         let start_idx = y_start * width as usize * 4;
         let len = width as usize * b_height * 4;
         out_slice[start_idx..start_idx + len].copy_from_slice(&band_bytes);
+
+        let id_start = y_start * width as usize;
+        let id_len = width as usize * b_height;
+        out_id_buf[id_start..id_start + id_len].copy_from_slice(&band_ids);
     }
 
-    out_img
+    (out_img, out_id_buf)
 }
 
 /// Computes the final RGBA color for a PMX pixel with Cook-Torrance GGX and Custom A/B maps.
@@ -823,7 +875,7 @@ mod tests {
         let sub_mats = vec![None; model.subsets.len()];
         let fallback_tex = vec![None; model.subsets.len()];
 
-        let img = render_pmx_model(
+        let (img, _id_buf) = render_pmx_model(
             &model,
             &sub_mats,
             &fallback_tex,
@@ -831,6 +883,7 @@ mod tests {
             ShadingModel::Default,
             ViewportDisplayMode::FullPbr,
             None,
+            false,
             false,
             256,
             256,
@@ -899,7 +952,7 @@ mod tests {
             ..Default::default()
         };
 
-        let img = render_pmx_model(
+        let (img, _id_buf) = render_pmx_model(
             &model,
             &[None],
             &[None],
@@ -907,6 +960,7 @@ mod tests {
             ShadingModel::Default,
             ViewportDisplayMode::FullPbr,
             None,
+            false,
             false,
             128,
             128,
@@ -971,7 +1025,7 @@ mod tests {
                 }
                 let sub_mats = vec![None; model.subsets.len()];
 
-                let img = render_pmx_model(
+                let (img, _id_buf) = render_pmx_model(
                     &model,
                     &sub_mats,
                     &fallback_textures,
@@ -979,6 +1033,7 @@ mod tests {
                     ShadingModel::Default,
                     ViewportDisplayMode::FullPbr,
                     None,
+                    false,
                     false,
                     640,
                     360,
@@ -998,5 +1053,88 @@ mod tests {
                 panic!("FAILED to load Cafe model: {}", e);
             }
         }
+    }
+
+    #[test]
+    fn test_wireframe_and_id_buffer() {
+        use crate::pmx::PmxVertex;
+
+        let vertices = vec![
+            PmxVertex { position: Vec3::new(-1.0, -1.0, 5.0), normal: -Vec3::Z, uv: Vec2::ZERO },
+            PmxVertex { position: Vec3::new( 1.0, -1.0, 5.0), normal: -Vec3::Z, uv: Vec2::X },
+            PmxVertex { position: Vec3::new( 0.0,  1.0, 5.0), normal: -Vec3::Z, uv: Vec2::Y },
+        ];
+        let indices = vec![0, 1, 2];
+        let subset = PmxSubset {
+            index: 0,
+            name_local: "Sub0".to_string(),
+            name_universal: "Sub0".to_string(),
+            diffuse: [1.0, 1.0, 1.0, 1.0],
+            specular: [0.0, 0.0, 0.0],
+            ambient: [0.1, 0.1, 0.1],
+            is_both_faces: true,
+            texture_index: None,
+            texture_path: None,
+            absolute_texture_path: None,
+            index_start: 0,
+            index_count: 3,
+            is_visible: true,
+        };
+        let model = PmxModel {
+            name_local: "TestTri".to_string(),
+            name_universal: "TestTri".to_string(),
+            center: Vec3::new(0.0, 0.0, 5.0),
+            radius: 2.0,
+            vertices,
+            indices,
+            subsets: vec![subset],
+            ..Default::default()
+        };
+
+        let camera = PreviewCamera {
+            target: Vec3::new(0.0, 0.0, 5.0),
+            distance: 3.0,
+            pitch: 0.0,
+            yaw: 0.0,
+            ..Default::default()
+        };
+
+        // Render without wireframe
+        let (img_solid, id_buf) = render_pmx_model(
+            &model,
+            &[None],
+            &[None],
+            &camera,
+            ShadingModel::Default,
+            ViewportDisplayMode::FullPbr,
+            None,
+            false,
+            false,
+            64,
+            64,
+        );
+
+        assert_eq!(id_buf.len(), 64 * 64);
+        let triangle_pixels = id_buf.iter().filter(|&&id| id == 0).count();
+        assert!(triangle_pixels > 50, "Expected triangle pixels in ID buffer, got {}", triangle_pixels);
+
+        // Render with wireframe
+        let (img_wire, _) = render_pmx_model(
+            &model,
+            &[None],
+            &[None],
+            &camera,
+            ShadingModel::Default,
+            ViewportDisplayMode::FullPbr,
+            None,
+            false,
+            true,
+            64,
+            64,
+        );
+
+        assert_eq!(img_wire.width(), 64);
+        assert_eq!(img_wire.height(), 64);
+        assert_ne!(img_solid.as_raw(), img_wire.as_raw(), "Wireframe must produce distinct pixel output");
     }
 }

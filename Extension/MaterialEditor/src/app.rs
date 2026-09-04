@@ -135,6 +135,10 @@ pub struct MaterialEditorApp {
     pub pmx_slots: Vec<PmxSubsetSlot>,
     pub active_pmx_subset: Option<usize>,
     pub solo_active_subset: bool,
+    pub pmx_wireframe: bool,
+    pub pmx_id_buffer: Vec<u16>,
+    pub pmx_buffer_dim: (u32, u32),
+    pub show_uv_wireframe: bool,
     pub pmx_camera: PreviewCamera,
     pub pmx_preview_texture: Option<TextureHandle>,
     pub pmx_preview_dirty: bool,
@@ -220,6 +224,10 @@ impl MaterialEditorApp {
             pmx_slots: Vec::new(),
             active_pmx_subset: None,
             solo_active_subset: false,
+            pmx_wireframe: false,
+            pmx_id_buffer: Vec::new(),
+            pmx_buffer_dim: (512, 512),
+            show_uv_wireframe: false,
             pmx_camera: PreviewCamera::default(),
             pmx_preview_texture: None,
             pmx_preview_dirty: false,
@@ -543,6 +551,10 @@ impl MaterialEditorApp {
             }
 
             ui.separator();
+            ui.checkbox(&mut self.show_uv_wireframe, "UV Wireframe")
+                .on_hover_text("Overlay active PMX subset UV wireframe on top of texture map");
+
+            ui.separator();
             if ui.button("💾 Save Image...").clicked() {
                 self.save_single_map(&self.selected_map_name);
             }
@@ -602,6 +614,44 @@ impl MaterialEditorApp {
                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                 Color32::WHITE,
             );
+
+            // Draw UV Wireframe overlay if enabled
+            if self.show_uv_wireframe {
+                if let Some(ref model) = self.pmx_model {
+                    if let Some(sub_idx) = self.active_pmx_subset {
+                        if let Some(subset) = model.subsets.get(sub_idx) {
+                            let tri_count = subset.index_count / 3;
+                            let sub_end = subset.index_start + subset.index_count;
+                            let uv_stroke = egui::Stroke::new(1.0, Color32::from_rgba_premultiplied(0, 220, 255, 140));
+                            let uv_painter = painter.with_clip_rect(img_rect);
+
+                            for t in 0..tri_count {
+                                let base = subset.index_start + t * 3;
+                                if base + 2 >= sub_end || base + 2 >= model.indices.len() {
+                                    break;
+                                }
+                                let i0 = model.indices[base] as usize;
+                                let i1 = model.indices[base + 1] as usize;
+                                let i2 = model.indices[base + 2] as usize;
+
+                                if let (Some(v0), Some(v1), Some(v2)) = (
+                                    model.vertices.get(i0),
+                                    model.vertices.get(i1),
+                                    model.vertices.get(i2),
+                                ) {
+                                    let p0 = img_rect.min + egui::vec2(v0.uv.x.rem_euclid(1.0) * img_rect.width(), v0.uv.y.rem_euclid(1.0) * img_rect.height());
+                                    let p1 = img_rect.min + egui::vec2(v1.uv.x.rem_euclid(1.0) * img_rect.width(), v1.uv.y.rem_euclid(1.0) * img_rect.height());
+                                    let p2 = img_rect.min + egui::vec2(v2.uv.x.rem_euclid(1.0) * img_rect.width(), v2.uv.y.rem_euclid(1.0) * img_rect.height());
+
+                                    uv_painter.line_segment([p0, p1], uv_stroke);
+                                    uv_painter.line_segment([p1, p2], uv_stroke);
+                                    uv_painter.line_segment([p2, p0], uv_stroke);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // Draw border around map
             painter.rect_stroke(img_rect, 0.0, egui::Stroke::new(1.0, Color32::from_rgb(80, 80, 100)), egui::StrokeKind::Outside);
@@ -984,7 +1034,7 @@ impl MaterialEditorApp {
             crate::graph::node::ShadingModel::Default
         };
 
-        let img = crate::pmx::render_pmx_model(
+        let (img, id_buf) = crate::pmx::render_pmx_model(
             model,
             &subset_materials,
             &fallback_textures,
@@ -993,9 +1043,12 @@ impl MaterialEditorApp {
             self.pmx_camera.display_mode,
             self.active_pmx_subset,
             self.solo_active_subset,
+            self.pmx_wireframe,
             width,
             height,
         );
+        self.pmx_id_buffer = id_buf;
+        self.pmx_buffer_dim = (width, height);
 
         let ci = ColorImage::from_rgba_unmultiplied(
             [img.width() as usize, img.height() as usize],
@@ -1182,8 +1235,8 @@ impl MaterialEditorApp {
         self.status_message = format!("Exported {} PMX subset materials to {:?}", exported_count, export_dir);
     }
 
-    /// Automatically sets up full ShaderMap PBR network for the active graph from an image file.
-    pub fn auto_generate_pbr_from_image(&mut self, file_path: &str) {
+    /// Builds a full PBR ShaderMap node graph for an image texture.
+    pub fn build_auto_pbr_snarl(file_path: &str, material_name: &str) -> Snarl<MaterialNode> {
         let mut snarl = Snarl::new();
 
         let img_node = snarl.insert_node(
@@ -1246,7 +1299,7 @@ impl MaterialEditorApp {
         let out_node = snarl.insert_node(
             egui::pos2(880.0, 100.0),
             MaterialNode::RayMaterialOutput {
-                material_name: "autogenerated_pbr".to_string(),
+                material_name: material_name.to_string(),
                 shading_model: crate::graph::node::ShadingModel::Default,
                 albedo_color: [1.0, 1.0, 1.0],
                 albedo_loop: [1.0, 1.0],
@@ -1291,6 +1344,13 @@ impl MaterialEditorApp {
         snarl.connect(OutPinId { node: ao_node, output: 0 }, InPinId { node: out_node, input: 7 });
         snarl.connect(OutPinId { node: height_node, output: 0 }, InPinId { node: out_node, input: 8 });
 
+        snarl
+    }
+
+    /// Automatically sets up full ShaderMap PBR network for the active graph from an image file.
+    pub fn auto_generate_pbr_from_image(&mut self, file_path: &str) {
+        let snarl = Self::build_auto_pbr_snarl(file_path, "autogenerated_pbr");
+
         if self.app_mode == AppMode::PmxStudio {
             if let Some(idx) = self.active_pmx_subset {
                 if let Some(slot) = self.pmx_slots.get_mut(idx) {
@@ -1305,6 +1365,58 @@ impl MaterialEditorApp {
         }
     }
 
+    /// Batch-generates full PBR material graphs and textures for ALL subsets in the model.
+    pub fn batch_auto_pbr_all_subsets(&mut self) {
+        let Some(ref model) = self.pmx_model else {
+            self.status_message = "No PMX model loaded.".to_string();
+            return;
+        };
+
+        let mut to_evaluate = Vec::new();
+
+        for (idx, slot) in self.pmx_slots.iter_mut().enumerate() {
+            if let Some(tex_path) = model.subsets.get(idx).and_then(|s| s.absolute_texture_path.as_ref()) {
+                let path_str = tex_path.to_string_lossy().to_string();
+                let clean_name = format!("{:02}_{}", idx, slot.name.replace(' ', "_"));
+                let snarl = Self::build_auto_pbr_snarl(&path_str, &clean_name);
+                slot.snarl = snarl.clone();
+                slot.has_custom_material = true;
+                slot.is_dirty = false;
+                to_evaluate.push((idx, snarl));
+            }
+        }
+
+        let count = to_evaluate.len();
+        if count == 0 {
+            self.status_message = "No subsets with base diffuse textures found for Auto-PBR.".to_string();
+            return;
+        }
+
+        self.status_message = format!("Batch generating PBR materials for {} subsets in parallel...", count);
+
+        // Parallel evaluation of all generated subset graphs with Rayon
+        use rayon::prelude::*;
+        let res = self.working_resolution.min(512);
+        let results: Vec<(usize, EvaluatedMaterial)> = to_evaluate
+            .into_par_iter()
+            .map(|(idx, snarl)| {
+                let mut evaluator = GraphEvaluator::with_resolution(&snarl, res);
+                let evaluated = evaluator.evaluate_material();
+                (idx, evaluated)
+            })
+            .collect();
+
+        for (idx, evaluated) in results {
+            if let Some(slot) = self.pmx_slots.get_mut(idx) {
+                slot.evaluated = Some(evaluated);
+            }
+        }
+
+        self.pmx_preview_dirty = true;
+        self.full_map_dirty = true;
+        self.status_message = format!("Batch Auto-PBR complete: generated {} materials in parallel!", count);
+    }
+
     /// Smooth, professional camera interaction for 3D viewports.
     /// - LMB drag: Orbit around target
     /// - MMB drag / Shift + LMB drag: Pan target in camera plane
@@ -1317,6 +1429,29 @@ impl MaterialEditorApp {
         } else {
             (&mut self.camera, &mut self.preview_dirty)
         };
+
+        if is_pmx && resp.clicked() {
+            if let Some(pos) = resp.interact_pointer_pos() {
+                if resp.rect.width() > 0.0 && resp.rect.height() > 0.0 {
+                    let u = ((pos.x - resp.rect.min.x) / resp.rect.width()).clamp(0.0, 1.0);
+                    let v = ((pos.y - resp.rect.min.y) / resp.rect.height()).clamp(0.0, 1.0);
+                    let (bw, bh) = self.pmx_buffer_dim;
+                    if bw > 0 && bh > 0 {
+                        let px = (u * (bw - 1) as f32).round() as usize;
+                        let py = (v * (bh - 1) as f32).round() as usize;
+                        let idx = py * (bw as usize) + px;
+                        if idx < self.pmx_id_buffer.len() {
+                            let picked_id = self.pmx_id_buffer[idx];
+                            if picked_id != 0xFFFF {
+                                self.active_pmx_subset = Some(picked_id as usize);
+                                *dirty = true;
+                                self.full_map_dirty = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         if resp.dragged() {
             let delta = resp.drag_delta();
@@ -1971,6 +2106,19 @@ impl eframe::App for MaterialEditorApp {
                         );
                         self.graph_dirty = true;
                     }
+                    if ui.button("⚡ Procedural Noise").clicked() {
+                        self.snarl.insert_node(
+                            egui::pos2(100.0, 100.0),
+                            MaterialNode::ProceduralNoise {
+                                noise_type: crate::image_proc::NoiseType::Perlin,
+                                scale: 4.0,
+                                octaves: 4,
+                                lacunarity: 2.0,
+                                gain: 0.5,
+                            },
+                        );
+                        self.graph_dirty = true;
+                    }
 
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("FILTERS & COMBINERS").strong());
@@ -2093,8 +2241,10 @@ impl eframe::App for MaterialEditorApp {
                         ui.separator();
 
                         let mut auto_pbr_path = None;
-                        if let Some(active_idx) = self.active_pmx_subset {
-                            ui.horizontal(|ui| {
+                        let mut batch_auto_pbr = false;
+
+                        ui.horizontal_wrapped(|ui| {
+                            if let Some(active_idx) = self.active_pmx_subset {
                                 if ui.button("⚡ Auto PBR").on_hover_text("Generate PBR material for selected subset from its base PMX texture").clicked() {
                                     if let Some(ref model) = self.pmx_model {
                                         if let Some(ref tex_path) = model.subsets.get(active_idx).and_then(|s| s.absolute_texture_path.as_ref()) {
@@ -2128,12 +2278,18 @@ impl eframe::App for MaterialEditorApp {
                                         }
                                     }
                                 }
-                            });
-                            ui.separator();
-                        }
+                            }
+                            if ui.button("⚡ Batch Auto-PBR All").on_hover_text("Generate complete PBR materials for ALL model subsets in parallel").clicked() {
+                                batch_auto_pbr = true;
+                            }
+                        });
+                        ui.separator();
 
                         if let Some(path) = auto_pbr_path {
                             self.auto_generate_pbr_from_image(&path);
+                        }
+                        if batch_auto_pbr {
+                            self.batch_auto_pbr_all_subsets();
                         }
 
                         let search = self.pmx_search_filter.to_lowercase();
@@ -2312,6 +2468,9 @@ impl eframe::App for MaterialEditorApp {
                                         if ui.checkbox(&mut self.solo_active_subset, "Solo").on_hover_text("Render only active material subset").changed() {
                                             self.pmx_preview_dirty = true;
                                         }
+                                        if ui.checkbox(&mut self.pmx_wireframe, "Wireframe").on_hover_text("Show mesh wireframe overlay").changed() {
+                                            self.pmx_preview_dirty = true;
+                                        }
                                         if ui.button("🎯 Focus").on_hover_text("Center camera on model bounding center").clicked() {
                                             if let Some(ref m) = self.pmx_model {
                                                 self.pmx_camera.target = m.center;
@@ -2337,7 +2496,7 @@ impl eframe::App for MaterialEditorApp {
                                         self.pmx_preview_dirty = true;
                                     }
                                     if let Some(ref tex) = self.pmx_preview_texture {
-                                        let resp = ui.image((tex.id(), preview_size)).interact(egui::Sense::drag());
+                                        let resp = ui.image((tex.id(), preview_size)).interact(egui::Sense::click_and_drag());
                                         self.handle_camera_interaction(true, &resp, ui);
                                     }
 
@@ -2412,6 +2571,9 @@ impl eframe::App for MaterialEditorApp {
 
                     if self.pmx_center_view_mode == 1 {
                         ui.separator();
+                        if ui.checkbox(&mut self.pmx_wireframe, "Wireframe").on_hover_text("Show mesh wireframe overlay").changed() {
+                            self.pmx_preview_dirty = true;
+                        }
                         if ui.button("🎯 Focus").on_hover_text("Center camera on model bounding center").clicked() {
                             if let Some(ref m) = self.pmx_model {
                                 self.pmx_camera.target = m.center;
@@ -2479,7 +2641,7 @@ impl eframe::App for MaterialEditorApp {
                         }
                     }
                     if let Some(ref tex) = self.pmx_preview_texture {
-                        let resp = ui.image((tex.id(), avail)).interact(egui::Sense::drag());
+                        let resp = ui.image((tex.id(), avail)).interact(egui::Sense::click_and_drag());
                         self.handle_camera_interaction(true, &resp, ui);
                     } else {
                         ui.centered_and_justified(|ui| {

@@ -93,6 +93,23 @@ impl<'a> GraphEvaluator<'a> {
         let dim = self.default_dim();
         let node = self.snarl.get_node(node_id)?;
         let result = match node {
+            MaterialNode::ProceduralNoise {
+                noise_type,
+                scale,
+                octaves,
+                lacunarity,
+                gain,
+            } => {
+                Some(generate_procedural_noise(
+                    dim,
+                    dim,
+                    *noise_type,
+                    *scale,
+                    *octaves,
+                    *lacunarity,
+                    *gain,
+                ))
+            }
             MaterialNode::ImageInput {
                 file_path,
                 cached_image,

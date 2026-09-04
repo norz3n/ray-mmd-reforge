@@ -1,6 +1,4 @@
-//! Node definitions and data structures for the ReForge Material Editor graph.
-
-use crate::image_proc::{CurvatureMode, NormalFilter, NormalOrientation, U8Image};
+use crate::image_proc::{CurvatureMode, NoiseType, NormalFilter, NormalOrientation, U8Image};
 use serde::{Deserialize, Serialize};
 
 /// Supported pin data types in the graph.
@@ -14,6 +12,14 @@ pub enum PinType {
 /// Node variants supported in the material graph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MaterialNode {
+    /// Generates multi-octave procedural noise (Perlin fBm, Voronoi cellular, White noise).
+    ProceduralNoise {
+        noise_type: NoiseType,
+        scale: f32,
+        octaves: usize,
+        lacunarity: f32,
+        gain: f32,
+    },
     /// Loads an image file from disk.
     ImageInput {
         file_path: String,
@@ -231,6 +237,7 @@ impl MaterialNode {
     /// Returns the display title for the node.
     pub fn title(&self) -> &'static str {
         match self {
+            Self::ProceduralNoise { .. } => "Procedural Noise",
             Self::ImageInput { .. } => "Texture Input",
             Self::ColorInput { .. } => "Color Value",
             Self::FloatInput { .. } => "Float Value",
@@ -253,6 +260,7 @@ impl MaterialNode {
     /// Number of input pins.
     pub fn input_count(&self) -> usize {
         match self {
+            Self::ProceduralNoise { .. } => 0,
             Self::ImageInput { .. } => 0,
             Self::ColorInput { .. } => 0,
             Self::FloatInput { .. } => 0,
@@ -275,6 +283,7 @@ impl MaterialNode {
     /// Number of output pins.
     pub fn output_count(&self) -> usize {
         match self {
+            Self::ProceduralNoise { .. } => 1,
             Self::ImageInput { .. } => 1,
             Self::ColorInput { .. } => 1,
             Self::FloatInput { .. } => 1,
@@ -348,6 +357,7 @@ impl MaterialNode {
     /// Name and type of output pin by index.
     pub fn output_info(&self, index: usize) -> (&'static str, PinType) {
         match self {
+            Self::ProceduralNoise { .. } => ("Noise (Grayscale)", PinType::Grayscale),
             Self::ImageInput { .. } => ("RGBA", PinType::Rgba),
             Self::ColorInput { .. } => ("RGBA", PinType::Rgba),
             Self::FloatInput { .. } => ("Float", PinType::Float),

@@ -814,3 +814,149 @@ pub fn generate_advanced_emissive_mask(
     out
 }
 
+/// Supported procedural noise algorithms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum NoiseType {
+    Perlin,
+    Voronoi,
+    WhiteNoise,
+}
+
+#[inline(always)]
+fn hash2d(x: i32, y: i32) -> f32 {
+    let mut n = (x.wrapping_mul(374761393) ^ y.wrapping_mul(668265263)) as u32;
+    n = (n ^ (n >> 13)).wrapping_mul(1274126177);
+    (n ^ (n >> 16)) as f32 / 4294967295.0
+}
+
+#[inline(always)]
+fn grad_dot(hash: u32, x: f32, y: f32) -> f32 {
+    let h = hash & 7;
+    let u = if h < 4 { x } else { y };
+    let v = if h < 4 { y } else { x };
+    (if (h & 1) != 0 { -u } else { u }) + (if (h & 2) != 0 { -2.0 * v } else { 2.0 * v })
+}
+
+#[inline(always)]
+fn perlin_2d(x: f32, y: f32) -> f32 {
+    let xi = x.floor() as i32;
+    let yi = y.floor() as i32;
+    let xf = x - x.floor();
+    let yf = y - y.floor();
+
+    let u = xf * xf * xf * (xf * (xf * 6.0 - 15.0) + 10.0);
+    let v = yf * yf * yf * (yf * (yf * 6.0 - 15.0) + 10.0);
+
+    let h00 = ((xi.wrapping_mul(374761393) ^ yi.wrapping_mul(668265263)) as u32) >> 16;
+    let h10 = (((xi + 1).wrapping_mul(374761393) ^ yi.wrapping_mul(668265263)) as u32) >> 16;
+    let h01 = ((xi.wrapping_mul(374761393) ^ (yi + 1).wrapping_mul(668265263)) as u32) >> 16;
+    let h11 = (((xi + 1).wrapping_mul(374761393) ^ (yi + 1).wrapping_mul(668265263)) as u32) >> 16;
+
+    let x1 = (1.0 - u) * grad_dot(h00, xf, yf) + u * grad_dot(h10, xf - 1.0, yf);
+    let x2 = (1.0 - u) * grad_dot(h01, xf, yf - 1.0) + u * grad_dot(h11, xf - 1.0, yf - 1.0);
+
+    ((1.0 - v) * x1 + v * x2) * 0.5 + 0.5
+}
+
+#[inline(always)]
+fn voronoi_2d(x: f32, y: f32) -> f32 {
+    let xi = x.floor() as i32;
+    let yi = y.floor() as i32;
+    let mut min_dist = 100.0f32;
+
+    for dx in -1..=1 {
+        for dy in -1..=1 {
+            let cx = xi + dx;
+            let cy = yi + dy;
+            let px = cx as f32 + hash2d(cx, cy);
+            let py = cy as f32 + hash2d(cx.wrapping_add(101), cy.wrapping_add(202));
+            let d = (px - x).hypot(py - y);
+            if d < min_dist {
+                min_dist = d;
+            }
+        }
+    }
+    min_dist.clamp(0.0, 1.0)
+}
+
+/// Generates high-performance multi-octave procedural noise (Perlin fBm, Voronoi cellular, White noise).
+pub fn generate_procedural_noise(
+    width: u32,
+    height: u32,
+    noise_type: NoiseType,
+    scale: f32,
+    octaves: usize,
+    lacunarity: f32,
+    gain: f32,
+) -> U8Image {
+    let mut out = U8Image::new(width.max(1), height.max(1));
+    let w_f = width as f32;
+    let h_f = height as f32;
+    let sc = scale.max(0.1);
+
+    out.as_mut()
+        .par_chunks_exact_mut(4)
+        .enumerate()
+        .for_each(|(idx, out_pix)| {
+            let px = (idx % width as usize) as f32;
+            let py = (idx / width as usize) as f32;
+            let u = px / w_f * sc;
+            let v = py / h_f * sc;
+
+            let val = match noise_type {
+                NoiseType::WhiteNoise => hash2d(px as i32, py as i32),
+                NoiseType::Voronoi => voronoi_2d(u, v),
+                NoiseType::Perlin => {
+                    let mut sum = 0.0f32;
+                    let mut freq = 1.0f32;
+                    let mut amp = 1.0f32;
+                    let mut max_amp = 0.0f32;
+                    let octs = octaves.clamp(1, 8);
+                    for _ in 0..octs {
+                        sum += perlin_2d(u * freq, v * freq) * amp;
+                        max_amp += amp;
+                        freq *= lacunarity;
+                        amp *= gain;
+                    }
+                    (sum / max_amp.max(1e-5)).clamp(0.0, 1.0)
+                }
+            };
+
+            let byte = (val.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+            out_pix[0] = byte;
+            out_pix[1] = byte;
+            out_pix[2] = byte;
+            out_pix[3] = 255;
+        });
+
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_procedural_noise_generation() {
+        let perlin = generate_procedural_noise(64, 64, NoiseType::Perlin, 4.0, 4, 2.0, 0.5);
+        assert_eq!(perlin.width(), 64);
+        assert_eq!(perlin.height(), 64);
+        assert!(!perlin.as_raw().is_empty());
+
+        let voronoi = generate_procedural_noise(64, 64, NoiseType::Voronoi, 5.0, 1, 2.0, 0.5);
+        assert_eq!(voronoi.width(), 64);
+        assert_eq!(voronoi.height(), 64);
+
+        let white = generate_procedural_noise(64, 64, NoiseType::WhiteNoise, 1.0, 1, 1.0, 1.0);
+        assert_eq!(white.width(), 64);
+        assert_eq!(white.height(), 64);
+
+        // Ensure noise is not completely uniform
+        let raw = perlin.as_raw();
+        let min_val = *raw.iter().step_by(4).min().unwrap();
+        let max_val = *raw.iter().step_by(4).max().unwrap();
+        assert!(max_val > min_val + 20, "Perlin noise must produce non-trivial dynamic range");
+    }
+}
+
+
