@@ -38,15 +38,15 @@ pub enum ViewportDisplayMode {
 impl ViewportDisplayMode {
     pub fn display_name(&self) -> &'static str {
         match self {
-            Self::FullPbr => "🌐 Full PBR Preview",
-            Self::AlbedoOnly => "🎨 Albedo (Base Color)",
-            Self::NormalOnly => "🧭 Normal Map",
-            Self::RoughnessOnly => "⚪ Roughness",
-            Self::MetalnessOnly => "🪙 Metalness",
-            Self::OcclusionOnly => "🌑 Ambient Occlusion",
-            Self::EmissiveOnly => "💡 Emissive Glow",
-            Self::CustomAOnly => "🎭 Custom A Channel",
-            Self::CustomBOnly => "🎭 Custom B Channel",
+            Self::FullPbr => "\u{E288} Full PBR Preview",
+            Self::AlbedoOnly => "\u{E6C8} Albedo (Base Color)",
+            Self::NormalOnly => "\u{E1C8} Normal Map",
+            Self::RoughnessOnly => "\u{E432} Roughness",
+            Self::MetalnessOnly => "\u{E60E} Metalness",
+            Self::OcclusionOnly => "\u{E18C} Ambient Occlusion",
+            Self::EmissiveOnly => "\u{E2DC} Emissive Glow",
+            Self::CustomAOnly => "\u{E228} Custom A Channel",
+            Self::CustomBOnly => "\u{E228} Custom B Channel",
         }
     }
 }
@@ -63,9 +63,9 @@ pub enum EnvironmentPreset {
 impl EnvironmentPreset {
     pub fn display_name(&self) -> &'static str {
         match self {
-            Self::NeutralStudio => "⚪ Neutral Studio",
-            Self::WarmSunset => "🌅 Warm Sunset",
-            Self::CyberpunkNeon => "🌆 Cyberpunk Neon",
+            Self::NeutralStudio => "\u{E472} Neutral Studio",
+            Self::WarmSunset => "\u{E5B6} Warm Sunset",
+            Self::CyberpunkNeon => "\u{E102} Cyberpunk Neon",
         }
     }
 }

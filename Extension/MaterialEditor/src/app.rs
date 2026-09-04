@@ -12,6 +12,7 @@ use crate::graph::viewer::{create_blender_snarl_style, MaterialSnarlViewer};
 use crate::image_proc::*;
 use crate::material_export::RayMaterialConfig;
 use crate::viewport::{render_pbr_preview, EnvironmentPreset, PreviewCamera, PreviewPrimitive, ViewportDisplayMode};
+use egui_phosphor::regular as icons;
 
 /// Viewport display mode in the right panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -170,6 +171,16 @@ pub struct MaterialEditorApp {
 
 impl MaterialEditorApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let mut fonts = egui::FontDefinitions::default();
+        fonts.font_data.insert(
+            "phosphor".into(),
+            egui::FontData::from_static(egui_phosphor::Variant::Regular.font_bytes()).into(),
+        );
+        if let Some(font_keys) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+            font_keys.push("phosphor".into());
+        }
+        cc.egui_ctx.set_fonts(fonts);
+
         let (eval_tx, req_rx) = std::sync::mpsc::channel::<EvalRequest>();
         let (res_tx, eval_rx) = std::sync::mpsc::channel::<EvalResponse>();
         let ctx = cc.egui_ctx.clone();
@@ -457,7 +468,7 @@ impl MaterialEditorApp {
                     }
                 }
             }
-            self.status_message = "↶ Undo performed".to_string();
+            self.status_message = format!("{} Undo performed", icons::ARROW_U_UP_LEFT);
         }
     }
 
@@ -485,7 +496,7 @@ impl MaterialEditorApp {
                     }
                 }
             }
-            self.status_message = "↷ Redo performed".to_string();
+            self.status_message = format!("{} Redo performed", icons::ARROW_U_UP_RIGHT);
         }
     }
 
@@ -1208,7 +1219,7 @@ impl MaterialEditorApp {
                 .on_hover_text("Overlay active PMX subset UV wireframe on top of texture map");
 
             ui.separator();
-            if ui.button("💾 Save Image...").clicked() {
+            if ui.button(format!("{} Save Image...", icons::FLOPPY_DISK)).clicked() {
                 self.save_single_map(&self.selected_map_name);
             }
         });
@@ -2241,7 +2252,7 @@ impl eframe::App for MaterialEditorApp {
             } else if matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "tga" | "bmp" | "dds") {
                 self.push_undo_snapshot();
                 self.auto_generate_pbr_from_image(&path.to_string_lossy());
-                self.status_message = format!("⚡ Auto-generated PBR from dropped image: {}", path.file_name().unwrap_or_default().to_string_lossy());
+                self.status_message = format!("{} Auto-generated PBR from dropped image: {}", icons::LIGHTNING, path.file_name().unwrap_or_default().to_string_lossy());
             }
         }
 
@@ -2252,7 +2263,7 @@ impl eframe::App for MaterialEditorApp {
                 .order(egui::Order::Foreground)
                 .show(&ctx, |ui| {
                     egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        ui.label(egui::RichText::new("📥 Drop .PMX Model or Texture Image here").heading().color(Color32::from_rgb(80, 220, 255)));
+                        ui.label(egui::RichText::new(format!("{} Drop .PMX Model or Texture Image here", icons::DOWNLOAD_SIMPLE)).heading().color(Color32::from_rgb(80, 220, 255)));
                     });
                 });
         }
@@ -2349,10 +2360,10 @@ impl eframe::App for MaterialEditorApp {
             egui::MenuBar::new().ui(ui, |ui| {
                 // Workspace Mode Selector
                 ui.horizontal(|ui| {
-                    if ui.selectable_label(self.app_mode == AppMode::SingleMaterial, "🎨 Single Material Editor").clicked() {
+                    if ui.selectable_label(self.app_mode == AppMode::SingleMaterial, format!("{} Single Material Editor", icons::PALETTE)).clicked() {
                         self.app_mode = AppMode::SingleMaterial;
                     }
-                    if ui.selectable_label(self.app_mode == AppMode::PmxStudio, "💃 PMX Model Studio").clicked() {
+                    if ui.selectable_label(self.app_mode == AppMode::PmxStudio, format!("{} PMX Model Studio", icons::CUBE)).clicked() {
                         self.app_mode = AppMode::PmxStudio;
                         if self.pmx_model.is_some() {
                             self.pmx_preview_dirty = true;
@@ -2363,7 +2374,7 @@ impl eframe::App for MaterialEditorApp {
                 ui.separator();
 
                 ui.menu_button("File", |ui| {
-                    if ui.button("📂 Open PMX Model...").clicked() {
+                    if ui.button(format!("{} Open PMX Model...", icons::FOLDER_OPEN)).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .add_filter("PMX Model (*.pmx)", &["pmx"])
                             .pick_file()
@@ -2372,16 +2383,16 @@ impl eframe::App for MaterialEditorApp {
                         }
                         ui.close();
                     }
-                    if self.app_mode == AppMode::PmxStudio && ui.button("💾 Export All PMX Materials...").clicked() {
+                    if self.app_mode == AppMode::PmxStudio && ui.button(format!("{} Export All PMX Materials...", icons::EXPORT)).clicked() {
                         self.export_all_pmx_materials();
                         ui.close();
                     }
                     ui.separator();
-                    if ui.button("New Graph").clicked() {
+                    if ui.button(format!("{} New Graph", icons::FILE_PLUS)).clicked() {
                         self.load_default_preset();
                         ui.close();
                     }
-                    if ui.button("Save Graph (.rfmat)...").clicked() {
+                    if ui.button(format!("{} Save Graph (.rfmat)...", icons::FLOPPY_DISK)).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .add_filter("ReForge Material", &["rfmat", "json"])
                             .save_file()
@@ -2392,7 +2403,7 @@ impl eframe::App for MaterialEditorApp {
                         }
                         ui.close();
                     }
-                    if ui.button("Load Graph (.rfmat)...").clicked() {
+                    if ui.button(format!("{} Load Graph (.rfmat)...", icons::FOLDER_OPEN)).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .add_filter("ReForge Material", &["rfmat", "json"])
                             .pick_file()
@@ -2408,22 +2419,22 @@ impl eframe::App for MaterialEditorApp {
                         ui.close();
                     }
                     ui.separator();
-                    if ui.button("⚡ Export Ray-MMD Material (.fx + Maps)").clicked() {
+                    if ui.button(format!("{} Export Ray-MMD Material (.fx + Maps)", icons::EXPORT)).clicked() {
                         self.export_ray_material();
                         ui.close();
                     }
                 });
 
                 ui.menu_button("Presets", |ui| {
-                    if ui.button("⚪ Standard PBR (Stone / Plastic)").on_hover_text("Balanced PBR surface with height, normal, roughness, and AO").clicked() {
+                    if ui.button(format!("{} Standard PBR (Stone / Plastic)", icons::SPHERE)).on_hover_text("Balanced PBR surface with height, normal, roughness, and AO").clicked() {
                         self.load_default_preset();
                         ui.close();
                     }
-                    if ui.button("🌸 Anime Character Skin (SSS)").on_hover_text("PreIntegrated Subsurface Scattering for realistic anime skin").clicked() {
+                    if ui.button(format!("{} Anime Character Skin (SSS)", icons::SPARKLE)).on_hover_text("PreIntegrated Subsurface Scattering for realistic anime skin").clicked() {
                         self.load_anime_skin_preset();
                         ui.close();
                     }
-                    if ui.button("🪙 Polished Chrome / Mirror").on_hover_text("Full metallic mirror reflection").clicked() {
+                    if ui.button(format!("{} Polished Chrome / Mirror", icons::SPARKLE)).on_hover_text("Full metallic mirror reflection").clicked() {
                         self.load_default_preset();
                         for node in self.snarl.nodes_mut() {
                             if let MaterialNode::RayMaterialOutput { metalness_val, smoothness_val, .. } = node {
@@ -2434,23 +2445,23 @@ impl eframe::App for MaterialEditorApp {
                         self.graph_dirty = true;
                         ui.close();
                     }
-                    if ui.button("🪙 Brushed Gold (Anisotropy)").on_hover_text("Brushed anisotropic tangent flow for metals and hair").clicked() {
+                    if ui.button(format!("{} Brushed Gold (Anisotropy)", icons::COIN)).on_hover_text("Brushed anisotropic tangent flow for metals and hair").clicked() {
                         self.load_brushed_gold_preset();
                         ui.close();
                     }
-                    if ui.button("👗 Silk Cloth & Velvet (Sheen)").on_hover_text("Microfiber sheen reflections for textiles and garments").clicked() {
+                    if ui.button(format!("{} Silk Cloth & Velvet (Sheen)", icons::WAVES)).on_hover_text("Microfiber sheen reflections for textiles and garments").clicked() {
                         self.load_silk_cloth_preset();
                         ui.close();
                     }
-                    if ui.button("🚗 Clear Coat Automotive Paint").on_hover_text("Dual-layer specular lacquer coating").clicked() {
+                    if ui.button(format!("{} Clear Coat Automotive Paint", icons::SHIELD)).on_hover_text("Dual-layer specular lacquer coating").clicked() {
                         self.load_clear_coat_preset();
                         ui.close();
                     }
-                    if ui.button("💎 Cornea / Wet Glass").on_hover_text("High gloss transparent / refractive dielectric").clicked() {
+                    if ui.button(format!("{} Cornea / Wet Glass", icons::DROP)).on_hover_text("High gloss transparent / refractive dielectric").clicked() {
                         self.load_glass_preset();
                         ui.close();
                     }
-                    if ui.button("⚡ Sci-Fi Hex Glowing Circuit").on_hover_text("Procedural hex-tiling with pulsing emissive glow").clicked() {
+                    if ui.button(format!("{} Sci-Fi Hex Glowing Circuit", icons::LIGHTNING)).on_hover_text("Procedural hex-tiling with pulsing emissive glow").clicked() {
                         self.load_scifi_emissive_preset();
                         ui.close();
                     }
@@ -2460,27 +2471,27 @@ impl eframe::App for MaterialEditorApp {
 
                 // Undo / Redo toolbar buttons
                 let can_undo = !self.undo_stack.is_empty();
-                if ui.add_enabled(can_undo, egui::Button::new("↶ Undo")).on_hover_text("Undo last change (Ctrl+Z)").clicked() {
+                if ui.add_enabled(can_undo, egui::Button::new(format!("{} Undo", icons::ARROW_U_UP_LEFT))).on_hover_text("Undo last change (Ctrl+Z)").clicked() {
                     self.undo();
                 }
                 let can_redo = !self.redo_stack.is_empty();
-                if ui.add_enabled(can_redo, egui::Button::new("↷ Redo")).on_hover_text("Redo change (Ctrl+Y)").clicked() {
+                if ui.add_enabled(can_redo, egui::Button::new(format!("{} Redo", icons::ARROW_U_UP_RIGHT))).on_hover_text("Redo change (Ctrl+Y)").clicked() {
                     self.redo();
                 }
 
                 ui.separator();
-                if ui.button("🔍 Add Node (Tab)").on_hover_text("Quick fuzzy search palette (Space / Tab)").clicked() {
+                if ui.button(format!("{} Add Node (Tab)", icons::PLUS_CIRCLE)).on_hover_text("Quick fuzzy search palette (Space / Tab)").clicked() {
                     self.show_node_search = true;
                     self.node_search_query.clear();
                     self.node_search_pos = egui::pos2(300.0, 250.0);
                 }
 
-                if ui.selectable_label(self.show_hlsl_inspector, "📜 Ray-MMD Code").on_hover_text("View live generated HLSL .fx code").clicked() {
+                if ui.selectable_label(self.show_hlsl_inspector, format!("{} Ray-MMD Code", icons::CODE)).on_hover_text("View live generated HLSL .fx code").clicked() {
                     self.show_hlsl_inspector = !self.show_hlsl_inspector;
                 }
 
                 ui.separator();
-                if ui.button("⚡ Export to Ray-MMD").clicked() {
+                if ui.button(format!("{} Export to Ray-MMD", icons::EXPORT)).clicked() {
                     self.export_ray_material();
                 }
 
@@ -2507,12 +2518,12 @@ impl eframe::App for MaterialEditorApp {
 
                 ui.separator();
                 if self.is_evaluating {
-                    ui.colored_label(Color32::from_rgb(255, 200, 50), "⏳ Evaluating...");
+                    ui.colored_label(Color32::from_rgb(255, 200, 50), format!("{} Evaluating...", icons::HOURGLASS));
                     ctx.request_repaint();
                 } else {
                     ui.colored_label(
                         Color32::from_rgb(80, 220, 100),
-                        format!("⚡ {:.1}ms", self.last_eval_time_ms),
+                        format!("{} {:.1}ms", icons::LIGHTNING, self.last_eval_time_ms),
                     );
                 }
             });
@@ -2575,7 +2586,7 @@ impl eframe::App for MaterialEditorApp {
                     }
 
                     ui.separator();
-                    if ui.button("🔍 2D Map Inspector").on_hover_text("Open dedicated floating 2D Texture Inspector window with zoom, pan, and pixel probe").clicked() {
+                    if ui.button(format!("{} 2D Map Inspector", icons::MAGNIFYING_GLASS)).on_hover_text("Open dedicated floating 2D Texture Inspector window with zoom, pan, and pixel probe").clicked() {
                         self.show_map_inspector_window = true;
                     }
 
@@ -2663,16 +2674,16 @@ impl eframe::App for MaterialEditorApp {
                             }
                             ui.add_space(6.0);
                             ui.horizontal(|ui| {
-                                if ui.button("🔍 View in 2D Viewport").clicked() {
+                                if ui.button(format!("{} View in 2D Viewport", icons::MAGNIFYING_GLASS)).clicked() {
                                     view_2d_clicked = Some(active_name.to_string());
                                 }
-                                if ui.button("🖼 Floating Inspector Window").clicked() {
+                                if ui.button(format!("{} Floating Inspector Window", icons::ARROWS_OUT)).clicked() {
                                     inspect_window_clicked = Some(active_name.to_string());
                                 }
-                                if ui.button("💾 Save Map to File...").clicked() {
+                                if ui.button(format!("{} Save Map to File...", icons::FLOPPY_DISK)).clicked() {
                                     save_map = Some(active_name.to_string());
                                 }
-                                if ui.button("📋 Show All Maps").clicked() {
+                                if ui.button(format!("{} Show All Maps", icons::STACK)).clicked() {
                                     switch_to_all = true;
                                 }
                             });
@@ -2717,8 +2728,8 @@ impl eframe::App for MaterialEditorApp {
                     ui.heading("Node Palette");
                     ui.separator();
 
-                    ui.label(egui::RichText::new("⚡ QUICK PBR TOOLS").strong());
-                    if ui.button("⚡ Auto PBR from Image...").on_hover_text("Automatically generates full ShaderMap PBR material (Height, Normal, Roughness, Metalness, AO) from a texture").clicked() {
+                    ui.label(egui::RichText::new(format!("{} QUICK PBR TOOLS", icons::LIGHTNING)).strong());
+                    if ui.button(format!("{} Auto PBR from Image...", icons::LIGHTNING)).on_hover_text("Automatically generates full ShaderMap PBR material (Height, Normal, Roughness, Metalness, AO) from a texture").clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .add_filter("Images", &["png", "jpg", "jpeg", "tga", "bmp"])
                             .pick_file()
@@ -2726,7 +2737,7 @@ impl eframe::App for MaterialEditorApp {
                             self.auto_generate_pbr_from_image(&path.to_string_lossy());
                         }
                     }
-                    if ui.button("🪙 Add Metalness Generator").clicked() {
+                    if ui.button(format!("{} Add Metalness Generator", icons::COIN)).clicked() {
                         self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(120.0, 150.0),
@@ -2739,7 +2750,7 @@ impl eframe::App for MaterialEditorApp {
                         );
                         self.graph_dirty = true;
                     }
-                    if ui.button("💡 Add Emissive Mask Generator").clicked() {
+                    if ui.button(format!("{} Add Emissive Mask Generator", icons::LIGHTBULB)).clicked() {
                         self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(120.0, 150.0),
@@ -2756,7 +2767,7 @@ impl eframe::App for MaterialEditorApp {
                         );
                         self.graph_dirty = true;
                     }
-                    if ui.button("🎭 Add Custom A/B Generator").on_hover_text("Generate Custom A (SSS/Sheen/Roughness) and Custom B (Tint/Flow)").clicked() {
+                    if ui.button(format!("{} Add Custom A/B Generator", icons::MASK_HAPPY)).on_hover_text("Generate Custom A (SSS/Sheen/Roughness) and Custom B (Tint/Flow)").clicked() {
                         self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(120.0, 150.0),
@@ -2773,7 +2784,7 @@ impl eframe::App for MaterialEditorApp {
 
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("INPUTS").strong());
-                    if ui.button("➕ Texture Image").clicked() {
+                    if ui.button(format!("{} Texture Image", icons::IMAGE)).clicked() {
                         self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
@@ -2785,7 +2796,7 @@ impl eframe::App for MaterialEditorApp {
                         );
                         self.graph_dirty = true;
                     }
-                    if ui.button("➕ Color Value").clicked() {
+                    if ui.button(format!("{} Color Value", icons::PALETTE)).clicked() {
                         self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
@@ -2795,7 +2806,7 @@ impl eframe::App for MaterialEditorApp {
                         );
                         self.graph_dirty = true;
                     }
-                    if ui.button("➕ Float Value").clicked() {
+                    if ui.button(format!("{} Float Value", icons::SLIDERS)).clicked() {
                         self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
@@ -2810,7 +2821,7 @@ impl eframe::App for MaterialEditorApp {
 
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("SHADERMAP GENERATORS").strong());
-                    if ui.button("⚡ Height Generator").clicked() {
+                    if ui.button(format!("{} Height Generator", icons::WAVES)).clicked() {
                         self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
@@ -2822,7 +2833,7 @@ impl eframe::App for MaterialEditorApp {
                         );
                         self.graph_dirty = true;
                     }
-                    if ui.button("⚡ Normal Generator").clicked() {
+                    if ui.button(format!("{} Normal Generator", icons::COMPASS)).clicked() {
                         self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
@@ -2834,7 +2845,7 @@ impl eframe::App for MaterialEditorApp {
                         );
                         self.graph_dirty = true;
                     }
-                    if ui.button("⚡ Ambient Occlusion (AO)").clicked() {
+                    if ui.button(format!("{} Ambient Occlusion (AO)", icons::CIRCLE_HALF)).clicked() {
                         self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
@@ -2847,7 +2858,7 @@ impl eframe::App for MaterialEditorApp {
                         );
                         self.graph_dirty = true;
                     }
-                    if ui.button("⚡ Curvature / Cavity").clicked() {
+                    if ui.button(format!("{} Curvature / Cavity", icons::APERTURE)).clicked() {
                         self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
@@ -2859,7 +2870,7 @@ impl eframe::App for MaterialEditorApp {
                         );
                         self.graph_dirty = true;
                     }
-                    if ui.button("⚡ Roughness Remap").clicked() {
+                    if ui.button(format!("{} Roughness Remap", icons::FADERS)).clicked() {
                         self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
@@ -2872,7 +2883,7 @@ impl eframe::App for MaterialEditorApp {
                         );
                         self.graph_dirty = true;
                     }
-                    if ui.button("⚡ Custom Map Generator").clicked() {
+                    if ui.button(format!("{} Custom Map Generator", icons::MASK_HAPPY)).clicked() {
                         self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
@@ -2886,7 +2897,7 @@ impl eframe::App for MaterialEditorApp {
                         );
                         self.graph_dirty = true;
                     }
-                    if ui.button("⚡ Procedural Noise").clicked() {
+                    if ui.button(format!("{} Procedural Noise", icons::WAVEFORM)).clicked() {
                         self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
@@ -2903,7 +2914,7 @@ impl eframe::App for MaterialEditorApp {
 
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("FILTERS & COMBINERS").strong());
-                    if ui.button("🔀 Normal Blend (RNM)").clicked() {
+                    if ui.button(format!("{} Normal Blend (RNM)", icons::GIT_MERGE)).clicked() {
                         self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
@@ -2914,7 +2925,7 @@ impl eframe::App for MaterialEditorApp {
                         );
                         self.graph_dirty = true;
                     }
-                    if ui.button("📦 Channel Packer (RGBA)").clicked() {
+                    if ui.button(format!("{} Channel Packer (RGBA)", icons::PACKAGE)).clicked() {
                         self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
@@ -2927,7 +2938,7 @@ impl eframe::App for MaterialEditorApp {
                         );
                         self.graph_dirty = true;
                     }
-                    if ui.button("✂ Channel Splitter").clicked() {
+                    if ui.button(format!("{} Channel Splitter", icons::SCISSORS)).clicked() {
                         self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
@@ -2935,7 +2946,7 @@ impl eframe::App for MaterialEditorApp {
                         );
                         self.graph_dirty = true;
                     }
-                    if ui.button("🎨 Color Blend").clicked() {
+                    if ui.button(format!("{} Color Blend", icons::PAINT_BUCKET)).clicked() {
                         self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
@@ -2949,7 +2960,7 @@ impl eframe::App for MaterialEditorApp {
 
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("OUTPUTS").strong());
-                    if ui.button("🎯 Ray-MMD Master Output").clicked() {
+                    if ui.button(format!("{} Ray-MMD Master Output", icons::TARGET)).clicked() {
                         self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
@@ -2992,7 +3003,7 @@ impl eframe::App for MaterialEditorApp {
                     ui.separator();
 
                     ui.horizontal(|ui| {
-                        if ui.button("📂 Open PMX...").clicked() {
+                        if ui.button(format!("{} Open PMX...", icons::FOLDER_OPEN)).clicked() {
                             if let Some(path) = rfd::FileDialog::new()
                                 .add_filter("PMX Model (*.pmx)", &["pmx"])
                                 .pick_file()
@@ -3000,7 +3011,7 @@ impl eframe::App for MaterialEditorApp {
                                 self.load_pmx_file(path, &ctx);
                             }
                         }
-                        if self.pmx_model.is_some() && ui.button("💾 Export All").clicked() {
+                        if self.pmx_model.is_some() && ui.button(format!("{} Export All", icons::FLOPPY_DISK)).clicked() {
                             self.export_all_pmx_materials();
                         }
                     });
@@ -3031,14 +3042,14 @@ impl eframe::App for MaterialEditorApp {
 
                         ui.horizontal_wrapped(|ui| {
                             if let Some(active_idx) = self.active_pmx_subset {
-                                if ui.button("⚡ Auto PBR").on_hover_text("Generate PBR material for selected subset from its base PMX texture").clicked() {
+                                if ui.button(format!("{} Auto PBR", icons::LIGHTNING)).on_hover_text("Generate PBR material for selected subset from its base PMX texture").clicked() {
                                     if let Some(ref model) = self.pmx_model {
                                         if let Some(ref tex_path) = model.subsets.get(active_idx).and_then(|s| s.absolute_texture_path.as_ref()) {
                                             auto_pbr_path = Some(tex_path.to_string_lossy().to_string());
                                         }
                                     }
                                 }
-                                if ui.button("🎯 Focus Subset").on_hover_text("Center camera directly on this material subset").clicked() {
+                                if ui.button(format!("{} Focus Subset", icons::CROSSHAIR)).on_hover_text("Center camera directly on this material subset").clicked() {
                                     if let Some(ref model) = self.pmx_model {
                                         if let Some(sub) = model.subsets.get(active_idx) {
                                             let mut s_min = glam::Vec3::splat(f32::MAX);
@@ -3065,7 +3076,7 @@ impl eframe::App for MaterialEditorApp {
                                     }
                                 }
                             }
-                            if ui.button("⚡ Batch Auto-PBR All").on_hover_text("Generate complete PBR materials for ALL model subsets in parallel").clicked() {
+                            if ui.button(format!("{} Batch Auto-PBR All", icons::LIGHTNING)).on_hover_text("Generate complete PBR materials for ALL model subsets in parallel").clicked() {
                                 batch_auto_pbr = true;
                             }
                         });
@@ -3137,16 +3148,16 @@ impl eframe::App for MaterialEditorApp {
                 let is_fullscreen_pmx = self.app_mode == AppMode::PmxStudio && self.pmx_center_view_mode == 1;
 
                 if is_fullscreen_pmx {
-                    ui.heading("🖼 2D Texture Map Inspector");
+                    ui.heading(format!("{} 2D Texture Map Inspector", icons::IMAGE));
                     ui.separator();
                     self.show_2d_map_viewer(ui);
                 } else {
                     ui.horizontal(|ui| {
-                        let pbr_label = if self.app_mode == AppMode::PmxStudio { "💃 3D Model" } else { "🌐 3D Viewport" };
+                        let pbr_label = if self.app_mode == AppMode::PmxStudio { format!("{} 3D Model", icons::PERSON) } else { format!("{} 3D Viewport", icons::GLOBE) };
                         if ui.selectable_label(self.viewport_mode == ViewportMode::Pbr3D, pbr_label).clicked() {
                             self.viewport_mode = ViewportMode::Pbr3D;
                         }
-                        if ui.selectable_label(self.viewport_mode == ViewportMode::Map2D, "🖼 2D Texture Viewer").clicked() {
+                        if ui.selectable_label(self.viewport_mode == ViewportMode::Map2D, format!("{} 2D Texture Viewer", icons::IMAGE)).clicked() {
                             self.viewport_mode = ViewportMode::Map2D;
                             self.full_map_dirty = true;
                         }
@@ -3161,13 +3172,13 @@ impl eframe::App for MaterialEditorApp {
 
                                 ui.horizontal(|ui| {
                                     ui.label("Mesh:");
-                                    if ui.selectable_value(&mut self.camera.primitive, PreviewPrimitive::Sphere, "Sphere").changed() {
+                                    if ui.selectable_value(&mut self.camera.primitive, PreviewPrimitive::Sphere, format!("{} Sphere", icons::SPHERE)).changed() {
                                         self.preview_dirty = true;
                                     }
-                                    if ui.selectable_value(&mut self.camera.primitive, PreviewPrimitive::Cube, "Cube").changed() {
+                                    if ui.selectable_value(&mut self.camera.primitive, PreviewPrimitive::Cube, format!("{} Cube", icons::CUBE)).changed() {
                                         self.preview_dirty = true;
                                     }
-                                    if ui.selectable_value(&mut self.camera.primitive, PreviewPrimitive::Plane, "Plane").changed() {
+                                    if ui.selectable_value(&mut self.camera.primitive, PreviewPrimitive::Plane, format!("{} Plane", icons::SQUARE)).changed() {
                                         self.preview_dirty = true;
                                     }
                                 });
@@ -3199,13 +3210,13 @@ impl eframe::App for MaterialEditorApp {
                                     egui::ComboBox::from_id_salt("single_env_mode")
                                         .selected_text(self.camera.environment.display_name())
                                         .show_ui(ui, |ui| {
-                                            if ui.selectable_value(&mut self.camera.environment, EnvironmentPreset::NeutralStudio, "⚪ Neutral Studio").changed() {
+                                            if ui.selectable_value(&mut self.camera.environment, EnvironmentPreset::NeutralStudio, format!("{} Neutral Studio", icons::SUN)).changed() {
                                                 self.preview_dirty = true;
                                             }
-                                            if ui.selectable_value(&mut self.camera.environment, EnvironmentPreset::WarmSunset, "🌅 Warm Sunset").changed() {
+                                            if ui.selectable_value(&mut self.camera.environment, EnvironmentPreset::WarmSunset, format!("{} Warm Sunset", icons::SUN_HORIZON)).changed() {
                                                 self.preview_dirty = true;
                                             }
-                                            if ui.selectable_value(&mut self.camera.environment, EnvironmentPreset::CyberpunkNeon, "🌆 Cyberpunk Neon").changed() {
+                                            if ui.selectable_value(&mut self.camera.environment, EnvironmentPreset::CyberpunkNeon, format!("{} Cyberpunk Neon", icons::MOON_STARS)).changed() {
                                                 self.preview_dirty = true;
                                             }
                                         });
@@ -3234,7 +3245,7 @@ impl eframe::App for MaterialEditorApp {
                                 });
 
                                 ui.separator();
-                                if ui.button("💾 Export Ray-MMD Package (.fx + Maps)").clicked() {
+                                if ui.button(format!("{} Export Ray-MMD Package (.fx + Maps)", icons::FLOPPY_DISK)).clicked() {
                                     self.export_ray_material();
                                 }
                             } else {
@@ -3273,7 +3284,7 @@ impl eframe::App for MaterialEditorApp {
                                         if ui.checkbox(&mut self.pmx_wireframe, "Wireframe").on_hover_text("Show mesh wireframe overlay").changed() {
                                             self.pmx_preview_dirty = true;
                                         }
-                                        if ui.button("🎯 Focus").on_hover_text("Center camera on model bounding center").clicked() {
+                                        if ui.button(format!("{} Focus", icons::CROSSHAIR)).on_hover_text("Center camera on model bounding center").clicked() {
                                             if let Some(ref m) = self.pmx_model {
                                                 self.pmx_camera.target = m.center;
                                                 self.pmx_camera.distance = (m.radius * 2.2).max(10.0);
@@ -3282,7 +3293,7 @@ impl eframe::App for MaterialEditorApp {
                                                 self.pmx_preview_dirty = true;
                                             }
                                         }
-                                        if ui.button("🏠 Stage View").on_hover_text("Reset camera to standard MMD stage interior view (target: Y=8, dist: 65)").clicked() {
+                                        if ui.button(format!("{} Stage View", icons::HOUSE)).on_hover_text("Reset camera to standard MMD stage interior view (target: Y=8, dist: 65)").clicked() {
                                             self.pmx_camera.target = glam::Vec3::new(0.0, 8.0, 10.0);
                                             self.pmx_camera.distance = 65.0;
                                             self.pmx_camera.pitch = 0.18;
@@ -3318,12 +3329,12 @@ impl eframe::App for MaterialEditorApp {
                                     });
 
                                     ui.separator();
-                                    if ui.button("💾 Export All PMX Materials...").clicked() {
+                                    if ui.button(format!("{} Export All PMX Materials...", icons::FLOPPY_DISK)).clicked() {
                                         self.export_all_pmx_materials();
                                     }
                                 } else {
                                     ui.add_space(20.0);
-                                    if ui.button("📂 Open PMX Model...").clicked() {
+                                    if ui.button(format!("{} Open PMX Model...", icons::FOLDER_OPEN)).clicked() {
                                         if let Some(path) = rfd::FileDialog::new()
                                             .add_filter("PMX Model (*.pmx)", &["pmx"])
                                             .pick_file()
@@ -3374,11 +3385,11 @@ impl eframe::App for MaterialEditorApp {
             } else {
                 // PMX Studio Center Panel
                 ui.horizontal(|ui| {
-                    if ui.selectable_value(&mut self.pmx_center_view_mode, 0, "🔀 Active Subset Material Graph").clicked() {
+                    if ui.selectable_value(&mut self.pmx_center_view_mode, 0, format!("{} Active Subset Material Graph", icons::GIT_FORK)).clicked() {
                         self.full_map_dirty = true;
                         self.pmx_preview_dirty = true;
                     }
-                    if ui.selectable_value(&mut self.pmx_center_view_mode, 1, "💃 Fullscreen 3D Model").clicked() {
+                    if ui.selectable_value(&mut self.pmx_center_view_mode, 1, format!("{} Fullscreen 3D Model", icons::PERSON)).clicked() {
                         self.viewport_mode = ViewportMode::Map2D;
                         self.full_map_dirty = true;
                         self.pmx_preview_dirty = true;
@@ -3389,7 +3400,7 @@ impl eframe::App for MaterialEditorApp {
                         if ui.checkbox(&mut self.pmx_wireframe, "Wireframe").on_hover_text("Show mesh wireframe overlay").changed() {
                             self.pmx_preview_dirty = true;
                         }
-                        if ui.button("🎯 Focus").on_hover_text("Center camera on model bounding center").clicked() {
+                        if ui.button(format!("{} Focus", icons::CROSSHAIR)).on_hover_text("Center camera on model bounding center").clicked() {
                             if let Some(ref m) = self.pmx_model {
                                 self.pmx_camera.target = m.center;
                                 self.pmx_camera.distance = (m.radius * 2.2).max(10.0);
@@ -3398,7 +3409,7 @@ impl eframe::App for MaterialEditorApp {
                                 self.pmx_preview_dirty = true;
                             }
                         }
-                        if ui.button("🏠 Stage View").on_hover_text("Reset camera to standard MMD stage interior view (target: Y=8, dist: 65)").clicked() {
+                        if ui.button(format!("{} Stage View", icons::HOUSE)).on_hover_text("Reset camera to standard MMD stage interior view (target: Y=8, dist: 65)").clicked() {
                             self.pmx_camera.target = glam::Vec3::new(0.0, 8.0, 10.0);
                             self.pmx_camera.distance = 65.0;
                             self.pmx_camera.pitch = 0.18;
@@ -3496,7 +3507,7 @@ impl eframe::App for MaterialEditorApp {
         // Floating Texture Map Inspector Window
         if self.show_map_inspector_window {
             let mut open = true;
-            egui::Window::new(format!("🖼 Texture Map Inspector — {}", self.selected_map_name))
+            egui::Window::new(format!("{} Texture Map Inspector — {}", icons::IMAGE, self.selected_map_name))
                 .open(&mut open)
                 .default_size(Vec2::new(750.0, 600.0))
                 .resizable(true)
@@ -3511,14 +3522,14 @@ impl eframe::App for MaterialEditorApp {
         // Quick Add Node Search Popup (Tab / Space)
         if self.show_node_search {
             let mut close_search = false;
-            egui::Window::new("🔍 Quick Add Node")
+            egui::Window::new(format!("{} Quick Add Node", icons::MAGNIFYING_GLASS))
                 .fixed_pos(self.node_search_pos)
                 .collapsible(false)
                 .resizable(false)
                 .default_width(320.0)
                 .show(ui.ctx(), |ui| {
                     ui.horizontal(|ui| {
-                        ui.label("🔍");
+                        ui.label(icons::MAGNIFYING_GLASS);
                         let resp = ui.text_edit_singleline(&mut self.node_search_query);
                         resp.request_focus();
                     });
@@ -3526,24 +3537,24 @@ impl eframe::App for MaterialEditorApp {
                     let query = self.node_search_query.trim().to_lowercase();
                     let mut chosen_node: Option<MaterialNode> = None;
 
-                    let items: [(&str, &str, &str, MaterialNode); 17] = [
-                        ("➕ Texture Image Input", "Load PNG/JPG/TGA image file", "texture image input file", MaterialNode::ImageInput { file_path: String::new(), is_srgb: true, cached_image: None }),
-                        ("➕ Color Value", "Uniform RGBA solid color", "color rgba solid tint", MaterialNode::ColorInput { color: [1.0, 1.0, 1.0, 1.0] }),
-                        ("➕ Float Value", "Single scalar float number", "float scalar value number", MaterialNode::FloatInput { value: 1.0, min: 0.0, max: 1.0 }),
-                        ("⚡ Procedural Noise", "Perlin fBm, Voronoi, White Noise", "noise perlin voronoi procedural", MaterialNode::ProceduralNoise { noise_type: NoiseType::Perlin, scale: 4.0, octaves: 4, lacunarity: 2.0, gain: 0.5 }),
-                        ("⚡ Height Generator", "Contrast, brightness, invert height", "height bump invert depth", MaterialNode::HeightGenerator { contrast: 1.0, brightness: 0.0, invert: false }),
-                        ("⚡ Normal Generator", "Tangent space normal map (DirectX/OpenGL)", "normal tangent bump height", MaterialNode::NormalGenerator { scale: 1.0, filter: NormalFilter::Scharr, orientation: NormalOrientation::DirectX }),
-                        ("🔀 Normal Blend (RNM)", "Reoriented Normal Mapping detail overlay", "normal blend rnm detail repeat", MaterialNode::NormalBlend { detail_scale: 1.0, detail_tile: 10.0 }),
-                        ("⚡ Ambient Occlusion (AO)", "Crevice and cavity contact shadows", "ao ambient occlusion shadow", MaterialNode::AOGenerator { radius: 16, samples: 16, intensity: 1.0, bias: 0.05 }),
-                        ("⚡ Curvature / Cavity", "Convex edge highlights & concave dirt crevices", "curvature cavity edge ridge wear", MaterialNode::CurvatureGenerator { radius: 2, intensity: 2.0, mode: CurvatureMode::Full }),
-                        ("⚡ Roughness Remap", "Remap and invert glossiness/roughness", "roughness glossiness smooth invert", MaterialNode::RoughnessGenerator { invert: false, contrast: 1.0, min_val: 0.0, max_val: 1.0 }),
-                        ("🪙 Metalness Generator", "Smart metallic isolation (Gold, Copper, Silver)", "metalness metallic chrome gold", MaterialNode::MetalnessGenerator { threshold: 0.5, falloff: 0.2, detect_metals: true, invert: false }),
-                        ("💡 Emissive Generator", "Luminance mask and color keying for glow", "emissive glow light neon blink", MaterialNode::EmissiveGenerator { min_lum: 0.5, max_lum: 1.0, use_hue_filter: false, target_hue: 180.0, hue_tolerance: 45.0, tint_color: [1.0, 1.0, 1.0], intensity: 2.0, invert: false }),
-                        ("🎭 Custom Map Generator", "Skin SSS, Hair Anisotropy, Cloth Sheen, Glass", "custom skin sss anisotropy cloth glass coat", MaterialNode::CustomMapGenerator { model: crate::graph::node::ShadingModel::Skin, param_a: 1.0, param_b_color: [1.0, 0.4, 0.25], invert_a: false, aniso_radial: false }),
-                        ("📦 Channel Packer (RGBA)", "Pack 4 grayscale maps into 1 RGBA texture", "pack channel rgba packer", MaterialNode::ChannelPacker { default_r: 128, default_g: 0, default_b: 255, default_a: 255 }),
-                        ("✂ Channel Splitter", "Extract R, G, B, A individual channels", "split channel r g b a separate", MaterialNode::ChannelSplitter),
-                        ("🎨 Color Blend", "Mix, Multiply, Screen, Overlay blend modes", "blend mix color multiply overlay", MaterialNode::ColorBlend { mode: crate::graph::node::BlendMode::Mix, factor: 0.5 }),
-                        ("🎯 Ray-MMD Master Output", "Master output connecting to Ray-MMD shader", "output master ray-mmd material", MaterialNode::RayMaterialOutput {
+                    let items: [(&str, &str, &str, &str, MaterialNode); 17] = [
+                        (icons::IMAGE, "Texture Image Input", "Load PNG/JPG/TGA image file", "texture image input file", MaterialNode::ImageInput { file_path: String::new(), is_srgb: true, cached_image: None }),
+                        (icons::PALETTE, "Color Value", "Uniform RGBA solid color", "color rgba solid tint", MaterialNode::ColorInput { color: [1.0, 1.0, 1.0, 1.0] }),
+                        (icons::SLIDERS, "Float Value", "Single scalar float number", "float scalar value number", MaterialNode::FloatInput { value: 1.0, min: 0.0, max: 1.0 }),
+                        (icons::WAVEFORM, "Procedural Noise", "Perlin fBm, Voronoi, White Noise", "noise perlin voronoi procedural", MaterialNode::ProceduralNoise { noise_type: NoiseType::Perlin, scale: 4.0, octaves: 4, lacunarity: 2.0, gain: 0.5 }),
+                        (icons::WAVES, "Height Generator", "Contrast, brightness, invert height", "height bump invert depth", MaterialNode::HeightGenerator { contrast: 1.0, brightness: 0.0, invert: false }),
+                        (icons::COMPASS, "Normal Generator", "Tangent space normal map (DirectX/OpenGL)", "normal tangent bump height", MaterialNode::NormalGenerator { scale: 1.0, filter: NormalFilter::Scharr, orientation: NormalOrientation::DirectX }),
+                        (icons::GIT_MERGE, "Normal Blend (RNM)", "Reoriented Normal Mapping detail overlay", "normal blend rnm detail repeat", MaterialNode::NormalBlend { detail_scale: 1.0, detail_tile: 10.0 }),
+                        (icons::CIRCLE_HALF, "Ambient Occlusion (AO)", "Crevice and cavity contact shadows", "ao ambient occlusion shadow", MaterialNode::AOGenerator { radius: 16, samples: 16, intensity: 1.0, bias: 0.05 }),
+                        (icons::APERTURE, "Curvature / Cavity", "Convex edge highlights & concave dirt crevices", "curvature cavity edge ridge wear", MaterialNode::CurvatureGenerator { radius: 2, intensity: 2.0, mode: CurvatureMode::Full }),
+                        (icons::FADERS, "Roughness Remap", "Remap and invert glossiness/roughness", "roughness glossiness smooth invert", MaterialNode::RoughnessGenerator { invert: false, contrast: 1.0, min_val: 0.0, max_val: 1.0 }),
+                        (icons::COIN, "Metalness Generator", "Smart metallic isolation (Gold, Copper, Silver)", "metalness metallic chrome gold", MaterialNode::MetalnessGenerator { threshold: 0.5, falloff: 0.2, detect_metals: true, invert: false }),
+                        (icons::LIGHTBULB, "Emissive Generator", "Luminance mask and color keying for glow", "emissive glow light neon blink", MaterialNode::EmissiveGenerator { min_lum: 0.5, max_lum: 1.0, use_hue_filter: false, target_hue: 180.0, hue_tolerance: 45.0, tint_color: [1.0, 1.0, 1.0], intensity: 2.0, invert: false }),
+                        (icons::MASK_HAPPY, "Custom Map Generator", "Skin SSS, Hair Anisotropy, Cloth Sheen, Glass", "custom skin sss anisotropy cloth glass coat", MaterialNode::CustomMapGenerator { model: crate::graph::node::ShadingModel::Skin, param_a: 1.0, param_b_color: [1.0, 0.4, 0.25], invert_a: false, aniso_radial: false }),
+                        (icons::PACKAGE, "Channel Packer (RGBA)", "Pack 4 grayscale maps into 1 RGBA texture", "pack channel rgba packer", MaterialNode::ChannelPacker { default_r: 128, default_g: 0, default_b: 255, default_a: 255 }),
+                        (icons::SCISSORS, "Channel Splitter", "Extract R, G, B, A individual channels", "split channel r g b a separate", MaterialNode::ChannelSplitter),
+                        (icons::PAINT_BUCKET, "Color Blend", "Mix, Multiply, Screen, Overlay blend modes", "blend mix color multiply overlay", MaterialNode::ColorBlend { mode: crate::graph::node::BlendMode::Mix, factor: 0.5 }),
+                        (icons::TARGET, "Ray-MMD Master Output", "Master output connecting to Ray-MMD shader", "output master ray-mmd material", MaterialNode::RayMaterialOutput {
                             material_name: "reforge_material".to_string(),
                             shading_model: crate::graph::node::ShadingModel::Default,
                             albedo_color: [1.0, 1.0, 1.0],
@@ -3577,9 +3588,9 @@ impl eframe::App for MaterialEditorApp {
 
                     ui.separator();
                     egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-                        for (title, desc, keywords, node_template) in items {
+                        for (icon, title, desc, keywords, node_template) in items {
                             if query.is_empty() || title.to_lowercase().contains(&query) || desc.to_lowercase().contains(&query) || keywords.contains(&query) {
-                                if ui.button(title).on_hover_text(desc).clicked() {
+                                if ui.button(format!("{} {}", icon, title)).on_hover_text(desc).clicked() {
                                     chosen_node = Some(node_template.clone());
                                 }
                             }
@@ -3616,7 +3627,7 @@ impl eframe::App for MaterialEditorApp {
         if self.show_hlsl_inspector {
             let mut open = true;
             let hlsl_code = self.generate_current_hlsl();
-            egui::Window::new("📜 Ray-MMD HLSL Code Inspector (Live Preview)")
+            egui::Window::new(format!("{} Ray-MMD HLSL Code Inspector (Live Preview)", icons::FILE_CODE))
                 .open(&mut open)
                 .default_size(Vec2::new(650.0, 500.0))
                 .resizable(true)
@@ -3624,9 +3635,9 @@ impl eframe::App for MaterialEditorApp {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new("Live preview of material.fx generated from current node graph:").weak());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("📋 Copy HLSL to Clipboard").clicked() {
+                            if ui.button(format!("{} Copy HLSL to Clipboard", icons::COPY)).clicked() {
                                 ui.ctx().copy_text(hlsl_code.clone());
-                                self.status_message = "Copied material.fx code to clipboard!".to_string();
+                                self.status_message = format!("{} Copied material.fx code to clipboard!", icons::CLIPBOARD);
                             }
                         });
                     });

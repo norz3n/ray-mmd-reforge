@@ -5,6 +5,7 @@ use egui_snarl::ui::{PinInfo, PinShape, SnarlPin, SnarlStyle, SnarlViewer};
 use egui_snarl::{InPin, NodeId, OutPin, Snarl};
 use crate::graph::node::{BlendMode, MaterialNode, PinType};
 use crate::image_proc::{CurvatureMode, NormalFilter, NormalOrientation};
+use egui_phosphor::regular as icons;
 
 pub fn create_blender_snarl_style() -> SnarlStyle {
     let mut style = SnarlStyle::new();
@@ -116,7 +117,7 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
 
             if !is_master {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button(egui::RichText::new("✖").size(8.5).color(Color32::from_rgb(180, 80, 80)))
+                    if ui.small_button(egui::RichText::new(icons::X).size(8.5).color(Color32::from_rgb(180, 80, 80)))
                         .on_hover_text("Delete node")
                         .clicked()
                     {
@@ -142,7 +143,7 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
     ) {
         let is_master = matches!(snarl[node], MaterialNode::RayMaterialOutput { .. });
         if !is_master {
-            if ui.button("🗑 Delete Node").clicked() {
+            if ui.button(format!("{} Delete Node", icons::TRASH)).clicked() {
                 self.nodes_to_remove.push(node);
                 self.needs_rebuild = true;
                 ui.close();
@@ -163,7 +164,7 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
         ui.label(egui::RichText::new("Create Node:").strong());
         ui.separator();
 
-        if ui.button("➕ Texture Input").clicked() {
+        if ui.button(format!("{} Texture Input", icons::IMAGE)).clicked() {
             snarl.insert_node(pos, MaterialNode::ImageInput {
                 file_path: String::new(),
                 is_srgb: true,
@@ -172,43 +173,43 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
             self.needs_rebuild = true;
             ui.close();
         }
-        if ui.button("➕ Color Value").clicked() {
+        if ui.button(format!("{} Color Value", icons::PALETTE)).clicked() {
             snarl.insert_node(pos, MaterialNode::ColorInput { color: [1.0, 1.0, 1.0, 1.0] });
             self.needs_rebuild = true;
             ui.close();
         }
-        if ui.button("➕ Float Value").clicked() {
+        if ui.button(format!("{} Float Value", icons::SLIDERS)).clicked() {
             snarl.insert_node(pos, MaterialNode::FloatInput { value: 1.0, min: 0.0, max: 1.0 });
             self.needs_rebuild = true;
             ui.close();
         }
         ui.separator();
-        if ui.button("⚡ Height Generator").clicked() {
+        if ui.button(format!("{} Height Generator", icons::WAVES)).clicked() {
             snarl.insert_node(pos, MaterialNode::HeightGenerator { contrast: 1.0, brightness: 0.0, invert: false });
             self.needs_rebuild = true;
             ui.close();
         }
-        if ui.button("⚡ Normal Generator").clicked() {
+        if ui.button(format!("{} Normal Generator", icons::COMPASS)).clicked() {
             snarl.insert_node(pos, MaterialNode::NormalGenerator { scale: 1.0, filter: NormalFilter::Scharr, orientation: NormalOrientation::DirectX });
             self.needs_rebuild = true;
             ui.close();
         }
-        if ui.button("⚡ Ambient Occlusion (AO)").clicked() {
+        if ui.button(format!("{} Ambient Occlusion (AO)", icons::CIRCLE_HALF)).clicked() {
             snarl.insert_node(pos, MaterialNode::AOGenerator { radius: 16, samples: 16, intensity: 1.0, bias: 0.05 });
             self.needs_rebuild = true;
             ui.close();
         }
-        if ui.button("⚡ Curvature / Cavity").clicked() {
+        if ui.button(format!("{} Curvature / Cavity", icons::APERTURE)).clicked() {
             snarl.insert_node(pos, MaterialNode::CurvatureGenerator { radius: 2, intensity: 2.0, mode: CurvatureMode::Full });
             self.needs_rebuild = true;
             ui.close();
         }
-        if ui.button("⚡ Roughness Remap").clicked() {
+        if ui.button(format!("{} Roughness Remap", icons::SLIDERS)).clicked() {
             snarl.insert_node(pos, MaterialNode::RoughnessGenerator { invert: false, contrast: 1.0, min_val: 0.0, max_val: 1.0 });
             self.needs_rebuild = true;
             ui.close();
         }
-        if ui.button("🪙 Metalness Generator").clicked() {
+        if ui.button(format!("{} Metalness Generator", icons::COIN)).clicked() {
             snarl.insert_node(pos, MaterialNode::MetalnessGenerator {
                 threshold: 0.5,
                 falloff: 0.2,
@@ -218,7 +219,7 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
             self.needs_rebuild = true;
             ui.close();
         }
-        if ui.button("💡 Emissive Generator").clicked() {
+        if ui.button(format!("{} Emissive Generator", icons::LIGHTBULB)).clicked() {
             snarl.insert_node(pos, MaterialNode::EmissiveGenerator {
                 min_lum: 0.5,
                 max_lum: 1.0,
@@ -232,7 +233,7 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
             self.needs_rebuild = true;
             ui.close();
         }
-        if ui.button("🎭 Custom Map Generator").clicked() {
+        if ui.button(format!("{} Custom Map Generator", icons::FADERS)).clicked() {
             snarl.insert_node(pos, MaterialNode::CustomMapGenerator {
                 model: crate::graph::node::ShadingModel::Skin,
                 param_a: 1.0,
@@ -244,27 +245,27 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
             ui.close();
         }
         ui.separator();
-        if ui.button("🔀 Normal Blend (RNM)").clicked() {
+        if ui.button(format!("{} Normal Blend (RNM)", icons::GIT_MERGE)).clicked() {
             snarl.insert_node(pos, MaterialNode::NormalBlend { detail_scale: 1.0, detail_tile: 10.0 });
             self.needs_rebuild = true;
             ui.close();
         }
-        if ui.button("📦 Channel Packer (RGBA)").clicked() {
+        if ui.button(format!("{} Channel Packer (RGBA)", icons::PACKAGE)).clicked() {
             snarl.insert_node(pos, MaterialNode::ChannelPacker { default_r: 128, default_g: 0, default_b: 255, default_a: 255 });
             self.needs_rebuild = true;
             ui.close();
         }
-        if ui.button("✂ Channel Splitter").clicked() {
+        if ui.button(format!("{} Channel Splitter", icons::SCISSORS)).clicked() {
             snarl.insert_node(pos, MaterialNode::ChannelSplitter);
             self.needs_rebuild = true;
             ui.close();
         }
-        if ui.button("🎨 Color Blend").clicked() {
+        if ui.button(format!("{} Color Blend", icons::PAINT_BUCKET)).clicked() {
             snarl.insert_node(pos, MaterialNode::ColorBlend { mode: BlendMode::Mix, factor: 0.5 });
             self.needs_rebuild = true;
             ui.close();
         }
-        if ui.button("⚡ Procedural Noise").clicked() {
+        if ui.button(format!("{} Procedural Noise", icons::WAVEFORM)).clicked() {
             snarl.insert_node(pos, MaterialNode::ProceduralNoise {
                 noise_type: crate::image_proc::NoiseType::Perlin,
                 scale: 4.0,
@@ -379,7 +380,7 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
                 cached_image,
             } => {
                 ui.horizontal(|ui| {
-                    if ui.button("📁 Open...").on_hover_text("Open Image file").clicked() {
+                    if ui.button(format!("{} Open...", icons::FOLDER_OPEN)).on_hover_text("Open Image file").clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .add_filter("Images", &["png", "jpg", "jpeg", "tga", "dds", "bmp"])
                             .pick_file()
