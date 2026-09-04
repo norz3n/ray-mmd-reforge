@@ -32,6 +32,8 @@ pub struct MaterialSnarlViewer {
     pub nodes_to_remove: Vec<NodeId>,
     /// Live node thumbnail textures for immediate in-node feedback.
     pub node_thumbnails: std::collections::HashMap<NodeId, egui::TextureHandle>,
+    /// Snapshots captured on wire connections/disconnections for undo history.
+    pub undo_snapshots: Vec<Snarl<MaterialNode>>,
 }
 
 impl MaterialSnarlViewer {
@@ -40,6 +42,7 @@ impl MaterialSnarlViewer {
             needs_rebuild: true,
             nodes_to_remove: Vec::new(),
             node_thumbnails: std::collections::HashMap::new(),
+            undo_snapshots: Vec::new(),
         }
     }
 }
@@ -227,21 +230,25 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
     }
 
     fn connect(&mut self, from: &OutPin, to: &InPin, snarl: &mut Snarl<MaterialNode>) {
+        self.undo_snapshots.push(snarl.clone());
         snarl.connect(from.id, to.id);
         self.needs_rebuild = true;
     }
 
     fn disconnect(&mut self, from: &OutPin, to: &InPin, snarl: &mut Snarl<MaterialNode>) {
+        self.undo_snapshots.push(snarl.clone());
         snarl.disconnect(from.id, to.id);
         self.needs_rebuild = true;
     }
 
     fn drop_outputs(&mut self, pin: &OutPin, snarl: &mut Snarl<MaterialNode>) {
+        self.undo_snapshots.push(snarl.clone());
         snarl.drop_outputs(pin.id);
         self.needs_rebuild = true;
     }
 
     fn drop_inputs(&mut self, pin: &InPin, snarl: &mut Snarl<MaterialNode>) {
+        self.undo_snapshots.push(snarl.clone());
         snarl.drop_inputs(pin.id);
         self.needs_rebuild = true;
     }
@@ -588,13 +595,13 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
                 });
 
                 ui.separator();
-                ui.label(format!("Custom A ({})", model.custom_a_name()));
+                ui.label(format!("Custom A: {}", model.custom_a_name()));
                 changed |= ui.add(Slider::new(param_a, 0.0..=1.0).text("Param A")).changed();
                 changed |= ui.checkbox(invert_a, "Invert A").changed();
 
                 if *model != crate::graph::node::ShadingModel::ClearCoat {
                     ui.separator();
-                    ui.label(format!("Custom B ({})", model.custom_b_name()));
+                    ui.label(format!("Custom B: {}", model.custom_b_name()));
                     if *model == crate::graph::node::ShadingModel::Anisotropy {
                         changed |= ui.checkbox(aniso_radial, "Radial Tangent Flow").changed();
                     } else {
@@ -617,59 +624,70 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
                 detail_map_enable,
                 ..
             } => {
-                ui.horizontal(|ui| {
-                    ui.label("Material Name:");
-                    changed |= ui.text_edit_singleline(material_name).changed();
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Shading Model:");
-                    egui::ComboBox::from_id_salt((node_id, "out_model"))
-                        .selected_text(shading_model.display_name())
-                        .show_ui(ui, |ui| {
-                            changed |= ui.selectable_value(shading_model, crate::graph::node::ShadingModel::Default, "0: Default (Standard PBR)").changed();
-                            changed |= ui.selectable_value(shading_model, crate::graph::node::ShadingModel::Skin, "1: Skin (PreIntegrated SSS)").changed();
-                            changed |= ui.selectable_value(shading_model, crate::graph::node::ShadingModel::Anisotropy, "3: Anisotropy (Hair/Brushed)").changed();
-                            changed |= ui.selectable_value(shading_model, crate::graph::node::ShadingModel::Glass, "4: Glass").changed();
-                            changed |= ui.selectable_value(shading_model, crate::graph::node::ShadingModel::Cloth, "5: Cloth").changed();
-                            changed |= ui.selectable_value(shading_model, crate::graph::node::ShadingModel::ClearCoat, "6: Clear Coat").changed();
-                            changed |= ui.selectable_value(shading_model, crate::graph::node::ShadingModel::Subsurface, "7: Subsurface Profile").changed();
-                            changed |= ui.selectable_value(shading_model, crate::graph::node::ShadingModel::CelShading, "8: Cel Shading").changed();
-                            changed |= ui.selectable_value(shading_model, crate::graph::node::ShadingModel::ToonShading, "9: Toon Shading").changed();
-                        });
-                });
-                changed |= ui.checkbox(is_roughness_mode, "Roughness Mode (Auto-invert for Ray-MMD Smoothness)").changed();
+                ui.vertical(|ui| {
+                    ui.set_min_width(300.0);
 
-                ui.collapsing("Emissive Animation & Blink", |ui| {
-                    changed |= ui.add(Slider::new(emissive_intensity, 0.0..=50.0).text("Intensity")).changed();
                     ui.horizontal(|ui| {
-                        ui.label("Blink Mode:");
-                        egui::ComboBox::from_id_salt((node_id, "blink_m"))
-                            .selected_text(match *emissive_blink_mode {
-                                0 => "None",
-                                1 => "Constant Frequency",
-                                _ => "Morph Controller",
-                            })
+                        ui.label(egui::RichText::new("Material Name:").strong());
+                        changed |= ui.add(egui::TextEdit::singleline(material_name).desired_width(140.0)).changed();
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Shading Model:").strong());
+                        egui::ComboBox::from_id_salt((node_id, "out_model"))
+                            .selected_text(shading_model.display_name())
+                            .width(160.0)
                             .show_ui(ui, |ui| {
-                                changed |= ui.selectable_value(emissive_blink_mode, 0, "None").changed();
-                                changed |= ui.selectable_value(emissive_blink_mode, 1, "Constant Frequency").changed();
-                                changed |= ui.selectable_value(emissive_blink_mode, 2, "Morph Controller").changed();
+                                changed |= ui.selectable_value(shading_model, crate::graph::node::ShadingModel::Default, "0: Default (Standard PBR)").changed();
+                                changed |= ui.selectable_value(shading_model, crate::graph::node::ShadingModel::Skin, "1: Skin (PreIntegrated SSS)").changed();
+                                changed |= ui.selectable_value(shading_model, crate::graph::node::ShadingModel::Anisotropy, "3: Anisotropy (Hair/Brushed)").changed();
+                                changed |= ui.selectable_value(shading_model, crate::graph::node::ShadingModel::Glass, "4: Glass").changed();
+                                changed |= ui.selectable_value(shading_model, crate::graph::node::ShadingModel::Cloth, "5: Cloth").changed();
+                                changed |= ui.selectable_value(shading_model, crate::graph::node::ShadingModel::ClearCoat, "6: Clear Coat").changed();
+                                changed |= ui.selectable_value(shading_model, crate::graph::node::ShadingModel::Subsurface, "7: Subsurface Profile").changed();
+                                changed |= ui.selectable_value(shading_model, crate::graph::node::ShadingModel::CelShading, "8: Cel Shading").changed();
+                                changed |= ui.selectable_value(shading_model, crate::graph::node::ShadingModel::ToonShading, "9: Toon Shading").changed();
                             });
                     });
-                    if *emissive_blink_mode == 1 {
-                        ui.horizontal(|ui| {
-                            ui.label("Freq (R,G,B):");
-                            changed |= ui.add(DragValue::new(&mut emissive_blink_freq[0]).speed(0.1)).changed();
-                            changed |= ui.add(DragValue::new(&mut emissive_blink_freq[1]).speed(0.1)).changed();
-                            changed |= ui.add(DragValue::new(&mut emissive_blink_freq[2]).speed(0.1)).changed();
-                        });
-                    }
-                });
 
-                ui.separator();
-                ui.label("ReForge Extended Features:");
-                changed |= ui.checkbox(hex_tiling_enable, "Hex-Tiling (Mikkelsen 2022)").changed();
-                changed |= ui.checkbox(hashed_alpha_enable, "Hashed Alpha Cutout").changed();
-                changed |= ui.checkbox(detail_map_enable, "Detail Normal Micro-surface").changed();
+                    if *shading_model == crate::graph::node::ShadingModel::Default {
+                        ui.label(egui::RichText::new("💡 Switch Shading Model to Skin, Cloth, ClearCoat or Subsurface to enable Custom A/B effects").weak().small());
+                    }
+
+                    changed |= ui.checkbox(is_roughness_mode, "Roughness Mode (Auto-invert for Ray-MMD Smoothness)").changed();
+
+                    ui.collapsing("Emissive Animation & Blink", |ui| {
+                        changed |= ui.add(Slider::new(emissive_intensity, 0.0..=50.0).text("Intensity")).changed();
+                        ui.horizontal(|ui| {
+                            ui.label("Blink Mode:");
+                            egui::ComboBox::from_id_salt((node_id, "blink_m"))
+                                .selected_text(match *emissive_blink_mode {
+                                    0 => "None",
+                                    1 => "Constant Frequency",
+                                    _ => "Morph Controller",
+                                })
+                                .show_ui(ui, |ui| {
+                                    changed |= ui.selectable_value(emissive_blink_mode, 0, "None").changed();
+                                    changed |= ui.selectable_value(emissive_blink_mode, 1, "Constant Frequency").changed();
+                                    changed |= ui.selectable_value(emissive_blink_mode, 2, "Morph Controller").changed();
+                                });
+                        });
+                        if *emissive_blink_mode == 1 {
+                            ui.horizontal(|ui| {
+                                ui.label("Freq (R,G,B):");
+                                changed |= ui.add(DragValue::new(&mut emissive_blink_freq[0]).speed(0.1)).changed();
+                                changed |= ui.add(DragValue::new(&mut emissive_blink_freq[1]).speed(0.1)).changed();
+                                changed |= ui.add(DragValue::new(&mut emissive_blink_freq[2]).speed(0.1)).changed();
+                            });
+                        }
+                    });
+
+                    ui.separator();
+                    ui.label("ReForge Extended Features:");
+                    changed |= ui.checkbox(hex_tiling_enable, "Hex-Tiling (Mikkelsen 2022)").changed();
+                    changed |= ui.checkbox(hashed_alpha_enable, "Hashed Alpha Cutout").changed();
+                    changed |= ui.checkbox(detail_map_enable, "Detail Normal Micro-surface").changed();
+                });
             }
         }
 

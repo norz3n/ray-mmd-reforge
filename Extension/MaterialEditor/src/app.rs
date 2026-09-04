@@ -98,6 +98,13 @@ pub struct EvalResponse {
     pub node_thumbnails: HashMap<NodeId, U8Image>,
 }
 
+/// Graph state snapshot for single-material and PMX multi-material undo/redo.
+#[derive(Clone)]
+pub enum UndoSnapshot {
+    Single(Snarl<MaterialNode>),
+    Pmx { subset_idx: usize, snarl: Snarl<MaterialNode> },
+}
+
 pub struct MaterialEditorApp {
     pub app_mode: AppMode,
 
@@ -122,8 +129,9 @@ pub struct MaterialEditorApp {
     eval_rx: std::sync::mpsc::Receiver<EvalResponse>,
 
     // Undo / Redo history
-    undo_stack: Vec<Snarl<MaterialNode>>,
-    redo_stack: Vec<Snarl<MaterialNode>>,
+    undo_stack: Vec<UndoSnapshot>,
+    redo_stack: Vec<UndoSnapshot>,
+    pre_drag_snapshot: Option<UndoSnapshot>,
 
     // Quick Node Search (Tab / Space)
     show_node_search: bool,
@@ -235,6 +243,7 @@ impl MaterialEditorApp {
 
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            pre_drag_snapshot: None,
             show_node_search: false,
             node_search_query: String::new(),
             node_search_pos: egui::pos2(250.0, 200.0),
@@ -266,6 +275,7 @@ impl MaterialEditorApp {
         };
 
         app.load_default_preset();
+        app.undo_stack.clear();
         let init_req = EvalRequest {
             snarl: app.snarl.clone(),
             working_resolution: app.working_resolution,
@@ -278,6 +288,7 @@ impl MaterialEditorApp {
 
     /// Sets up default PBR graph with Diffuse -> Height -> Normal -> AO -> Material Output.
     pub fn load_default_preset(&mut self) {
+        self.push_undo_snapshot();
         self.snarl = Snarl::new();
 
         // 1. Color Input (Base Color)
@@ -382,21 +393,70 @@ impl MaterialEditorApp {
         self.graph_dirty = true;
     }
 
+    /// Captures current active graph state for single or PMX studio mode.
+    pub fn current_undo_snapshot(&self) -> UndoSnapshot {
+        match self.app_mode {
+            AppMode::SingleMaterial => UndoSnapshot::Single(self.snarl.clone()),
+            AppMode::PmxStudio => {
+                if let Some(idx) = self.active_pmx_subset {
+                    if let Some(slot) = self.pmx_slots.get(idx) {
+                        UndoSnapshot::Pmx {
+                            subset_idx: idx,
+                            snarl: slot.snarl.clone(),
+                        }
+                    } else {
+                        UndoSnapshot::Single(self.snarl.clone())
+                    }
+                } else {
+                    UndoSnapshot::Single(self.snarl.clone())
+                }
+            }
+        }
+    }
+
     /// Saves current snarl state to undo stack.
     pub fn push_undo_snapshot(&mut self) {
+        let snap = self.current_undo_snapshot();
         if self.undo_stack.len() >= 50 {
             self.undo_stack.remove(0);
         }
-        self.undo_stack.push(self.snarl.clone());
+        self.undo_stack.push(snap);
+        self.redo_stack.clear();
+    }
+
+    /// Pushes a prepared snapshot directly onto the undo stack.
+    pub fn push_snapshot_direct(&mut self, snap: UndoSnapshot) {
+        if self.undo_stack.len() >= 50 {
+            self.undo_stack.remove(0);
+        }
+        self.undo_stack.push(snap);
         self.redo_stack.clear();
     }
 
     /// Reverts to the previous graph state.
     pub fn undo(&mut self) {
         if let Some(prev) = self.undo_stack.pop() {
-            self.redo_stack.push(self.snarl.clone());
-            self.snarl = prev;
-            self.graph_dirty = true;
+            let current = self.current_undo_snapshot();
+            self.redo_stack.push(current);
+
+            match prev {
+                UndoSnapshot::Single(snarl) => {
+                    self.snarl = snarl;
+                    self.graph_dirty = true;
+                    self.app_mode = AppMode::SingleMaterial;
+                }
+                UndoSnapshot::Pmx { subset_idx, snarl } => {
+                    if let Some(slot) = self.pmx_slots.get_mut(subset_idx) {
+                        slot.snarl = snarl;
+                        slot.is_dirty = true;
+                        slot.has_custom_material = true;
+                        self.active_pmx_subset = Some(subset_idx);
+                        self.graph_dirty = true;
+                        self.pmx_preview_dirty = true;
+                        self.app_mode = AppMode::PmxStudio;
+                    }
+                }
+            }
             self.status_message = "↶ Undo performed".to_string();
         }
     }
@@ -404,9 +464,27 @@ impl MaterialEditorApp {
     /// Reapplies an undone graph state.
     pub fn redo(&mut self) {
         if let Some(next) = self.redo_stack.pop() {
-            self.undo_stack.push(self.snarl.clone());
-            self.snarl = next;
-            self.graph_dirty = true;
+            let current = self.current_undo_snapshot();
+            self.undo_stack.push(current);
+
+            match next {
+                UndoSnapshot::Single(snarl) => {
+                    self.snarl = snarl;
+                    self.graph_dirty = true;
+                    self.app_mode = AppMode::SingleMaterial;
+                }
+                UndoSnapshot::Pmx { subset_idx, snarl } => {
+                    if let Some(slot) = self.pmx_slots.get_mut(subset_idx) {
+                        slot.snarl = snarl;
+                        slot.is_dirty = true;
+                        slot.has_custom_material = true;
+                        self.active_pmx_subset = Some(subset_idx);
+                        self.graph_dirty = true;
+                        self.pmx_preview_dirty = true;
+                        self.app_mode = AppMode::PmxStudio;
+                    }
+                }
+            }
             self.status_message = "↷ Redo performed".to_string();
         }
     }
@@ -1871,11 +1949,20 @@ impl MaterialEditorApp {
             },
         );
 
+        let curv_node = snarl.insert_node(
+            egui::pos2(560.0, 680.0),
+            MaterialNode::CurvatureGenerator {
+                radius: 2,
+                intensity: 1.5,
+                mode: CurvatureMode::Full,
+            },
+        );
+
         let out_node = snarl.insert_node(
             egui::pos2(880.0, 100.0),
             MaterialNode::RayMaterialOutput {
                 material_name: material_name.to_string(),
-                shading_model: crate::graph::node::ShadingModel::Default,
+                shading_model: crate::graph::node::ShadingModel::Subsurface,
                 albedo_color: [1.0, 1.0, 1.0],
                 albedo_loop: [1.0, 1.0],
                 normal_scale: 1.0,
@@ -1911,6 +1998,7 @@ impl MaterialEditorApp {
         snarl.connect(OutPinId { node: height_node, output: 0 }, InPinId { node: normal_node, input: 0 });
         snarl.connect(OutPinId { node: height_node, output: 0 }, InPinId { node: ao_node, input: 0 });
         snarl.connect(OutPinId { node: height_node, output: 0 }, InPinId { node: rough_node, input: 0 });
+        snarl.connect(OutPinId { node: height_node, output: 0 }, InPinId { node: curv_node, input: 0 });
 
         snarl.connect(OutPinId { node: img_node, output: 0 }, InPinId { node: out_node, input: 0 });
         snarl.connect(OutPinId { node: normal_node, output: 0 }, InPinId { node: out_node, input: 3 });
@@ -1918,12 +2006,14 @@ impl MaterialEditorApp {
         snarl.connect(OutPinId { node: metal_node, output: 0 }, InPinId { node: out_node, input: 5 });
         snarl.connect(OutPinId { node: ao_node, output: 0 }, InPinId { node: out_node, input: 7 });
         snarl.connect(OutPinId { node: height_node, output: 0 }, InPinId { node: out_node, input: 8 });
+        snarl.connect(OutPinId { node: curv_node, output: 0 }, InPinId { node: out_node, input: 10 });
 
         snarl
     }
 
     /// Automatically sets up full ShaderMap PBR network for the active graph from an image file.
     pub fn auto_generate_pbr_from_image(&mut self, file_path: &str) {
+        self.push_undo_snapshot();
         let snarl = Self::build_auto_pbr_snarl(file_path, "autogenerated_pbr");
 
         if self.app_mode == AppMode::PmxStudio {
@@ -2126,10 +2216,11 @@ impl eframe::App for MaterialEditorApp {
         }
 
         // Global Shortcuts: Undo (Ctrl+Z) / Redo (Ctrl+Y, Ctrl+Shift+Z)
-        if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Z) && !i.modifiers.shift) {
+        let is_ctrl = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
+        if is_ctrl && ui.input(|i| i.key_pressed(egui::Key::Z) && !i.modifiers.shift) {
             self.undo();
         }
-        if ui.input(|i| (i.modifiers.command && i.key_pressed(egui::Key::Y)) || (i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::Z))) {
+        if is_ctrl && ui.input(|i| i.key_pressed(egui::Key::Y) || (i.modifiers.shift && i.key_pressed(egui::Key::Z))) {
             self.redo();
         }
 
@@ -2308,6 +2399,7 @@ impl eframe::App for MaterialEditorApp {
                         {
                             if let Ok(json) = std::fs::read_to_string(path) {
                                 if let Ok(loaded) = serde_json::from_str(&json) {
+                                    self.push_undo_snapshot();
                                     self.snarl = loaded;
                                     self.graph_dirty = true;
                                 }
@@ -2635,6 +2727,7 @@ impl eframe::App for MaterialEditorApp {
                         }
                     }
                     if ui.button("🪙 Add Metalness Generator").clicked() {
+                        self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(120.0, 150.0),
                             MaterialNode::MetalnessGenerator {
@@ -2647,6 +2740,7 @@ impl eframe::App for MaterialEditorApp {
                         self.graph_dirty = true;
                     }
                     if ui.button("💡 Add Emissive Mask Generator").clicked() {
+                        self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(120.0, 150.0),
                             MaterialNode::EmissiveGenerator {
@@ -2662,10 +2756,25 @@ impl eframe::App for MaterialEditorApp {
                         );
                         self.graph_dirty = true;
                     }
+                    if ui.button("🎭 Add Custom A/B Generator").on_hover_text("Generate Custom A (SSS/Sheen/Roughness) and Custom B (Tint/Flow)").clicked() {
+                        self.push_undo_snapshot();
+                        self.snarl.insert_node(
+                            egui::pos2(120.0, 150.0),
+                            MaterialNode::CustomMapGenerator {
+                                model: crate::graph::node::ShadingModel::Subsurface,
+                                param_a: 1.0,
+                                param_b_color: [1.0, 0.4, 0.25],
+                                invert_a: false,
+                                aniso_radial: false,
+                            },
+                        );
+                        self.graph_dirty = true;
+                    }
 
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("INPUTS").strong());
                     if ui.button("➕ Texture Image").clicked() {
+                        self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
                             MaterialNode::ImageInput {
@@ -2677,6 +2786,7 @@ impl eframe::App for MaterialEditorApp {
                         self.graph_dirty = true;
                     }
                     if ui.button("➕ Color Value").clicked() {
+                        self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
                             MaterialNode::ColorInput {
@@ -2686,6 +2796,7 @@ impl eframe::App for MaterialEditorApp {
                         self.graph_dirty = true;
                     }
                     if ui.button("➕ Float Value").clicked() {
+                        self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
                             MaterialNode::FloatInput {
@@ -2700,6 +2811,7 @@ impl eframe::App for MaterialEditorApp {
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("SHADERMAP GENERATORS").strong());
                     if ui.button("⚡ Height Generator").clicked() {
+                        self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
                             MaterialNode::HeightGenerator {
@@ -2711,6 +2823,7 @@ impl eframe::App for MaterialEditorApp {
                         self.graph_dirty = true;
                     }
                     if ui.button("⚡ Normal Generator").clicked() {
+                        self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
                             MaterialNode::NormalGenerator {
@@ -2722,6 +2835,7 @@ impl eframe::App for MaterialEditorApp {
                         self.graph_dirty = true;
                     }
                     if ui.button("⚡ Ambient Occlusion (AO)").clicked() {
+                        self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
                             MaterialNode::AOGenerator {
@@ -2734,6 +2848,7 @@ impl eframe::App for MaterialEditorApp {
                         self.graph_dirty = true;
                     }
                     if ui.button("⚡ Curvature / Cavity").clicked() {
+                        self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
                             MaterialNode::CurvatureGenerator {
@@ -2745,6 +2860,7 @@ impl eframe::App for MaterialEditorApp {
                         self.graph_dirty = true;
                     }
                     if ui.button("⚡ Roughness Remap").clicked() {
+                        self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
                             MaterialNode::RoughnessGenerator {
@@ -2757,6 +2873,7 @@ impl eframe::App for MaterialEditorApp {
                         self.graph_dirty = true;
                     }
                     if ui.button("⚡ Custom Map Generator").clicked() {
+                        self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
                             MaterialNode::CustomMapGenerator {
@@ -2770,6 +2887,7 @@ impl eframe::App for MaterialEditorApp {
                         self.graph_dirty = true;
                     }
                     if ui.button("⚡ Procedural Noise").clicked() {
+                        self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
                             MaterialNode::ProceduralNoise {
@@ -2786,6 +2904,7 @@ impl eframe::App for MaterialEditorApp {
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("FILTERS & COMBINERS").strong());
                     if ui.button("🔀 Normal Blend (RNM)").clicked() {
+                        self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
                             MaterialNode::NormalBlend {
@@ -2796,6 +2915,7 @@ impl eframe::App for MaterialEditorApp {
                         self.graph_dirty = true;
                     }
                     if ui.button("📦 Channel Packer (RGBA)").clicked() {
+                        self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
                             MaterialNode::ChannelPacker {
@@ -2808,6 +2928,7 @@ impl eframe::App for MaterialEditorApp {
                         self.graph_dirty = true;
                     }
                     if ui.button("✂ Channel Splitter").clicked() {
+                        self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
                             MaterialNode::ChannelSplitter,
@@ -2815,6 +2936,7 @@ impl eframe::App for MaterialEditorApp {
                         self.graph_dirty = true;
                     }
                     if ui.button("🎨 Color Blend").clicked() {
+                        self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
                             MaterialNode::ColorBlend {
@@ -2828,6 +2950,7 @@ impl eframe::App for MaterialEditorApp {
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("OUTPUTS").strong());
                     if ui.button("🎯 Ray-MMD Master Output").clicked() {
+                        self.push_undo_snapshot();
                         self.snarl.insert_node(
                             egui::pos2(100.0, 100.0),
                             MaterialNode::RayMaterialOutput {
@@ -3221,15 +3344,25 @@ impl eframe::App for MaterialEditorApp {
         // Center Panel: Node Graph Canvas (Single Mode or PMX Active Subset Graph)
         egui::CentralPanel::default().show(ui, |ui| {
             if self.app_mode == AppMode::SingleMaterial {
+                let state_before = self.current_undo_snapshot();
                 SnarlWidget::new().show(&mut self.snarl, &mut self.viewer, ui);
 
+                let snaps: Vec<_> = self.viewer.undo_snapshots.drain(..).collect();
+                for snap in snaps {
+                    self.push_snapshot_direct(UndoSnapshot::Single(snap));
+                }
+
                 if self.viewer.needs_rebuild {
+                    if self.pre_drag_snapshot.is_none() {
+                        self.pre_drag_snapshot = Some(state_before);
+                    }
                     self.graph_dirty = true;
                     self.viewer.needs_rebuild = false;
                     ui.ctx().request_repaint();
                 }
 
                 if !self.viewer.nodes_to_remove.is_empty() {
+                    self.push_undo_snapshot();
                     for node_id in self.viewer.nodes_to_remove.drain(..) {
                         self.snarl.remove_node(node_id);
                     }
@@ -3283,16 +3416,18 @@ impl eframe::App for MaterialEditorApp {
 
                 if self.pmx_center_view_mode == 0 {
                     if let Some(active_idx) = self.active_pmx_subset {
+                        let state_before = self.current_undo_snapshot();
+                        let mut needs_rebuild = false;
+                        let mut removed_nodes = false;
+
                         if let Some(slot) = self.pmx_slots.get_mut(active_idx) {
                             SnarlWidget::new().show(&mut slot.snarl, &mut self.viewer, ui);
 
                             if self.viewer.needs_rebuild {
                                 slot.is_dirty = true;
                                 slot.has_custom_material = true;
-                                self.graph_dirty = true;
-                                self.pmx_preview_dirty = true;
+                                needs_rebuild = true;
                                 self.viewer.needs_rebuild = false;
-                                ui.ctx().request_repaint();
                             }
 
                             if !self.viewer.nodes_to_remove.is_empty() {
@@ -3301,10 +3436,32 @@ impl eframe::App for MaterialEditorApp {
                                 }
                                 slot.is_dirty = true;
                                 slot.has_custom_material = true;
-                                self.graph_dirty = true;
-                                self.pmx_preview_dirty = true;
-                                ui.ctx().request_repaint();
+                                removed_nodes = true;
                             }
+                        }
+
+                        let snaps: Vec<_> = self.viewer.undo_snapshots.drain(..).collect();
+                        for snap in snaps {
+                            self.push_snapshot_direct(UndoSnapshot::Pmx {
+                                subset_idx: active_idx,
+                                snarl: snap,
+                            });
+                        }
+
+                        if needs_rebuild {
+                            if self.pre_drag_snapshot.is_none() {
+                                self.pre_drag_snapshot = Some(state_before.clone());
+                            }
+                            self.graph_dirty = true;
+                            self.pmx_preview_dirty = true;
+                            ui.ctx().request_repaint();
+                        }
+
+                        if removed_nodes {
+                            self.push_snapshot_direct(state_before);
+                            self.graph_dirty = true;
+                            self.pmx_preview_dirty = true;
+                            ui.ctx().request_repaint();
                         }
                     } else {
                         ui.centered_and_justified(|ui| {
@@ -3482,6 +3639,13 @@ impl eframe::App for MaterialEditorApp {
                 });
             if !open {
                 self.show_hlsl_inspector = false;
+            }
+        }
+
+        // Commit drag/slider undo snapshot once mouse button is released
+        if self.pre_drag_snapshot.is_some() && !ui.input(|i| i.pointer.any_down()) {
+            if let Some(snap) = self.pre_drag_snapshot.take() {
+                self.push_snapshot_direct(snap);
             }
         }
 

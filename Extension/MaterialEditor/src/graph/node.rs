@@ -195,29 +195,29 @@ impl ShadingModel {
 
     pub fn custom_a_name(&self) -> &'static str {
         match self {
-            Self::Default => "Custom A (Unused)",
-            Self::Skin => "Curvature / Opacity",
-            Self::Anisotropy => "Anisotropic Strength",
-            Self::Glass => "Curvature / Absorption",
-            Self::Cloth => "Sheen Weight",
-            Self::ClearCoat => "Clearcoat Smoothness",
-            Self::Subsurface => "Curvature / Opacity",
-            Self::CelShading => "Step Threshold",
-            Self::ToonShading => "Ramp Hardness",
+            Self::Default => "Custom A (Subsurface / SSS)",
+            Self::Skin => "Curvature / SSS (Custom A)",
+            Self::Anisotropy => "Anisotropic Strength (Custom A)",
+            Self::Glass => "Curvature / Absorption (Custom A)",
+            Self::Cloth => "Sheen Weight (Custom A)",
+            Self::ClearCoat => "Clearcoat Smoothness (Custom A)",
+            Self::Subsurface => "Curvature / Opacity (Custom A)",
+            Self::CelShading => "Step Threshold (Custom A)",
+            Self::ToonShading => "Ramp Hardness (Custom A)",
         }
     }
 
     pub fn custom_b_name(&self) -> &'static str {
         match self {
-            Self::Default => "Custom B (Unused)",
-            Self::Skin => "Transmittance Color",
-            Self::Anisotropy => "Tangent Shift / Flow",
-            Self::Glass => "Transmittance Color",
-            Self::Cloth => "Fuzz Color",
-            Self::ClearCoat => "Custom B (Unused)",
-            Self::Subsurface => "Transmittance Color",
-            Self::CelShading => "Shadow Color",
-            Self::ToonShading => "Shadow Color",
+            Self::Default => "Custom B (Transmittance / Tint)",
+            Self::Skin => "Transmittance Color (Custom B)",
+            Self::Anisotropy => "Tangent Flow (Custom B)",
+            Self::Glass => "Transmittance Color (Custom B)",
+            Self::Cloth => "Fuzz Color (Custom B)",
+            Self::ClearCoat => "Clearcoat Normal (Custom B)",
+            Self::Subsurface => "Transmittance Color (Custom B)",
+            Self::CelShading => "Shadow Tint (Custom B)",
+            Self::ToonShading => "Shadow Tint (Custom B)",
         }
     }
 }
