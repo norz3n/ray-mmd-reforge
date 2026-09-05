@@ -1,0 +1,50 @@
+name: Feature Request
+description: Suggest an enhancement, new shading feature, material preset, or controller extension
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea for **Ray-MMD Reforge**? We appreciate suggestions that push real-time rendering in MMD further while respecting Direct3D 9 Shader Model 3.0 constraints.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Feature Summary
+      description: A concise summary of the proposed feature or improvement.
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation & Problem Statement
+      description: What problem or visual limitation does this address? Why is this valuable for creators?
+    validations:
+      required: true
+
+  - type: textarea
+    id: technical_proposal
+    attributes:
+      label: Technical Proposal & Reference Material
+      description: |
+        Describe how this could be implemented in HLSL/MME. Please include papers, algorithms, reference code (e.g. Filament, UE, three.js, academic publications), and Shader Model 3.0 / ps_3_0 feasibility notes.
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative shaders, workarounds, or existing tools you have considered.
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Visual References & Additional Context
+      description: Add any mockups, reference screenshots, or diagrams to illustrate your idea.
+    validations:
+      required: false

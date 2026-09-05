@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Quick Start Guide
+    url: https://github.com/norz3n/ray-mmd-reforge/wiki/Quick-Start-Guide
+    about: Follow the step-by-step setup guide for Ray-MMD Reforge in MikuMikuDance.
+  - name: 🛠️ Troubleshooting & FAQ
+    url: https://github.com/norz3n/ray-mmd-reforge/wiki/Troubleshooting-&-FAQ
+    about: Read common solutions for black screen, anti-aliasing issues, or shader errors.
+  - name: ⚙️ Configuration Guide (ray.conf)
+    url: https://github.com/norz3n/ray-mmd-reforge/wiki/Configuration-Guide-(ray.conf)
+    about: Detailed documentation of all macro switches, feature flags, and quality presets.
+  - name: 🎨 Materials & PBR Shading
+    url: https://github.com/norz3n/ray-mmd-reforge/wiki/Materials-&-PBR-Shading
+    about: Learn how to configure PBR, SSS, and anime materials in Reforge.

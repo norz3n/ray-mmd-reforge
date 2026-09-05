@@ -1,0 +1,88 @@
+name: Bug Report
+description: Report a shader compilation error, visual artifact, crash, or unexpected behavior
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report a bug in **Ray-MMD Reforge**!
+        Please fill out this form as accurately as possible to help diagnose and resolve the issue.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Step-by-step instructions to reproduce the issue.
+      placeholder: |
+        1. Open MMD x64 (version 9.26 / 9.32)
+        2. Load model '...'
+        3. Load 'ray.x' and assign 'ray.conf' / 'Main.fx' in MME
+        4. Enable feature XYZ or adjust morph '...' on ray_controller.pmx
+        5. See error / visual artifact
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs Actual Behavior
+      description: What did you expect to happen vs what actually occurred?
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment & Hardware Specs
+      description: Shader Model 3.0 and Direct3D 9 behavior heavily depends on your GPU, driver, and MMD/MME setup.
+      value: |
+        - OS: Windows 10 / 11 (64-bit)
+        - GPU Model & VRAM: (e.g., NVIDIA RTX 4070 12GB / AMD RX 7800 XT / Intel Arc A770)
+        - GPU Driver Version:
+        - MikuMikuDance (MMD) Version: (e.g., 9.26 x64 / 9.32 x64)
+        - MikuMikuEffect (MME) Version: (e.g., 0.37 x64)
+        - Ray-MMD Reforge Version / Git Commit:
+        - Viewport / Render Resolution: (e.g., 1920x1080)
+    validations:
+      required: true
+
+  - type: textarea
+    id: mme_error_log
+    attributes:
+      label: MME Error Log / Compiler Output
+      description: If MikuMikuEffect displayed an error dialog (e.g. "Technique failed to compile", register limit exceeded, missing include), paste the exact message here.
+      render: text
+
+  - type: textarea
+    id: config_changes
+    attributes:
+      label: Configuration Changes (ray.conf / ray_advanced.conf)
+      description: Did you modify any macro switches (e.g. TAA_ENABLE, SSGI_ENABLE, PCSS_ENABLE, GTAO_ENABLE)? Paste relevant snippets here.
+      render: text
+
+  - type: textarea
+    id: visual_evidence
+    attributes:
+      label: Screenshots or Recordings
+      description: Drag and drop screenshots or video links showing the issue (including MME Effect Mapping window if relevant).
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-flight Checklist
+      options:
+        - label: I have verified that MMD built-in Anti-Aliasing is disabled (View -> Anti-Aliasing is unchecked).
+          required: true
+        - label: I have checked the [Troubleshooting & FAQ](https://github.com/norz3n/ray-mmd-reforge/wiki/Troubleshooting-&-FAQ) in the Wiki.
+          required: true
+        - label: I have searched existing issues and confirmed this is not a duplicate.
+          required: true

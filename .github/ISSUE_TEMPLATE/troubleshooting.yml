@@ -1,0 +1,45 @@
+name: Troubleshooting & Questions
+description: Ask for help with setup, material configuration, or unexpected visual output
+title: "[Help]: "
+labels: ["question", "troubleshooting"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Need help setting up **Ray-MMD Reforge**?
+        Before opening a question, please review the [Wiki Quick Start Guide](https://github.com/norz3n/ray-mmd-reforge/wiki/Quick-Start-Guide) and [Troubleshooting & FAQ](https://github.com/norz3n/ray-mmd-reforge/wiki/Troubleshooting-&-FAQ).
+
+  - type: textarea
+    id: question_description
+    attributes:
+      label: What are you trying to accomplish?
+      description: Describe what you want to achieve and what is currently happening instead (e.g., black screen, blurry output, material not loading).
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: System & Setup
+      value: |
+        - OS: Windows 10 / 11 (64-bit)
+        - GPU:
+        - MMD Version: (e.g., 9.26 x64)
+        - MME Version: (e.g., 0.37 x64)
+        - Ray-MMD Reforge Version / Commit:
+    validations:
+      required: true
+
+  - type: textarea
+    id: troubleshooting_done
+    attributes:
+      label: What steps have you already tried?
+      description: Mention what wiki guides or troubleshooting steps you've tested so far.
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Attach screenshots of your MMD viewport and the MME Effect Mapping window (showing Main, MaterialMap, etc.).
