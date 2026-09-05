@@ -1,5 +1,7 @@
 //! ReForge Material Editor — High-performance node-based PBR material authoring and ShaderMap generator for Ray-MMD ReForge.
 
+#![windows_subsystem = "windows"]
+
 pub mod app;
 pub mod graph;
 pub mod image_proc;
