@@ -932,6 +932,272 @@ pub fn generate_procedural_noise(
     out
 }
 
+/// Smoothstep Hermite interpolation between edge0 and edge1.
+#[inline(always)]
+pub fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = ((x - edge0) / (edge1 - edge0).max(1e-5)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Strand orientation for procedural hair generation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum StrandOrientation {
+    /// Hair strands run vertically along Y axis (standard for Ray-MMD hair meshes).
+    Vertical,
+    /// Hair strands run horizontally along X axis.
+    Horizontal,
+}
+
+/// Generates high-fidelity procedural hair maps matching Ray-MMD anisotropic shader specifications:
+/// 1. Tangent space Normal map with cylindrical micro-groove perturbation.
+/// 2. Tangent Shift map for silky anisotropic specular jitter (matching shift4.png plugged into Custom B).
+/// 3. Individual strand alpha/depth mask for albedo and occlusion modulation.
+pub fn generate_hair_strands(
+    width: u32,
+    height: u32,
+    strand_density: f32,
+    roughness: f32,
+    waviness: f32,
+    wave_frequency: f32,
+    orientation: StrandOrientation,
+    normal_intensity: f32,
+) -> (U8Image, U8Image, U8Image) {
+    let w = width.max(1);
+    let h = height.max(1);
+    let mut normal_img = U8Image::new(w, h);
+    let mut shift_img = U8Image::new(w, h);
+    let mut mask_img = U8Image::new(w, h);
+
+    let w_f = w as f32;
+    let h_f = h as f32;
+    let density = strand_density.clamp(5.0, 2000.0);
+    let rough = roughness.clamp(0.0, 1.0);
+    let wave_amp = waviness.clamp(0.0, 1.0) * 0.04;
+    let wave_freq = wave_frequency.clamp(0.1, 50.0);
+    let norm_scale = normal_intensity.clamp(0.0, 5.0);
+
+    let mut normal_raw = normal_img.as_flat_samples_mut();
+    let mut shift_raw = shift_img.as_flat_samples_mut();
+    let mut mask_raw = mask_img.as_flat_samples_mut();
+
+    normal_raw
+        .as_mut_slice()
+        .par_chunks_exact_mut(4)
+        .zip(shift_raw.as_mut_slice().par_chunks_exact_mut(4))
+        .zip(mask_raw.as_mut_slice().par_chunks_exact_mut(4))
+        .enumerate()
+        .for_each(|(idx, ((norm_pix, shift_pix), mask_pix))| {
+            let px = (idx % w as usize) as f32;
+            let py = (idx / w as usize) as f32;
+            let u = px / w_f;
+            let v = py / h_f;
+
+            let (cross_coord, flow_coord) = match orientation {
+                StrandOrientation::Vertical => (u, v),
+                StrandOrientation::Horizontal => (v, u),
+            };
+
+            // Organic strand waviness along flow
+            let wave = (flow_coord * wave_freq * std::f32::consts::TAU).sin() * wave_amp;
+            let strand_pos = cross_coord + wave;
+
+            // Discrete fiber index and intra-strand coordinate [-1.0, 1.0]
+            let fiber_scalar = strand_pos * density;
+            let fiber_id = fiber_scalar.floor() as i32;
+            let intra_strand = fiber_scalar.fract() * 2.0 - 1.0;
+
+            // Per-fiber stochastic properties
+            let fiber_h0 = hash2d(fiber_id, 107);
+            let fiber_h1 = hash2d(fiber_id, 389);
+            let fiber_jitter = (hash2d(fiber_id, (flow_coord * 120.0) as i32) - 0.5) * rough;
+
+            // Exact Ray-MMD hairNoise formula from material_common_2.0.fxsub:
+            // hairNoise = sin(nx) * 0.4 + sin(nx * 1.732) * 0.3 + sin(nx * 3.1415) * 0.3
+            let nx = strand_pos * density * std::f32::consts::TAU;
+            let ray_noise = (nx).sin() * 0.4 + (nx * 1.732).sin() * 0.3 + (nx * std::f32::consts::PI).sin() * 0.3;
+
+            // 1. Normal Map (Cylindrical micro-groove slope + Ray-MMD sine wave perturbation)
+            let cylindrical_slope = intra_strand * (1.0 - intra_strand * intra_strand).max(0.0).sqrt();
+            let pert = (cylindrical_slope * 0.65 + ray_noise * 0.25 + fiber_jitter * 0.5) * norm_scale;
+
+            let (nx_val, ny_val, nz_val) = match orientation {
+                StrandOrientation::Vertical => {
+                    let len = (pert * pert + 1.0).sqrt();
+                    (-pert / len, 0.0, 1.0 / len)
+                }
+                StrandOrientation::Horizontal => {
+                    let len = (pert * pert + 1.0).sqrt();
+                    (0.0, -pert / len, 1.0 / len)
+                }
+            };
+
+            norm_pix[0] = (nx_val.clamp(-1.0, 1.0) * 127.5 + 128.0) as u8;
+            norm_pix[1] = (ny_val.clamp(-1.0, 1.0) * 127.5 + 128.0) as u8;
+            norm_pix[2] = (nz_val.clamp(0.0, 1.0) * 255.0) as u8;
+            norm_pix[3] = 255;
+
+            // 2. Tangent Shift Map (Silky specular anisotropic jitter, matching shift4.png)
+            let flow_variation = (flow_coord * wave_freq * 1.5 + fiber_h0 * 6.28).sin() * 0.15;
+            let shift_val = (0.5 + (fiber_h0 - 0.5) * 0.5 + flow_variation + fiber_jitter * 0.3).clamp(0.0, 1.0);
+            let shift_byte = (shift_val * 255.0 + 0.5) as u8;
+            shift_pix[0] = shift_byte;
+            shift_pix[1] = shift_byte;
+            shift_pix[2] = shift_byte;
+            shift_pix[3] = 255;
+
+            // 3. Strand Mask (Individual fiber highlight and separation)
+            let core = (1.0 - intra_strand.abs().powf(1.8)) * (0.8 + fiber_h1 * 0.2);
+            let mask_byte = (core.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+            mask_pix[0] = mask_byte;
+            mask_pix[1] = mask_byte;
+            mask_pix[2] = mask_byte;
+            mask_pix[3] = 255;
+        });
+
+    (normal_img, shift_img, mask_img)
+}
+
+/// Procedurally generates physical Cornea lens and Iris parallax maps:
+/// 1. Cornea Dome Normal Map (Convex spherical lens converting flat eye mesh into physical cornea dome)
+/// 2. Iris Parallax / Concave Depth Map (Depth into anterior chamber for parallax occlusion)
+/// 3. Limbal Ring & Caustic Mask Map (R = Limbal darkening, G = Caustic focus, B = Pupil/Iris mask)
+/// 4. Refracted Iris Image (Applies Snell's Law refraction, limbal darkening, and caustic intensity)
+pub fn generate_eye_cornea_maps(
+    width: u32,
+    height: u32,
+    iris_depth: f32,
+    cornea_ior: f32,
+    limbal_width: f32,
+    limbal_darkness: f32,
+    caustic_intensity: f32,
+    dome_curvature: f32,
+    input_iris: Option<&U8Image>,
+) -> (U8Image, U8Image, U8Image, U8Image) {
+    let w = width.max(1);
+    let h = height.max(1);
+    let mut normal_img = U8Image::new(w, h);
+    let mut parallax_img = U8Image::new(w, h);
+    let mut limbal_caustic_img = U8Image::new(w, h);
+    let mut refracted_iris_img = U8Image::new(w, h);
+
+    let w_f = w as f32;
+    let h_f = h as f32;
+    let depth = iris_depth.clamp(0.001, 0.5);
+    let ior = cornea_ior.max(1.0);
+    let eta = 1.0 / ior;
+    let l_width = limbal_width.clamp(0.01, 0.5);
+    let l_darkness = limbal_darkness.clamp(0.0, 1.0);
+    let c_intensity = caustic_intensity.clamp(0.0, 5.0);
+    let curvature = dome_curvature.clamp(0.05, 1.0);
+
+    let mut norm_raw = normal_img.as_flat_samples_mut();
+    let mut par_raw = parallax_img.as_flat_samples_mut();
+    let mut lc_raw = limbal_caustic_img.as_flat_samples_mut();
+    let mut ref_raw = refracted_iris_img.as_flat_samples_mut();
+
+    norm_raw
+        .as_mut_slice()
+        .par_chunks_exact_mut(4)
+        .zip(par_raw.as_mut_slice().par_chunks_exact_mut(4))
+        .zip(lc_raw.as_mut_slice().par_chunks_exact_mut(4))
+        .zip(ref_raw.as_mut_slice().par_chunks_exact_mut(4))
+        .enumerate()
+        .for_each(|(idx, (((norm_pix, par_pix), lc_pix), ref_pix))| {
+            let px = (idx % w as usize) as f32;
+            let py = (idx / w as usize) as f32;
+            let u = (px + 0.5) / w_f;
+            let v = (py + 0.5) / h_f;
+
+            // Centered UV coords [-1.0, 1.0] relative to eye/iris center
+            let cx = (u - 0.5) * 2.0;
+            let cy = (v - 0.5) * 2.0;
+            let dist = (cx * cx + cy * cy).sqrt();
+
+            // 1. Cornea Dome Normal Map (Convex spherical dome)
+            let dome_r = (dist * curvature).min(1.0);
+            let dome_z = (1.0 - dome_r * dome_r).max(0.0).sqrt();
+            let dome_falloff = smoothstep(1.1, 0.9, dist);
+            let n_x = -cx * curvature * dome_falloff;
+            let n_y = -cy * curvature * dome_falloff; // DirectX Y-
+            let n_z = dome_z * dome_falloff + (1.0 - dome_falloff);
+            let n_len = (n_x * n_x + n_y * n_y + n_z * n_z).sqrt().max(1e-5);
+            let norm_vec = [n_x / n_len, n_y / n_len, n_z / n_len];
+
+            norm_pix[0] = (norm_vec[0] * 127.5 + 128.0) as u8;
+            norm_pix[1] = (norm_vec[1] * 127.5 + 128.0) as u8;
+            norm_pix[2] = (norm_vec[2] * 255.0).clamp(0.0, 255.0) as u8;
+            norm_pix[3] = 255;
+
+            // 2. Iris Parallax Map (Concave depth into anterior chamber)
+            let funnel_depth = (1.0 - (dist * 0.95).min(1.0)).powf(1.6) * depth * 3.0;
+            let par_val = (1.0 - funnel_depth).clamp(0.0, 1.0);
+            let par_byte = (par_val * 255.0 + 0.5) as u8;
+            par_pix[0] = par_byte;
+            par_pix[1] = par_byte;
+            par_pix[2] = par_byte;
+            par_pix[3] = 255;
+
+            // 3. Limbal Ring & Caustic Mask Map
+            let limbal_edge = smoothstep(1.0, 1.0 - l_width, dist);
+            let limbal_val = 1.0 - limbal_edge * l_darkness;
+
+            let caustic_dir = (cx * 0.55 + cy * 0.75).max(0.0);
+            let caustic_ring = (1.0 - (dist - 0.55).abs() * 2.8).max(0.0);
+            let caustic_val = (caustic_dir.powf(2.2) * caustic_ring * c_intensity).clamp(0.0, 1.0);
+
+            let pupil_val = smoothstep(0.25, 0.20, dist);
+
+            lc_pix[0] = (limbal_val.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+            lc_pix[1] = (caustic_val * 255.0 + 0.5) as u8;
+            lc_pix[2] = (pupil_val * 255.0 + 0.5) as u8;
+            lc_pix[3] = 255;
+
+            // 4. Refracted Iris Image
+            let view_dir = [-0.15f32, -0.20, 0.95];
+            let refr_scale = (1.0 - eta) * depth * 2.5;
+            let offset_u = norm_vec[0] * refr_scale + view_dir[0] * depth;
+            let offset_v = norm_vec[1] * refr_scale + view_dir[1] * depth;
+            let refr_u = (u + offset_u).clamp(0.0, 1.0);
+            let refr_v = (v + offset_v).clamp(0.0, 1.0);
+
+            let base_color = if let Some(in_img) = input_iris {
+                let sx = (refr_u * (in_img.width() - 1) as f32).round() as u32;
+                let sy = (refr_v * (in_img.height() - 1) as f32).round() as u32;
+                let p = in_img.get_pixel(sx.min(in_img.width() - 1), sy.min(in_img.height() - 1));
+                [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0, p[3] as f32 / 255.0]
+            } else {
+                let refr_cx = (refr_u - 0.5) * 2.0;
+                let refr_cy = (refr_v - 0.5) * 2.0;
+                let refr_dist = (refr_cx * refr_cx + refr_cy * refr_cy).sqrt();
+                let angle = refr_cy.atan2(refr_cx);
+                let spoke = (angle * 24.0).sin() * 0.08;
+
+                if refr_dist < 0.22 {
+                    [0.05, 0.05, 0.08, 1.0]
+                } else if refr_dist < 0.95 {
+                    let t = (refr_dist - 0.22) / 0.73;
+                    let r_c = 0.15 + t * 0.2 + spoke;
+                    let g_c = 0.35 + (1.0 - t) * 0.35 + spoke;
+                    let b_c = 0.85 + (1.0 - t) * 0.15;
+                    [r_c.clamp(0.0, 1.0), g_c.clamp(0.0, 1.0), b_c.clamp(0.0, 1.0), 1.0]
+                } else {
+                    [0.92, 0.93, 0.95, 1.0]
+                }
+            };
+
+            let final_r = (base_color[0] * limbal_val + caustic_val * 0.35).clamp(0.0, 1.0);
+            let final_g = (base_color[1] * limbal_val + caustic_val * 0.35).clamp(0.0, 1.0);
+            let final_b = (base_color[2] * limbal_val + caustic_val * 0.40).clamp(0.0, 1.0);
+
+            ref_pix[0] = (final_r * 255.0 + 0.5) as u8;
+            ref_pix[1] = (final_g * 255.0 + 0.5) as u8;
+            ref_pix[2] = (final_b * 255.0 + 0.5) as u8;
+            ref_pix[3] = (base_color[3] * 255.0 + 0.5) as u8;
+        });
+
+    (normal_img, parallax_img, limbal_caustic_img, refracted_iris_img)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -956,6 +1222,45 @@ mod tests {
         let min_val = *raw.iter().step_by(4).min().unwrap();
         let max_val = *raw.iter().step_by(4).max().unwrap();
         assert!(max_val > min_val + 20, "Perlin noise must produce non-trivial dynamic range");
+    }
+
+    #[test]
+    fn test_generate_hair_strands() {
+        let (norm, shift, mask) = generate_hair_strands(
+            64, 64, 200.0, 0.35, 0.20, 4.0, StrandOrientation::Vertical, 0.7,
+        );
+        assert_eq!(norm.width(), 64);
+        assert_eq!(norm.height(), 64);
+        assert_eq!(shift.width(), 64);
+        assert_eq!(mask.width(), 64);
+
+        // Normal map Z channel should be dominant (blue tangent normal)
+        let n_raw = norm.as_raw();
+        assert!(n_raw[2] > 128, "Normal Z should point towards camera in tangent space");
+
+        // Shift map should have non-trivial variation
+        let s_raw = shift.as_raw();
+        let s_min = *s_raw.iter().step_by(4).min().unwrap();
+        let s_max = *s_raw.iter().step_by(4).max().unwrap();
+        assert!(s_max > s_min, "Shift map must have variation across hair strands");
+    }
+
+    #[test]
+    fn test_generate_eye_cornea_maps() {
+        let (norm, par, lc, refr) = generate_eye_cornea_maps(
+            64, 64, 0.05, 1.376, 0.15, 0.65, 1.50, 0.85, None,
+        );
+        assert_eq!(norm.width(), 64);
+        assert_eq!(par.width(), 64);
+        assert_eq!(lc.width(), 64);
+        assert_eq!(refr.width(), 64);
+
+        // Center pixel of normal map should be facing straight out [128, 128, 255]
+        let center_idx = (32 * 64 + 32) * 4;
+        let n_raw = norm.as_raw();
+        let diff_x = (n_raw[center_idx] as i32 - 128).abs();
+        let diff_y = (n_raw[center_idx + 1] as i32 - 128).abs();
+        assert!(diff_x < 15 && diff_y < 15, "Center of dome normal should be perpendicular to surface");
     }
 }
 

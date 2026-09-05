@@ -21,6 +21,7 @@ pub struct EvaluatedMaterial {
     pub custom_a: Option<U8Image>,
     pub custom_b: Option<U8Image>,
     pub detail_normal: Option<U8Image>,
+    pub normal_sub: Option<U8Image>,
 }
 
 /// Helper to create a solid 1x1 color image.
@@ -416,6 +417,64 @@ impl<'a> GraphEvaluator<'a> {
                     }
                 }
             }
+            MaterialNode::HairStrandGenerator {
+                strand_density,
+                roughness,
+                waviness,
+                wave_frequency,
+                orientation,
+                normal_intensity,
+            } => {
+                let (norm, shift, mask) = generate_hair_strands(
+                    dim,
+                    dim,
+                    *strand_density,
+                    *roughness,
+                    *waviness,
+                    *wave_frequency,
+                    *orientation,
+                    *normal_intensity,
+                );
+                self.cache.insert((node_id, 0), norm.clone());
+                self.cache.insert((node_id, 1), shift.clone());
+                self.cache.insert((node_id, 2), mask.clone());
+                match output_index {
+                    0 => Some(norm),
+                    1 => Some(shift),
+                    _ => Some(mask),
+                }
+            }
+            MaterialNode::EyeCorneaGenerator {
+                iris_depth,
+                cornea_ior,
+                limbal_width,
+                limbal_darkness,
+                caustic_intensity,
+                dome_curvature,
+            } => {
+                let in_iris = self.eval_input(node_id, 0);
+                let (norm, par, lc, refr) = generate_eye_cornea_maps(
+                    dim,
+                    dim,
+                    *iris_depth,
+                    *cornea_ior,
+                    *limbal_width,
+                    *limbal_darkness,
+                    *caustic_intensity,
+                    *dome_curvature,
+                    in_iris.as_ref(),
+                );
+                self.cache.insert((node_id, 0), norm.clone());
+                self.cache.insert((node_id, 1), par.clone());
+                self.cache.insert((node_id, 2), lc.clone());
+                self.cache.insert((node_id, 3), refr.clone());
+                match output_index {
+                    0 => Some(norm),
+                    1 => Some(par),
+                    2 => Some(lc),
+                    _ => Some(refr),
+                }
+            }
             MaterialNode::RayMaterialOutput { .. } => None,
         };
 
@@ -459,6 +518,7 @@ impl<'a> GraphEvaluator<'a> {
         mat.custom_a = self.eval_input(output_id, 10);
         mat.custom_b = self.eval_input(output_id, 11);
         mat.detail_normal = self.eval_input(output_id, 12);
+        mat.normal_sub = self.eval_input(output_id, 13);
 
         // Fallback: if channels are not connected to output pins, still evaluate any generator nodes in graph
         if mat.metalness.is_none() {
@@ -484,6 +544,14 @@ impl<'a> GraphEvaluator<'a> {
                     if mat.custom_b.is_none() {
                         mat.custom_b = self.eval_node_output(id, 1);
                     }
+                    break;
+                }
+            }
+        }
+        if mat.normal_sub.is_none() {
+            for (id, node) in self.snarl.node_ids() {
+                if matches!(node, MaterialNode::HairStrandGenerator { .. }) {
+                    mat.normal_sub = self.eval_node_output(id, 0);
                     break;
                 }
             }

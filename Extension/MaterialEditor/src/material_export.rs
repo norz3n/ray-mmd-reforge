@@ -104,6 +104,23 @@ pub struct RayMaterialConfig {
     pub detail_normal_scale: f32,
     pub detail_normal_loop: f32,
     pub detail_fade_distance: f32,
+
+    // Sub-Normal Map
+    pub normal_sub_enabled: bool,
+    pub normal_sub_file: String,
+    pub normal_sub_scale: f32,
+    pub normal_sub_loop: f32,
+
+    // Procedural Hair
+    pub procedural_hair_enable: bool,
+    pub procedural_hair_scale: f32,
+    pub procedural_hair_intensity: f32,
+
+    // Eye Parallax & Cornea Dome
+    pub eye_parallax_enable: bool,
+    pub eye_iris_depth: f32,
+    pub eye_cornea_ior: f32,
+    pub convex_normal_enable: bool,
 }
 
 impl Default for RayMaterialConfig {
@@ -187,6 +204,20 @@ impl Default for RayMaterialConfig {
             detail_normal_scale: 1.0,
             detail_normal_loop: 20.0,
             detail_fade_distance: 15.0,
+
+            normal_sub_enabled: false,
+            normal_sub_file: "normal_sub.png".to_string(),
+            normal_sub_scale: 1.0,
+            normal_sub_loop: 1.0,
+
+            procedural_hair_enable: false,
+            procedural_hair_scale: 0.45,
+            procedural_hair_intensity: 0.45,
+
+            eye_parallax_enable: false,
+            eye_iris_depth: 0.05,
+            eye_cornea_ior: 1.376,
+            convex_normal_enable: false,
         }
     }
 }
@@ -252,6 +283,15 @@ impl RayMaterialConfig {
         code.push_str(&format!("#define NORMAL_MAP_FILE \"{}\"\n\n", self.normal_file));
         code.push_str(&format!("const float normalMapScale = {:.4};\n", self.normal_scale));
         code.push_str(&format!("const float normalMapLoopNum = {:.4};\n\n", self.normal_loop));
+
+        // Sub-Normal Map
+        let normal_sub_from = if self.normal_sub_enabled { 3 } else { 0 };
+        code.push_str(&format!("#define NORMAL_SUB_MAP_FROM {}\n", normal_sub_from));
+        code.push_str("#define NORMAL_SUB_MAP_TYPE 0\n");
+        code.push_str("#define NORMAL_SUB_MAP_UV_FLIP 0\n");
+        code.push_str(&format!("#define NORMAL_SUB_MAP_FILE \"{}\"\n\n", self.normal_sub_file));
+        code.push_str(&format!("const float normalSubMapScale = {:.4};\n", self.normal_sub_scale));
+        code.push_str(&format!("const float normalSubMapLoopNum = {:.4};\n\n", self.normal_sub_loop));
 
         // Smoothness
         let smoothness_from = if self.smoothness_enabled { 3 } else { 0 };
@@ -387,6 +427,22 @@ impl RayMaterialConfig {
         code.push_str(&format!("const float detailNormalScale = {:.4};\n", self.detail_normal_scale));
         code.push_str(&format!("const float detailNormalLoopNum = {:.4};\n", self.detail_normal_loop));
         code.push_str(&format!("const float detailFadeDistance = {:.4};\n\n", self.detail_fade_distance));
+
+        // Procedural Hair
+        let proc_hair_en = if self.procedural_hair_enable { 1 } else { 0 };
+        code.push_str("// Procedural Hair Anisotropic Highlight Perturbation\n");
+        code.push_str(&format!("#define PROCEDURAL_HAIR {}\n", proc_hair_en));
+        code.push_str(&format!("#define PROCEDURAL_HAIR_SCALE {:.4}\n", self.procedural_hair_scale));
+        code.push_str(&format!("#define PROCEDURAL_HAIR_INTENSITY {:.4}\n\n", self.procedural_hair_intensity));
+
+        // Eye Cornea Dome & Iris Parallax Refraction
+        let convex_norm_en = if self.convex_normal_enable { 1 } else { 0 };
+        let eye_par_en = if self.eye_parallax_enable { 1 } else { 0 };
+        code.push_str("// Eye Cornea Dome Normal & Snell's Law Iris Parallax Refraction\n");
+        code.push_str(&format!("#define CONVEX_NORMAL {}\n", convex_norm_en));
+        code.push_str(&format!("#define EYE_PARALLAX_ENABLE {}\n", eye_par_en));
+        code.push_str(&format!("#define EYE_IRIS_DEPTH {:.4}\n", self.eye_iris_depth));
+        code.push_str(&format!("#define EYE_CORNEA_IOR {:.4}\n\n", self.eye_cornea_ior));
 
         // Common include
         code.push_str("#include \"material_common_2.0.fxsub\"\n");

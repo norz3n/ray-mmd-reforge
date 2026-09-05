@@ -228,12 +228,26 @@ pub fn render_pbr_preview(
 
                 // Normal map perturbation
                 let normal_samp = sample_texture_bilinear(material.normal.as_ref(), uv.x, uv.y, [0.5, 0.5, 1.0, 1.0]);
-                let map_n = Vec3::new(
+                let mut map_n = Vec3::new(
                     normal_samp[0] * 2.0 - 1.0,
                     normal_samp[1] * 2.0 - 1.0, // DirectX Y-
                     normal_samp[2] * 2.0 - 1.0,
                 )
                 .normalize();
+
+                // RNM blend with normal_sub if present (matching Ray-MMD shader RNMBlendUnpacked)
+                if let Some(ref sub_img) = material.normal_sub {
+                    let sub_samp = sample_texture_bilinear(Some(sub_img), uv.x, uv.y, [0.5, 0.5, 1.0, 1.0]);
+                    let sub_n = Vec3::new(
+                        sub_samp[0] * 2.0 - 1.0,
+                        sub_samp[1] * 2.0 - 1.0,
+                        sub_samp[2] * 2.0 - 1.0,
+                    ).normalize();
+
+                    let t = map_n + Vec3::new(0.0, 0.0, 1.0);
+                    let u = Vec3::new(-sub_n.x, -sub_n.y, sub_n.z);
+                    map_n = (t * (t.dot(u) / t.z.max(1e-5)) - u).normalize();
+                }
 
                 // TBN transformation
                 let tbn = Mat3::from_cols(tangent, bitangent, geo_normal);

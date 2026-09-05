@@ -244,6 +244,30 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
             self.needs_rebuild = true;
             ui.close();
         }
+        if ui.button(format!("{} Hair Strand Generator", icons::WAVES)).clicked() {
+            snarl.insert_node(pos, MaterialNode::HairStrandGenerator {
+                strand_density: 250.0,
+                roughness: 0.35,
+                waviness: 0.20,
+                wave_frequency: 4.0,
+                orientation: crate::image_proc::StrandOrientation::Vertical,
+                normal_intensity: 0.65,
+            });
+            self.needs_rebuild = true;
+            ui.close();
+        }
+        if ui.button(format!("{} Eye Cornea & Iris Parallax", icons::EYE)).clicked() {
+            snarl.insert_node(pos, MaterialNode::EyeCorneaGenerator {
+                iris_depth: 0.05,
+                cornea_ior: 1.376,
+                limbal_width: 0.15,
+                limbal_darkness: 0.65,
+                caustic_intensity: 1.50,
+                dome_curvature: 0.85,
+            });
+            self.needs_rebuild = true;
+            ui.close();
+        }
         ui.separator();
         if ui.button(format!("{} Normal Blend (RNM)", icons::GIT_MERGE)).clicked() {
             snarl.insert_node(pos, MaterialNode::NormalBlend { detail_scale: 1.0, detail_tile: 10.0 });
@@ -659,6 +683,47 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
                     }
                 }
             }
+            MaterialNode::HairStrandGenerator {
+                strand_density,
+                roughness,
+                waviness,
+                wave_frequency,
+                orientation,
+                normal_intensity,
+            } => {
+                ui.horizontal(|ui| {
+                    ui.label("Orient:");
+                    egui::ComboBox::from_id_salt((node_id, "strand_ori"))
+                        .selected_text(match orientation {
+                            crate::image_proc::StrandOrientation::Vertical => "Vertical (Y)",
+                            crate::image_proc::StrandOrientation::Horizontal => "Horizontal (X)",
+                        })
+                        .show_ui(ui, |ui| {
+                            changed |= ui.selectable_value(orientation, crate::image_proc::StrandOrientation::Vertical, "Vertical (Y)").changed();
+                            changed |= ui.selectable_value(orientation, crate::image_proc::StrandOrientation::Horizontal, "Horizontal (X)").changed();
+                        });
+                });
+                changed |= ui.add(Slider::new(strand_density, 20.0..=800.0).text("Density")).changed();
+                changed |= ui.add(Slider::new(roughness, 0.0..=1.0).text("Roughness")).changed();
+                changed |= ui.add(Slider::new(waviness, 0.0..=1.0).text("Waviness")).changed();
+                changed |= ui.add(Slider::new(wave_frequency, 0.5..=20.0).text("Wave Freq")).changed();
+                changed |= ui.add(Slider::new(normal_intensity, 0.0..=2.0).text("Normal Int")).changed();
+            }
+            MaterialNode::EyeCorneaGenerator {
+                iris_depth,
+                cornea_ior,
+                limbal_width,
+                limbal_darkness,
+                caustic_intensity,
+                dome_curvature,
+            } => {
+                changed |= ui.add(Slider::new(dome_curvature, 0.1..=1.0).text("Dome Curv")).changed();
+                changed |= ui.add(Slider::new(iris_depth, 0.005..=0.20).text("Iris Depth")).changed();
+                changed |= ui.add(Slider::new(cornea_ior, 1.0..=1.8).text("Cornea IOR")).changed();
+                changed |= ui.add(Slider::new(limbal_width, 0.02..=0.40).text("Limbal Width")).changed();
+                changed |= ui.add(Slider::new(limbal_darkness, 0.0..=1.0).text("Limbal Dark")).changed();
+                changed |= ui.add(Slider::new(caustic_intensity, 0.0..=3.0).text("Caustic Int")).changed();
+            }
             MaterialNode::RayMaterialOutput {
                 material_name,
                 shading_model,
@@ -669,6 +734,15 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
                 hex_tiling_enable,
                 hashed_alpha_enable,
                 detail_map_enable,
+                normal_sub_scale,
+                normal_sub_loop,
+                procedural_hair_enable,
+                procedural_hair_scale,
+                procedural_hair_intensity,
+                eye_parallax_enable,
+                eye_iris_depth,
+                eye_cornea_ior,
+                convex_normal_enable,
                 ..
             } => {
                 ui.vertical(|ui| {
@@ -731,6 +805,31 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
                         changed |= ui.checkbox(hex_tiling_enable, "Hex-Tiling").on_hover_text("Mikkelsen 2022 procedural repetition suppression").changed();
                         changed |= ui.checkbox(hashed_alpha_enable, "Hashed Alpha").on_hover_text("Subpixel stochastic alpha cutout").changed();
                         changed |= ui.checkbox(detail_map_enable, "Detail Normal").on_hover_text("Micro-surface normal detail overlay").changed();
+                        ui.separator();
+                        ui.label("Sub-Normal Map:");
+                        changed |= ui.add(Slider::new(normal_sub_scale, 0.0..=3.0).text("Sub Scale")).changed();
+                        changed |= ui.add(Slider::new(normal_sub_loop, 1.0..=50.0).text("Sub Loop")).changed();
+                    });
+
+                    ui.collapsing("Hair & Eye Special FX", |ui| {
+                        changed |= ui.checkbox(procedural_hair_enable, "Procedural Hair")
+                            .on_hover_text("Ray-MMD anisotropic strand micro-groove perturbation")
+                            .changed();
+                        if *procedural_hair_enable {
+                            changed |= ui.add(Slider::new(procedural_hair_scale, 0.01..=2.0).text("Hair Scale")).changed();
+                            changed |= ui.add(Slider::new(procedural_hair_intensity, 0.0..=2.0).text("Hair Intensity")).changed();
+                        }
+                        ui.separator();
+                        changed |= ui.checkbox(convex_normal_enable, "Convex Eye Normal")
+                            .on_hover_text("Invert concave anime eye curvature into convex cornea dome")
+                            .changed();
+                        changed |= ui.checkbox(eye_parallax_enable, "Eye Iris Parallax")
+                            .on_hover_text("Snell's Law cornea refraction into anterior chamber")
+                            .changed();
+                        if *eye_parallax_enable {
+                            changed |= ui.add(Slider::new(eye_iris_depth, 0.005..=0.25).text("Iris Depth")).changed();
+                            changed |= ui.add(Slider::new(eye_cornea_ior, 1.0..=2.0).text("Cornea IOR")).changed();
+                        }
                     });
                 });
             }

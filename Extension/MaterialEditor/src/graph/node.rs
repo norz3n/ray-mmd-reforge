@@ -1,4 +1,4 @@
-use crate::image_proc::{CurvatureMode, NoiseType, NormalFilter, NormalOrientation, U8Image};
+use crate::image_proc::{CurvatureMode, NoiseType, NormalFilter, NormalOrientation, StrandOrientation, U8Image};
 use egui::Color32;
 use serde::{Deserialize, Serialize};
 
@@ -116,6 +116,24 @@ pub enum MaterialNode {
         invert_a: bool,
         aniso_radial: bool,
     },
+    /// Ray-MMD: Generates anisotropic hair strand normal, silky tangent shift (shift4.png), and strand mask.
+    HairStrandGenerator {
+        strand_density: f32,
+        roughness: f32,
+        waviness: f32,
+        wave_frequency: f32,
+        orientation: StrandOrientation,
+        normal_intensity: f32,
+    },
+    /// Ray-MMD: Generates cornea convex dome normal, iris parallax depth, limbal & caustic, and refracted iris.
+    EyeCorneaGenerator {
+        iris_depth: f32,
+        cornea_ior: f32,
+        limbal_width: f32,
+        limbal_darkness: f32,
+        caustic_intensity: f32,
+        dome_curvature: f32,
+    },
     /// Master Ray-MMD ReForge Material Output node.
     RayMaterialOutput {
         material_name: String,
@@ -149,6 +167,18 @@ pub enum MaterialNode {
         detail_normal_scale: f32,
         detail_normal_loop: f32,
         detail_fade_distance: f32,
+        // Sub-Normal
+        normal_sub_scale: f32,
+        normal_sub_loop: f32,
+        // Procedural Hair
+        procedural_hair_enable: bool,
+        procedural_hair_scale: f32,
+        procedural_hair_intensity: f32,
+        // Eye Parallax & Cornea Dome
+        eye_parallax_enable: bool,
+        eye_iris_depth: f32,
+        eye_cornea_ior: f32,
+        convex_normal_enable: bool,
     },
 }
 
@@ -269,6 +299,8 @@ impl MaterialNode {
             Self::MetalnessGenerator { .. } => "Metalness Generator",
             Self::EmissiveGenerator { .. } => "Emissive Generator",
             Self::CustomMapGenerator { .. } => "Custom Map Generator",
+            Self::HairStrandGenerator { .. } => "Hair Strand Generator",
+            Self::EyeCorneaGenerator { .. } => "Eye Cornea & Iris Parallax",
             Self::RayMaterialOutput { .. } => "Ray-MMD Material Output",
         }
     }
@@ -299,7 +331,9 @@ impl MaterialNode {
             | Self::RoughnessGenerator { .. }
             | Self::MetalnessGenerator { .. }
             | Self::EmissiveGenerator { .. }
-            | Self::CustomMapGenerator { .. } => {
+            | Self::CustomMapGenerator { .. }
+            | Self::HairStrandGenerator { .. }
+            | Self::EyeCorneaGenerator { .. } => {
                 Color32::from_rgb(40, 126, 124)
             }
             // Blender Material Output (Emerald Green)
@@ -328,7 +362,9 @@ impl MaterialNode {
             Self::MetalnessGenerator { .. } => 1,
             Self::EmissiveGenerator { .. } => 2,
             Self::CustomMapGenerator { .. } => 2,
-            Self::RayMaterialOutput { .. } => 13,
+            Self::HairStrandGenerator { .. } => 0,
+            Self::EyeCorneaGenerator { .. } => 1,
+            Self::RayMaterialOutput { .. } => 14,
         }
     }
 
@@ -351,6 +387,8 @@ impl MaterialNode {
             Self::MetalnessGenerator { .. } => 1,
             Self::EmissiveGenerator { .. } => 1,
             Self::CustomMapGenerator { .. } => 2,
+            Self::HairStrandGenerator { .. } => 3,
+            Self::EyeCorneaGenerator { .. } => 4,
             Self::RayMaterialOutput { .. } => 0,
         }
     }
@@ -387,6 +425,8 @@ impl MaterialNode {
                 0 => ("Guide / Height (Optional)", PinType::Grayscale),
                 _ => ("Guide / Color (Optional)", PinType::Rgba),
             },
+            Self::HairStrandGenerator { .. } => ("", PinType::Rgba),
+            Self::EyeCorneaGenerator { .. } => ("Iris Color (Optional)", PinType::Rgba),
             Self::RayMaterialOutput { shading_model, .. } => match index {
                 0 => ("Albedo", PinType::Rgba),
                 1 => ("Albedo Sub", PinType::Rgba),
@@ -400,7 +440,8 @@ impl MaterialNode {
                 9 => ("Emissive", PinType::Rgba),
                 10 => (shading_model.custom_a_name(), PinType::Grayscale),
                 11 => (shading_model.custom_b_name(), PinType::Rgba),
-                _ => ("Detail Normal", PinType::Vector),
+                12 => ("Detail Normal", PinType::Vector),
+                _ => ("Normal Sub", PinType::Vector),
             },
             _ => ("", PinType::Rgba),
         }
@@ -432,6 +473,17 @@ impl MaterialNode {
             Self::CustomMapGenerator { model, .. } => match index {
                 0 => (model.custom_a_name(), PinType::Grayscale),
                 _ => (model.custom_b_name(), PinType::Rgba),
+            },
+            Self::HairStrandGenerator { .. } => match index {
+                0 => ("Normal (Strands)", PinType::Vector),
+                1 => ("Tangent Shift (Silky)", PinType::Grayscale),
+                _ => ("Strand Mask", PinType::Grayscale),
+            },
+            Self::EyeCorneaGenerator { .. } => match index {
+                0 => ("Cornea Dome Normal", PinType::Vector),
+                1 => ("Iris Parallax Map", PinType::Grayscale),
+                2 => ("Limbal & Caustic Map", PinType::Rgba),
+                _ => ("Refracted Iris", PinType::Rgba),
             },
             Self::RayMaterialOutput { .. } => ("", PinType::Rgba),
         }

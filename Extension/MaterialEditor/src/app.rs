@@ -384,6 +384,15 @@ impl MaterialEditorApp {
                 detail_normal_scale: 1.0,
                 detail_normal_loop: 20.0,
                 detail_fade_distance: 15.0,
+                normal_sub_scale: 1.0,
+                normal_sub_loop: 1.0,
+                procedural_hair_enable: false,
+                procedural_hair_scale: 0.45,
+                procedural_hair_intensity: 0.45,
+                eye_parallax_enable: false,
+                eye_iris_depth: 0.05,
+                eye_cornea_ior: 1.376,
+                convex_normal_enable: false,
             },
         );
 
@@ -577,6 +586,15 @@ impl MaterialEditorApp {
                 detail_normal_scale: 1.0,
                 detail_normal_loop: 20.0,
                 detail_fade_distance: 15.0,
+                normal_sub_scale: 1.0,
+                normal_sub_loop: 1.0,
+                procedural_hair_enable: false,
+                procedural_hair_scale: 0.45,
+                procedural_hair_intensity: 0.45,
+                eye_parallax_enable: false,
+                eye_iris_depth: 0.05,
+                eye_cornea_ior: 1.376,
+                convex_normal_enable: false,
             },
         );
 
@@ -663,6 +681,15 @@ impl MaterialEditorApp {
                 detail_normal_scale: 1.0,
                 detail_normal_loop: 20.0,
                 detail_fade_distance: 15.0,
+                normal_sub_scale: 1.0,
+                normal_sub_loop: 1.0,
+                procedural_hair_enable: false,
+                procedural_hair_scale: 0.45,
+                procedural_hair_intensity: 0.45,
+                eye_parallax_enable: false,
+                eye_iris_depth: 0.05,
+                eye_cornea_ior: 1.376,
+                convex_normal_enable: false,
             },
         );
 
@@ -745,6 +772,15 @@ impl MaterialEditorApp {
                 detail_normal_scale: 1.0,
                 detail_normal_loop: 20.0,
                 detail_fade_distance: 15.0,
+                normal_sub_scale: 1.0,
+                normal_sub_loop: 1.0,
+                procedural_hair_enable: false,
+                procedural_hair_scale: 0.45,
+                procedural_hair_intensity: 0.45,
+                eye_parallax_enable: false,
+                eye_iris_depth: 0.05,
+                eye_cornea_ior: 1.376,
+                convex_normal_enable: false,
             },
         );
 
@@ -810,6 +846,15 @@ impl MaterialEditorApp {
                 detail_normal_scale: 1.0,
                 detail_normal_loop: 20.0,
                 detail_fade_distance: 15.0,
+                normal_sub_scale: 1.0,
+                normal_sub_loop: 1.0,
+                procedural_hair_enable: false,
+                procedural_hair_scale: 0.45,
+                procedural_hair_intensity: 0.45,
+                eye_parallax_enable: false,
+                eye_iris_depth: 0.05,
+                eye_cornea_ior: 1.376,
+                convex_normal_enable: false,
             },
         );
 
@@ -872,6 +917,15 @@ impl MaterialEditorApp {
                 detail_normal_scale: 1.0,
                 detail_normal_loop: 20.0,
                 detail_fade_distance: 15.0,
+                normal_sub_scale: 1.0,
+                normal_sub_loop: 1.0,
+                procedural_hair_enable: false,
+                procedural_hair_scale: 0.45,
+                procedural_hair_intensity: 0.45,
+                eye_parallax_enable: false,
+                eye_iris_depth: 0.05,
+                eye_cornea_ior: 1.376,
+                convex_normal_enable: false,
             },
         );
 
@@ -937,6 +991,15 @@ impl MaterialEditorApp {
                 detail_normal_scale: 1.0,
                 detail_normal_loop: 20.0,
                 detail_fade_distance: 15.0,
+                normal_sub_scale: 1.0,
+                normal_sub_loop: 1.0,
+                procedural_hair_enable: false,
+                procedural_hair_scale: 0.45,
+                procedural_hair_intensity: 0.45,
+                eye_parallax_enable: false,
+                eye_iris_depth: 0.05,
+                eye_cornea_ior: 1.376,
+                convex_normal_enable: false,
             },
         );
 
@@ -945,6 +1008,161 @@ impl MaterialEditorApp {
 
         self.graph_dirty = true;
         self.status_message = "Loaded recipe: Sci-Fi Hex Glowing Emissive".to_string();
+    }
+
+    /// Sets up Silky Hair with procedural anisotropic tangent shift, micro-strands, and Ray-MMD hair parameters.
+    pub fn load_silky_hair_preset(&mut self) {
+        self.push_undo_snapshot();
+        self.snarl = Snarl::new();
+
+        let base_color_node = self.snarl.insert_node(
+            egui::pos2(60.0, 100.0),
+            MaterialNode::ColorInput {
+                color: [0.72, 0.48, 0.35, 1.0], // Chestnut hair color
+            },
+        );
+
+        let strand_node = self.snarl.insert_node(
+            egui::pos2(300.0, 100.0),
+            MaterialNode::HairStrandGenerator {
+                strand_density: 300.0,
+                roughness: 0.35,
+                waviness: 0.15,
+                wave_frequency: 3.5,
+                orientation: crate::image_proc::StrandOrientation::Vertical,
+                normal_intensity: 0.70,
+            },
+        );
+
+        let aniso_node = self.snarl.insert_node(
+            egui::pos2(560.0, 260.0),
+            MaterialNode::CustomMapGenerator {
+                model: crate::graph::node::ShadingModel::Anisotropy,
+                param_a: 0.85,
+                param_b_color: [1.0, 1.0, 1.0],
+                invert_a: false,
+                aniso_radial: false,
+            },
+        );
+
+        let output_node = self.snarl.insert_node(
+            egui::pos2(880.0, 100.0),
+            MaterialNode::RayMaterialOutput {
+                material_name: "silky_hair".to_string(),
+                shading_model: crate::graph::node::ShadingModel::Anisotropy,
+                albedo_color: [1.0, 1.0, 1.0],
+                albedo_loop: [1.0, 1.0],
+                normal_scale: 1.0,
+                normal_loop: 1.0,
+                smoothness_val: 0.65,
+                is_roughness_mode: false,
+                metalness_val: 0.10,
+                specular_color: [0.65, 0.60, 0.55],
+                occlusion_val: 1.0,
+                parallax_scale: 0.0,
+                emissive_color: [0.0, 0.0, 0.0],
+                emissive_intensity: 0.0,
+                emissive_blink_mode: 0,
+                emissive_blink_freq: [1.0, 1.0, 1.0],
+                custom_a_val: 0.85,
+                custom_b_color: [1.0, 1.0, 1.0],
+                hex_tiling_enable: false,
+                hex_tiling_rotation: 0.0,
+                hex_tiling_contrast: 0.5,
+                hex_tiling_sharpness: 5.0,
+                hashed_alpha_enable: true,
+                hashed_alpha_scale: 1.0,
+                detail_map_enable: false,
+                detail_normal_scale: 1.0,
+                detail_normal_loop: 20.0,
+                detail_fade_distance: 15.0,
+                normal_sub_scale: 1.0,
+                normal_sub_loop: 1.0,
+                procedural_hair_enable: true,
+                procedural_hair_scale: 0.45,
+                procedural_hair_intensity: 0.45,
+                eye_parallax_enable: false,
+                eye_iris_depth: 0.05,
+                eye_cornea_ior: 1.376,
+                convex_normal_enable: false,
+            },
+        );
+
+        self.connect(base_color_node, 0, output_node, 0);
+        self.connect(strand_node, 0, output_node, 3);
+        self.connect(aniso_node, 0, output_node, 10);
+        self.connect(strand_node, 1, output_node, 11);
+
+        self.graph_dirty = true;
+        self.status_message = "Loaded recipe: Silky Hair (Anisotropic + Strands)".to_string();
+    }
+
+    /// Sets up Anime Eye with physical Cornea Dome lens and Snell's Law Iris Parallax refraction.
+    pub fn load_cornea_eye_preset(&mut self) {
+        self.push_undo_snapshot();
+        self.snarl = Snarl::new();
+
+        let cornea_node = self.snarl.insert_node(
+            egui::pos2(200.0, 100.0),
+            MaterialNode::EyeCorneaGenerator {
+                iris_depth: 0.05,
+                cornea_ior: 1.376,
+                limbal_width: 0.15,
+                limbal_darkness: 0.65,
+                caustic_intensity: 1.50,
+                dome_curvature: 0.85,
+            },
+        );
+
+        let output_node = self.snarl.insert_node(
+            egui::pos2(680.0, 100.0),
+            MaterialNode::RayMaterialOutput {
+                material_name: "cornea_eye".to_string(),
+                shading_model: crate::graph::node::ShadingModel::ClearCoat,
+                albedo_color: [1.0, 1.0, 1.0],
+                albedo_loop: [1.0, 1.0],
+                normal_scale: 1.0,
+                normal_loop: 1.0,
+                smoothness_val: 0.94,
+                is_roughness_mode: false,
+                metalness_val: 0.0,
+                specular_color: [0.04, 0.04, 0.04],
+                occlusion_val: 1.0,
+                parallax_scale: 0.05,
+                emissive_color: [1.0, 1.0, 1.0],
+                emissive_intensity: 0.85,
+                emissive_blink_mode: 0,
+                emissive_blink_freq: [1.0, 1.0, 1.0],
+                custom_a_val: 0.95,
+                custom_b_color: [0.0, 0.0, 0.0],
+                hex_tiling_enable: false,
+                hex_tiling_rotation: 0.0,
+                hex_tiling_contrast: 0.5,
+                hex_tiling_sharpness: 5.0,
+                hashed_alpha_enable: false,
+                hashed_alpha_scale: 1.0,
+                detail_map_enable: false,
+                detail_normal_scale: 1.0,
+                detail_normal_loop: 20.0,
+                detail_fade_distance: 15.0,
+                normal_sub_scale: 1.0,
+                normal_sub_loop: 1.0,
+                procedural_hair_enable: false,
+                procedural_hair_scale: 0.45,
+                procedural_hair_intensity: 0.45,
+                eye_parallax_enable: true,
+                eye_iris_depth: 0.05,
+                eye_cornea_ior: 1.376,
+                convex_normal_enable: true,
+            },
+        );
+
+        self.connect(cornea_node, 3, output_node, 0);
+        self.connect(cornea_node, 0, output_node, 3);
+        self.connect(cornea_node, 1, output_node, 8);
+
+        self.graph_dirty = true;
+        self.status_message = "Loaded recipe: Anime Eye (Cornea Dome + Iris Parallax)".to_string();
     }
 
     /// Generates current Ray-MMD material.fx HLSL code dynamically for live inspection.
@@ -980,6 +1198,16 @@ impl MaterialEditorApp {
                 detail_normal_scale,
                 detail_normal_loop,
                 detail_fade_distance,
+                normal_sub_scale,
+                normal_sub_loop,
+                procedural_hair_enable,
+                procedural_hair_scale,
+                procedural_hair_intensity,
+                eye_parallax_enable,
+                eye_iris_depth,
+                eye_cornea_ior,
+                convex_normal_enable,
+                ..
             } = node
             {
                 config.name = material_name.clone();
@@ -1011,6 +1239,15 @@ impl MaterialEditorApp {
                 config.detail_normal_scale = *detail_normal_scale;
                 config.detail_normal_loop = *detail_normal_loop;
                 config.detail_fade_distance = *detail_fade_distance;
+                config.normal_sub_scale = *normal_sub_scale;
+                config.normal_sub_loop = *normal_sub_loop;
+                config.procedural_hair_enable = *procedural_hair_enable;
+                config.procedural_hair_scale = *procedural_hair_scale;
+                config.procedural_hair_intensity = *procedural_hair_intensity;
+                config.eye_parallax_enable = *eye_parallax_enable;
+                config.eye_iris_depth = *eye_iris_depth;
+                config.eye_cornea_ior = *eye_cornea_ior;
+                config.convex_normal_enable = *convex_normal_enable;
                 break;
             }
         }
@@ -1433,6 +1670,16 @@ impl MaterialEditorApp {
                 detail_normal_scale,
                 detail_normal_loop,
                 detail_fade_distance,
+                normal_sub_scale,
+                normal_sub_loop,
+                procedural_hair_enable,
+                procedural_hair_scale,
+                procedural_hair_intensity,
+                eye_parallax_enable,
+                eye_iris_depth,
+                eye_cornea_ior,
+                convex_normal_enable,
+                ..
             } = node
             {
                 config.name = material_name.clone();
@@ -1467,6 +1714,16 @@ impl MaterialEditorApp {
                 config.detail_normal_scale = *detail_normal_scale;
                 config.detail_normal_loop = *detail_normal_loop;
                 config.detail_fade_distance = *detail_fade_distance;
+
+                config.normal_sub_scale = *normal_sub_scale;
+                config.normal_sub_loop = *normal_sub_loop;
+                config.procedural_hair_enable = *procedural_hair_enable;
+                config.procedural_hair_scale = *procedural_hair_scale;
+                config.procedural_hair_intensity = *procedural_hair_intensity;
+                config.eye_parallax_enable = *eye_parallax_enable;
+                config.eye_iris_depth = *eye_iris_depth;
+                config.eye_cornea_ior = *eye_cornea_ior;
+                config.convex_normal_enable = *convex_normal_enable;
             }
         }
 
@@ -1479,6 +1736,10 @@ impl MaterialEditorApp {
         if let Some(ref nrm) = baked.normal {
             config.normal_enabled = true;
             textures_to_export.push(("normal.png".to_string(), nrm));
+        }
+        if let Some(ref sub_nrm) = baked.normal_sub {
+            config.normal_sub_enabled = true;
+            textures_to_export.push(("normal_sub.png".to_string(), sub_nrm));
         }
         if let Some(ref smt) = baked.smoothness {
             config.smoothness_enabled = true;
@@ -1574,6 +1835,15 @@ impl MaterialEditorApp {
                             detail_normal_scale: 1.0,
                             detail_normal_loop: 20.0,
                             detail_fade_distance: 15.0,
+                            normal_sub_scale: 1.0,
+                            normal_sub_loop: 1.0,
+                            procedural_hair_enable: false,
+                            procedural_hair_scale: 50.0,
+                            procedural_hair_intensity: 0.5,
+                            eye_parallax_enable: false,
+                            eye_iris_depth: 0.05,
+                            eye_cornea_ior: 1.376,
+                            convex_normal_enable: false,
                         },
                     );
 
@@ -1796,6 +2066,15 @@ impl MaterialEditorApp {
                     detail_normal_scale,
                     detail_normal_loop,
                     detail_fade_distance,
+                    normal_sub_scale,
+                    normal_sub_loop,
+                    procedural_hair_enable,
+                    procedural_hair_scale,
+                    procedural_hair_intensity,
+                    eye_parallax_enable,
+                    eye_iris_depth,
+                    eye_cornea_ior,
+                    convex_normal_enable,
                     ..
                 } = node {
                     config.shading_model_id = shading_model.id();
@@ -1826,6 +2105,15 @@ impl MaterialEditorApp {
                     config.detail_normal_scale = *detail_normal_scale;
                     config.detail_normal_loop = *detail_normal_loop;
                     config.detail_fade_distance = *detail_fade_distance;
+                    config.normal_sub_scale = *normal_sub_scale;
+                    config.normal_sub_loop = *normal_sub_loop;
+                    config.procedural_hair_enable = *procedural_hair_enable;
+                    config.procedural_hair_scale = *procedural_hair_scale;
+                    config.procedural_hair_intensity = *procedural_hair_intensity;
+                    config.eye_parallax_enable = *eye_parallax_enable;
+                    config.eye_iris_depth = *eye_iris_depth;
+                    config.eye_cornea_ior = *eye_cornea_ior;
+                    config.convex_normal_enable = *convex_normal_enable;
                 }
             }
 
@@ -1849,6 +2137,12 @@ impl MaterialEditorApp {
                 let _ = packed_n.save(export_dir.join(&fname));
                 config.normal_file = fname;
                 config.normal_enabled = true;
+            }
+            if let Some(ref nsub) = evaluated.normal_sub {
+                let fname = format!("{}_normal_sub.png", clean_name);
+                let _ = nsub.save(export_dir.join(&fname));
+                config.normal_sub_file = fname;
+                config.normal_sub_enabled = true;
             }
             if let Some(ref m) = evaluated.metalness {
                 let fname = format!("{}_metalness.png", clean_name);
@@ -2000,6 +2294,15 @@ impl MaterialEditorApp {
                 detail_normal_scale: 1.0,
                 detail_normal_loop: 20.0,
                 detail_fade_distance: 15.0,
+                normal_sub_scale: 1.0,
+                normal_sub_loop: 1.0,
+                procedural_hair_enable: false,
+                procedural_hair_scale: 50.0,
+                procedural_hair_intensity: 0.5,
+                eye_parallax_enable: false,
+                eye_iris_depth: 0.05,
+                eye_cornea_ior: 1.376,
+                convex_normal_enable: false,
             },
         );
 
@@ -2465,6 +2768,14 @@ impl eframe::App for MaterialEditorApp {
                         self.load_scifi_emissive_preset();
                         ui.close();
                     }
+                    if ui.button(format!("{} Silky Hair (Anisotropic + Strands)", icons::WAVES)).on_hover_text("Procedural hair fibers, shift specular jitter, and dual normal detail").clicked() {
+                        self.load_silky_hair_preset();
+                        ui.close();
+                    }
+                    if ui.button(format!("{} Anime Eye (Cornea Dome + Iris Parallax)", icons::EYE)).on_hover_text("Convex corneal dome normal, Snell's law depth parallax, and limbal ring").clicked() {
+                        self.load_cornea_eye_preset();
+                        ui.close();
+                    }
                 });
 
                 ui.separator();
@@ -2911,6 +3222,36 @@ impl eframe::App for MaterialEditorApp {
                         );
                         self.graph_dirty = true;
                     }
+                    if ui.button(format!("{} Hair Strand Generator", icons::WAVES)).clicked() {
+                        self.push_undo_snapshot();
+                        self.snarl.insert_node(
+                            egui::pos2(100.0, 100.0),
+                            MaterialNode::HairStrandGenerator {
+                                strand_density: 30.0,
+                                roughness: 0.35,
+                                waviness: 0.15,
+                                wave_frequency: 6.0,
+                                orientation: crate::image_proc::StrandOrientation::Vertical,
+                                normal_intensity: 1.5,
+                            },
+                        );
+                        self.graph_dirty = true;
+                    }
+                    if ui.button(format!("{} Eye Cornea & Iris Parallax", icons::EYE)).clicked() {
+                        self.push_undo_snapshot();
+                        self.snarl.insert_node(
+                            egui::pos2(100.0, 100.0),
+                            MaterialNode::EyeCorneaGenerator {
+                                iris_depth: 0.05,
+                                cornea_ior: 1.376,
+                                limbal_width: 0.08,
+                                limbal_darkness: 0.7,
+                                caustic_intensity: 0.3,
+                                dome_curvature: 1.0,
+                            },
+                        );
+                        self.graph_dirty = true;
+                    }
 
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("FILTERS & COMBINERS").strong());
@@ -2993,6 +3334,15 @@ impl eframe::App for MaterialEditorApp {
                                 detail_normal_scale: 1.0,
                                 detail_normal_loop: 20.0,
                                 detail_fade_distance: 15.0,
+                                normal_sub_scale: 1.0,
+                                normal_sub_loop: 1.0,
+                                procedural_hair_enable: false,
+                                procedural_hair_scale: 50.0,
+                                procedural_hair_intensity: 0.5,
+                                eye_parallax_enable: false,
+                                eye_iris_depth: 0.05,
+                                eye_cornea_ior: 1.376,
+                                convex_normal_enable: false,
                             },
                         );
                         self.graph_dirty = true;
@@ -3537,7 +3887,7 @@ impl eframe::App for MaterialEditorApp {
                     let query = self.node_search_query.trim().to_lowercase();
                     let mut chosen_node: Option<MaterialNode> = None;
 
-                    let items: [(&str, &str, &str, &str, MaterialNode); 17] = [
+                    let items: [(&str, &str, &str, &str, MaterialNode); 19] = [
                         (icons::IMAGE, "Texture Image Input", "Load PNG/JPG/TGA image file", "texture image input file", MaterialNode::ImageInput { file_path: String::new(), is_srgb: true, cached_image: None }),
                         (icons::PALETTE, "Color Value", "Uniform RGBA solid color", "color rgba solid tint", MaterialNode::ColorInput { color: [1.0, 1.0, 1.0, 1.0] }),
                         (icons::SLIDERS, "Float Value", "Single scalar float number", "float scalar value number", MaterialNode::FloatInput { value: 1.0, min: 0.0, max: 1.0 }),
@@ -3545,6 +3895,8 @@ impl eframe::App for MaterialEditorApp {
                         (icons::WAVES, "Height Generator", "Contrast, brightness, invert height", "height bump invert depth", MaterialNode::HeightGenerator { contrast: 1.0, brightness: 0.0, invert: false }),
                         (icons::COMPASS, "Normal Generator", "Tangent space normal map (DirectX/OpenGL)", "normal tangent bump height", MaterialNode::NormalGenerator { scale: 1.0, filter: NormalFilter::Scharr, orientation: NormalOrientation::DirectX }),
                         (icons::GIT_MERGE, "Normal Blend (RNM)", "Reoriented Normal Mapping detail overlay", "normal blend rnm detail repeat", MaterialNode::NormalBlend { detail_scale: 1.0, detail_tile: 10.0 }),
+                        (icons::WAVES, "Hair Strand Generator", "Procedural anisotropic hair strands, tangent shift & normal", "hair strand fiber anisotropic shift silky", MaterialNode::HairStrandGenerator { strand_density: 30.0, roughness: 0.35, waviness: 0.15, wave_frequency: 6.0, orientation: crate::image_proc::StrandOrientation::Vertical, normal_intensity: 1.5 }),
+                        (icons::EYE, "Eye Cornea & Iris Parallax", "Convex cornea dome normal, Snell's law parallax & limbal ring", "eye cornea iris parallax pupil lens convex refraction", MaterialNode::EyeCorneaGenerator { iris_depth: 0.05, cornea_ior: 1.376, limbal_width: 0.08, limbal_darkness: 0.7, caustic_intensity: 0.3, dome_curvature: 1.0 }),
                         (icons::CIRCLE_HALF, "Ambient Occlusion (AO)", "Crevice and cavity contact shadows", "ao ambient occlusion shadow", MaterialNode::AOGenerator { radius: 16, samples: 16, intensity: 1.0, bias: 0.05 }),
                         (icons::APERTURE, "Curvature / Cavity", "Convex edge highlights & concave dirt crevices", "curvature cavity edge ridge wear", MaterialNode::CurvatureGenerator { radius: 2, intensity: 2.0, mode: CurvatureMode::Full }),
                         (icons::FADERS, "Roughness Remap", "Remap and invert glossiness/roughness", "roughness glossiness smooth invert", MaterialNode::RoughnessGenerator { invert: false, contrast: 1.0, min_val: 0.0, max_val: 1.0 }),
@@ -3583,6 +3935,15 @@ impl eframe::App for MaterialEditorApp {
                             detail_normal_scale: 1.0,
                             detail_normal_loop: 20.0,
                             detail_fade_distance: 15.0,
+                            normal_sub_scale: 1.0,
+                            normal_sub_loop: 1.0,
+                            procedural_hair_enable: false,
+                            procedural_hair_scale: 50.0,
+                            procedural_hair_intensity: 0.5,
+                            eye_parallax_enable: false,
+                            eye_iris_depth: 0.05,
+                            eye_cornea_ior: 1.376,
+                            convex_normal_enable: false,
                         }),
                     ];
 
