@@ -1,7 +1,7 @@
 //! Main application state and UI for ReForge Material Editor.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use egui::{Color32, ColorImage, Context, TextureHandle, TextureOptions, Vec2};
 use egui_snarl::ui::SnarlWidget;
 use egui_snarl::{InPinId, NodeId, OutPinId, Snarl};
@@ -64,7 +64,7 @@ impl MapViewTab {
 }
 
 /// Workspace mode: Single Material standalone vs PMX Model Studio.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum AppMode {
     #[default]
     SingleMaterial,
@@ -154,6 +154,54 @@ pub enum UndoSnapshot {
     Pmx { subset_idx: usize, snarl: Snarl<MaterialNode> },
 }
 
+/// Unified ReForge Project file representation (.rfproj).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ReForgeProject {
+    pub format_version: u32,
+    pub app_mode: AppMode,
+    pub pmx_project: Option<PmxProjectData>,
+    pub single_material: Option<SingleMaterialProjectData>,
+}
+
+/// Project data for PMX Model Studio multi-material workspaces.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PmxProjectData {
+    /// Relative or absolute path to the .pmx model file
+    pub pmx_path: String,
+    pub camera_target: [f32; 3],
+    pub camera_distance: f32,
+    pub camera_pitch: f32,
+    pub camera_yaw: f32,
+    pub camera_light_yaw: f32,
+    pub camera_light_pitch: f32,
+    pub active_subset: Option<usize>,
+    pub solo_active_subset: bool,
+    pub wireframe: bool,
+    pub subsets: Vec<PmxSubsetProjectData>,
+}
+
+/// Per-subset material graph data in a PMX project.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PmxSubsetProjectData {
+    pub subset_index: usize,
+    pub name: String,
+    pub is_visible: bool,
+    pub has_custom_material: bool,
+    pub snarl: Snarl<MaterialNode>,
+}
+
+/// Project data for Single Material standalone workspaces.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SingleMaterialProjectData {
+    pub snarl: Snarl<MaterialNode>,
+    pub camera_target: [f32; 3],
+    pub camera_distance: f32,
+    pub camera_pitch: f32,
+    pub camera_yaw: f32,
+    pub camera_light_yaw: f32,
+    pub camera_light_pitch: f32,
+}
+
 pub struct MaterialEditorApp {
     pub app_mode: AppMode,
 
@@ -221,6 +269,9 @@ pub struct MaterialEditorApp {
     pub welcome_tour_step: usize,
     pub welcome_active_tab: WelcomeTab,
     pub show_welcome_on_startup: bool,
+
+    // Project State (.rfproj)
+    pub current_project_path: Option<PathBuf>,
 }
 
 impl MaterialEditorApp {
@@ -342,6 +393,7 @@ impl MaterialEditorApp {
             welcome_tour_step: 0,
             welcome_active_tab: WelcomeTab::QuickStart,
             show_welcome_on_startup: true,
+            current_project_path: None,
         };
 
         let editor_config = EditorConfig::load();
@@ -2061,6 +2113,349 @@ impl MaterialEditorApp {
         self.pmx_preview_dirty = false;
     }
 
+    // =========================================================================
+    // ReForge Project Management (.rfproj)
+    // =========================================================================
+
+    /// Resets the workspace to a fresh new project state.
+    pub fn new_project(&mut self) {
+        self.current_project_path = None;
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.load_default_preset();
+        self.pmx_model = None;
+        self.pmx_slots.clear();
+        self.active_pmx_subset = None;
+        self.app_mode = AppMode::SingleMaterial;
+        self.graph_dirty = true;
+        self.preview_dirty = true;
+        self.status_message = "Created new project.".to_string();
+    }
+
+    /// Serializes the active workspace (PMX Studio or Single Material) into a ReForgeProject representation.
+    pub fn build_current_project(&self, project_file_path: Option<&Path>) -> ReForgeProject {
+        match self.app_mode {
+            AppMode::PmxStudio => {
+                let pmx_path_str = if let Some(ref model) = self.pmx_model {
+                    if let Some(ref fp) = model.file_path {
+                        if let Some(proj_path) = project_file_path {
+                            if let Some(parent) = proj_path.parent() {
+                                if let Ok(rel) = fp.strip_prefix(parent) {
+                                    rel.to_string_lossy().replace('\\', "/")
+                                } else {
+                                    fp.to_string_lossy().to_string()
+                                }
+                            } else {
+                                fp.to_string_lossy().to_string()
+                            }
+                        } else {
+                            fp.to_string_lossy().to_string()
+                        }
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                };
+
+                let subsets = self.pmx_slots.iter().map(|s| PmxSubsetProjectData {
+                    subset_index: s.subset_index,
+                    name: s.name.clone(),
+                    is_visible: s.is_visible,
+                    has_custom_material: s.has_custom_material,
+                    snarl: s.snarl.clone(),
+                }).collect();
+
+                ReForgeProject {
+                    format_version: 1,
+                    app_mode: AppMode::PmxStudio,
+                    pmx_project: Some(PmxProjectData {
+                        pmx_path: pmx_path_str,
+                        camera_target: [self.pmx_camera.target.x, self.pmx_camera.target.y, self.pmx_camera.target.z],
+                        camera_distance: self.pmx_camera.distance,
+                        camera_pitch: self.pmx_camera.pitch,
+                        camera_yaw: self.pmx_camera.yaw,
+                        camera_light_yaw: self.pmx_camera.light_yaw,
+                        camera_light_pitch: self.pmx_camera.light_pitch,
+                        active_subset: self.active_pmx_subset,
+                        solo_active_subset: self.solo_active_subset,
+                        wireframe: self.pmx_wireframe,
+                        subsets,
+                    }),
+                    single_material: None,
+                }
+            }
+            AppMode::SingleMaterial => {
+                ReForgeProject {
+                    format_version: 1,
+                    app_mode: AppMode::SingleMaterial,
+                    pmx_project: None,
+                    single_material: Some(SingleMaterialProjectData {
+                        snarl: self.snarl.clone(),
+                        camera_target: [self.camera.target.x, self.camera.target.y, self.camera.target.z],
+                        camera_distance: self.camera.distance,
+                        camera_pitch: self.camera.pitch,
+                        camera_yaw: self.camera.yaw,
+                        camera_light_yaw: self.camera.light_yaw,
+                        camera_light_pitch: self.camera.light_pitch,
+                    }),
+                }
+            }
+        }
+    }
+
+    /// Saves the current workspace to the specified .rfproj file path.
+    pub fn save_project_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), String> {
+        let path_ref = path.as_ref();
+        let project = self.build_current_project(Some(path_ref));
+        let json = serde_json::to_string_pretty(&project).map_err(|e| e.to_string())?;
+        std::fs::write(path_ref, json).map_err(|e| e.to_string())?;
+        self.current_project_path = Some(path_ref.to_path_buf());
+        self.status_message = format!("Saved project: {}", path_ref.file_name().unwrap_or_default().to_string_lossy());
+        Ok(())
+    }
+
+    /// Quick save: overwrites existing project file or triggers Save As dialog if unsaved.
+    pub fn save_project_auto(&mut self, _ctx: &Context) {
+        if let Some(path) = self.current_project_path.clone() {
+            if let Err(e) = self.save_project_file(&path) {
+                self.status_message = format!("Failed to save project: {}", e);
+            }
+        } else {
+            self.save_project_as_dialog();
+        }
+    }
+
+    /// Opens a native file dialog to save the project as a new .rfproj file.
+    pub fn save_project_as_dialog(&mut self) {
+        let default_name = if self.app_mode == AppMode::PmxStudio {
+            if let Some(ref model) = self.pmx_model {
+                let n = if !model.name_universal.is_empty() {
+                    &model.name_universal
+                } else if !model.name_local.is_empty() {
+                    &model.name_local
+                } else {
+                    "Model"
+                };
+                let clean = n.replace(|c: char| !c.is_alphanumeric() && c != '_', "_");
+                format!("{}_reforge.rfproj", clean)
+            } else {
+                "pmx_project.rfproj".to_string()
+            }
+        } else {
+            "material_project.rfproj".to_string()
+        };
+
+        let default_dir = if let Some(ref model) = self.pmx_model {
+            model.file_path.as_ref().and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        } else {
+            None
+        };
+
+        let mut dialog = rfd::FileDialog::new()
+            .set_file_name(&default_name)
+            .add_filter("ReForge Project (*.rfproj)", &["rfproj", "json"]);
+        if let Some(ref dir) = default_dir {
+            dialog = dialog.set_directory(dir);
+        }
+
+        if let Some(path) = dialog.save_file() {
+            if let Err(e) = self.save_project_file(path) {
+                self.status_message = format!("Failed to save project: {}", e);
+            }
+        }
+    }
+
+    /// Loads a .rfproj file from disk and restores full PMX multi-material or Single Material session.
+    pub fn load_project_file<P: AsRef<Path>>(&mut self, path: P, ctx: &Context) -> Result<(), String> {
+        let path_ref = path.as_ref();
+        let content = std::fs::read_to_string(path_ref).map_err(|e| format!("Cannot read project file: {}", e))?;
+        let project: ReForgeProject = serde_json::from_str(&content).map_err(|e| format!("Invalid project format: {}", e))?;
+
+        match project.app_mode {
+            AppMode::SingleMaterial => {
+                if let Some(data) = project.single_material {
+                    self.snarl = data.snarl;
+                    self.camera.target = glam::Vec3::new(data.camera_target[0], data.camera_target[1], data.camera_target[2]);
+                    self.camera.distance = data.camera_distance;
+                    self.camera.pitch = data.camera_pitch;
+                    self.camera.yaw = data.camera_yaw;
+                    self.camera.light_yaw = data.camera_light_yaw;
+                    self.camera.light_pitch = data.camera_light_pitch;
+                    self.app_mode = AppMode::SingleMaterial;
+                    self.graph_dirty = true;
+                    self.preview_dirty = true;
+                    self.current_project_path = Some(path_ref.to_path_buf());
+                    self.undo_stack.clear();
+                    self.redo_stack.clear();
+                    self.status_message = format!("Loaded Single Material project: {}", path_ref.file_name().unwrap_or_default().to_string_lossy());
+                }
+            }
+            AppMode::PmxStudio => {
+                if let Some(pmx_data) = project.pmx_project {
+                    // 1. Resolve PMX model file path
+                    let pmx_target = Path::new(&pmx_data.pmx_path);
+                    let resolved_path = if pmx_target.is_absolute() && pmx_target.exists() {
+                        Some(pmx_target.to_path_buf())
+                    } else if let Some(parent) = path_ref.parent() {
+                        let rel_cand = parent.join(pmx_target);
+                        if rel_cand.exists() {
+                            Some(rel_cand)
+                        } else if let Some(filename) = pmx_target.file_name() {
+                            let local_cand = parent.join(filename);
+                            if local_cand.exists() {
+                                Some(local_cand)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    let actual_pmx_path = match resolved_path {
+                        Some(p) => p,
+                        None => {
+                            if let Some(picked) = rfd::FileDialog::new()
+                                .set_title(format!("Locate PMX Model ({})", pmx_data.pmx_path))
+                                .add_filter("PMX Model (*.pmx)", &["pmx"])
+                                .pick_file()
+                            {
+                                picked
+                            } else {
+                                return Err("PMX model location cancelled.".to_string());
+                            }
+                        }
+                    };
+
+                    // 2. Load model geometry & base slots
+                    self.load_pmx_file(&actual_pmx_path, ctx);
+
+                    // 3. Restore customized subset material graphs & states
+                    let mut restored_count = 0;
+                    for saved_sub in pmx_data.subsets {
+                        if let Some(slot) = self.pmx_slots.iter_mut().find(|s| s.subset_index == saved_sub.subset_index || s.name == saved_sub.name) {
+                            slot.snarl = saved_sub.snarl;
+                            slot.is_visible = saved_sub.is_visible;
+                            slot.has_custom_material = saved_sub.has_custom_material;
+                            slot.is_dirty = true;
+                            restored_count += 1;
+                        }
+                    }
+
+                    // 4. Restore camera & interaction state
+                    self.pmx_camera.target = glam::Vec3::new(pmx_data.camera_target[0], pmx_data.camera_target[1], pmx_data.camera_target[2]);
+                    self.pmx_camera.distance = pmx_data.camera_distance;
+                    self.pmx_camera.pitch = pmx_data.camera_pitch;
+                    self.pmx_camera.yaw = pmx_data.camera_yaw;
+                    self.pmx_camera.light_yaw = pmx_data.camera_light_yaw;
+                    self.pmx_camera.light_pitch = pmx_data.camera_light_pitch;
+                    self.solo_active_subset = pmx_data.solo_active_subset;
+                    self.pmx_wireframe = pmx_data.wireframe;
+                    self.active_pmx_subset = pmx_data.active_subset.filter(|&idx| idx < self.pmx_slots.len()).or(Some(0));
+                    self.app_mode = AppMode::PmxStudio;
+                    self.pmx_preview_dirty = true;
+                    self.graph_dirty = true;
+                    self.current_project_path = Some(path_ref.to_path_buf());
+                    self.undo_stack.clear();
+                    self.redo_stack.clear();
+                    self.status_message = format!("Loaded PMX project: {} ({} subsets restored)", path_ref.file_name().unwrap_or_default().to_string_lossy(), restored_count);
+
+                    // 5. Trigger evaluation of the active subset
+                    if let Some(active_idx) = self.active_pmx_subset {
+                        if let Some(slot) = self.pmx_slots.get(active_idx) {
+                            let req = EvalRequest {
+                                snarl: slot.snarl.clone(),
+                                working_resolution: self.working_resolution,
+                                slot_index: Some(active_idx),
+                            };
+                            let _ = self.eval_tx.send(req);
+                            self.is_evaluating = true;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Opens a native file dialog to load an existing .rfproj project file.
+    pub fn open_project_dialog(&mut self, ctx: &Context) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("ReForge Project (*.rfproj)", &["rfproj", "json"])
+            .pick_file()
+        {
+            if let Err(e) = self.load_project_file(path, ctx) {
+                self.status_message = format!("Failed to load project: {}", e);
+            }
+        }
+    }
+
+    /// Loads a single .rfmat material graph file from disk into the active material slot.
+    pub fn load_material_graph_file<P: AsRef<Path>>(&mut self, path: P) {
+        let path_ref = path.as_ref();
+        if let Ok(json) = std::fs::read_to_string(path_ref) {
+            if let Ok(loaded) = serde_json::from_str::<Snarl<MaterialNode>>(&json) {
+                self.push_undo_snapshot();
+                if self.app_mode == AppMode::PmxStudio {
+                    if let Some(active_idx) = self.active_pmx_subset {
+                        if let Some(slot) = self.pmx_slots.get_mut(active_idx) {
+                            slot.snarl = loaded;
+                            slot.has_custom_material = true;
+                            slot.is_dirty = true;
+                        }
+                    }
+                } else {
+                    self.snarl = loaded;
+                }
+                self.graph_dirty = true;
+                self.status_message = format!("Loaded material graph: {}", path_ref.file_name().unwrap_or_default().to_string_lossy());
+            }
+        }
+    }
+
+    /// Opens a native file dialog to import an individual .rfmat material graph into active slot.
+    pub fn import_material_graph_dialog(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("ReForge Material (*.rfmat)", &["rfmat", "json"])
+            .pick_file()
+        {
+            self.load_material_graph_file(path);
+        }
+    }
+
+    /// Opens a native file dialog to export the active slot's material graph as a .rfmat file.
+    pub fn export_material_graph_dialog(&mut self) {
+        let (snarl_to_save, default_name) = if self.app_mode == AppMode::PmxStudio {
+            if let Some(active_idx) = self.active_pmx_subset {
+                if let Some(slot) = self.pmx_slots.get(active_idx) {
+                    let clean = slot.name.replace(' ', "_").replace(|c: char| !c.is_alphanumeric() && c != '_', "");
+                    (&slot.snarl, format!("{}.rfmat", clean))
+                } else {
+                    (&self.snarl, "material.rfmat".to_string())
+                }
+            } else {
+                (&self.snarl, "material.rfmat".to_string())
+            }
+        } else {
+            (&self.snarl, "material.rfmat".to_string())
+        };
+
+        if let Some(path) = rfd::FileDialog::new()
+            .set_file_name(&default_name)
+            .add_filter("ReForge Material (*.rfmat)", &["rfmat", "json"])
+            .save_file()
+        {
+            if let Ok(json) = serde_json::to_string_pretty(snarl_to_save) {
+                if std::fs::write(&path, json).is_ok() {
+                    self.status_message = format!("Saved material graph: {}", path.file_name().unwrap_or_default().to_string_lossy());
+                }
+            }
+        }
+    }
+
     /// Exports all PMX subsets as ready-to-use Ray-MMD materials (.fx + maps).
     pub fn export_all_pmx_materials(&mut self) {
         let model = match self.pmx_model.as_ref() {
@@ -2601,6 +2996,22 @@ impl eframe::App for MaterialEditorApp {
             self.redo();
         }
 
+        // Project Shortcuts: Ctrl+S (Save), Ctrl+Shift+S (Save As), Ctrl+O (Open), Ctrl+N (New)
+        if is_ctrl && ui.input(|i| i.key_pressed(egui::Key::S)) {
+            let is_shift = ui.input(|i| i.modifiers.shift);
+            if is_shift {
+                self.save_project_as_dialog();
+            } else {
+                self.save_project_auto(&ctx);
+            }
+        }
+        if is_ctrl && ui.input(|i| i.key_pressed(egui::Key::O)) {
+            self.open_project_dialog(&ctx);
+        }
+        if is_ctrl && ui.input(|i| i.key_pressed(egui::Key::N)) {
+            self.new_project();
+        }
+
         // Quick Node Search Shortcut (Tab / Space)
         if ui.input(|i| i.key_pressed(egui::Key::Tab) || i.key_pressed(egui::Key::Space)) {
             self.show_node_search = true;
@@ -2618,7 +3029,11 @@ impl eframe::App for MaterialEditorApp {
         for dropped in dropped_files {
             let path = dropped.path();
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-            if ext == "pmx" {
+            if ext == "rfproj" {
+                let _ = self.load_project_file(path, &ctx);
+            } else if ext == "rfmat" {
+                self.load_material_graph_file(path);
+            } else if ext == "pmx" {
                 self.load_pmx_file(path, &ctx);
             } else if matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "tga" | "bmp" | "dds") {
                 self.push_undo_snapshot();
@@ -2634,7 +3049,7 @@ impl eframe::App for MaterialEditorApp {
                 .order(egui::Order::Foreground)
                 .show(&ctx, |ui| {
                     egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        ui.label(egui::RichText::new(format!("{} Drop .PMX Model or Texture Image here", icons::DOWNLOAD_SIMPLE)).heading().color(Color32::from_rgb(80, 220, 255)));
+                        ui.label(egui::RichText::new(format!("{} Drop .PMX Model, .RFPROJ Project, or Texture Image here", icons::DOWNLOAD_SIMPLE)).heading().color(Color32::from_rgb(80, 220, 255)));
                     });
                 });
         }
@@ -2740,12 +3155,41 @@ impl eframe::App for MaterialEditorApp {
                             self.pmx_preview_dirty = true;
                         }
                     }
+
+                    // Active Project indicator & Quick Save
+                    if let Some(ref proj_path) = self.current_project_path {
+                        ui.separator();
+                        let name = proj_path.file_name().unwrap_or_default().to_string_lossy();
+                        ui.label(egui::RichText::new(format!("{} {}", icons::FILE_CODE, name)).strong().color(Color32::from_rgb(100, 220, 255)));
+                        if ui.small_button(format!("{}", icons::FLOPPY_DISK)).on_hover_text("Save Project (Ctrl+S)").clicked() {
+                            self.save_project_auto(&ctx);
+                        }
+                    }
                 });
 
                 ui.separator();
 
                 ui.menu_button("File", |ui| {
-                    if ui.button(format!("{} Open PMX Model...", icons::FOLDER_OPEN)).clicked() {
+                    if ui.add(egui::Button::new(format!("{} New Project", icons::FILE_PLUS)).shortcut_text("Ctrl+N")).on_hover_text("Start a fresh project").clicked() {
+                        self.new_project();
+                        ui.close();
+                    }
+                    if ui.add(egui::Button::new(format!("{} Open Project (.rfproj)...", icons::FOLDER_OPEN)).shortcut_text("Ctrl+O")).on_hover_text("Open a ReForge PMX or Single Material Project").clicked() {
+                        self.open_project_dialog(&ctx);
+                        ui.close();
+                    }
+                    if ui.add(egui::Button::new(format!("{} Save Project", icons::FLOPPY_DISK)).shortcut_text("Ctrl+S")).on_hover_text("Save current project").clicked() {
+                        self.save_project_auto(&ctx);
+                        ui.close();
+                    }
+                    if ui.add(egui::Button::new(format!("{} Save Project As...", icons::FLOPPY_DISK)).shortcut_text("Ctrl+Shift+S")).on_hover_text("Save project under a new name or location").clicked() {
+                        self.save_project_as_dialog();
+                        ui.close();
+                    }
+
+                    ui.separator();
+
+                    if ui.button(format!("{} Open PMX Model...", icons::CUBE)).on_hover_text("Load a 3D PMX character or stage model").clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .add_filter("PMX Model (*.pmx)", &["pmx"])
                             .pick_file()
@@ -2754,43 +3198,25 @@ impl eframe::App for MaterialEditorApp {
                         }
                         ui.close();
                     }
-                    if self.app_mode == AppMode::PmxStudio && ui.button(format!("{} Export All PMX Materials...", icons::EXPORT)).clicked() {
+
+                    ui.separator();
+
+                    if ui.button(format!("{} Import Material Graph (.rfmat)...", icons::DOWNLOAD_SIMPLE)).on_hover_text("Load an individual material graph into the active slot").clicked() {
+                        self.import_material_graph_dialog();
+                        ui.close();
+                    }
+                    if ui.button(format!("{} Export Material Graph (.rfmat)...", icons::EXPORT)).on_hover_text("Save the active slot's material graph to .rfmat").clicked() {
+                        self.export_material_graph_dialog();
+                        ui.close();
+                    }
+
+                    ui.separator();
+
+                    if self.app_mode == AppMode::PmxStudio && ui.button(format!("{} Export All PMX Materials...", icons::EXPORT)).on_hover_text("Batch export physical Ray-MMD materials for all subsets").clicked() {
                         self.export_all_pmx_materials();
                         ui.close();
                     }
-                    ui.separator();
-                    if ui.button(format!("{} New Graph", icons::FILE_PLUS)).clicked() {
-                        self.load_default_preset();
-                        ui.close();
-                    }
-                    if ui.button(format!("{} Save Graph (.rfmat)...", icons::FLOPPY_DISK)).clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("ReForge Material", &["rfmat", "json"])
-                            .save_file()
-                        {
-                            if let Ok(json) = serde_json::to_string_pretty(&self.snarl) {
-                                let _ = std::fs::write(path, json);
-                            }
-                        }
-                        ui.close();
-                    }
-                    if ui.button(format!("{} Load Graph (.rfmat)...", icons::FOLDER_OPEN)).clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("ReForge Material", &["rfmat", "json"])
-                            .pick_file()
-                        {
-                            if let Ok(json) = std::fs::read_to_string(path) {
-                                if let Ok(loaded) = serde_json::from_str(&json) {
-                                    self.push_undo_snapshot();
-                                    self.snarl = loaded;
-                                    self.graph_dirty = true;
-                                }
-                            }
-                        }
-                        ui.close();
-                    }
-                    ui.separator();
-                    if ui.button(format!("{} Export Ray-MMD Material (.fx + Maps)", icons::EXPORT)).clicked() {
+                    if ui.button(format!("{} Export Ray-MMD Material (.fx + Maps)", icons::EXPORT)).on_hover_text("Export active material to Ray-MMD shader directory").clicked() {
                         self.export_ray_material();
                         ui.close();
                     }
@@ -3444,7 +3870,7 @@ impl eframe::App for MaterialEditorApp {
                     ui.separator();
 
                     ui.horizontal(|ui| {
-                        if ui.button(format!("{} Open PMX...", icons::FOLDER_OPEN)).clicked() {
+                        if ui.button(format!("{} Open PMX...", icons::CUBE)).on_hover_text("Load raw .pmx 3D model").clicked() {
                             if let Some(path) = rfd::FileDialog::new()
                                 .add_filter("PMX Model (*.pmx)", &["pmx"])
                                 .pick_file()
@@ -3452,7 +3878,13 @@ impl eframe::App for MaterialEditorApp {
                                 self.load_pmx_file(path, &ctx);
                             }
                         }
-                        if self.pmx_model.is_some() && ui.button(format!("{} Export All", icons::FLOPPY_DISK)).clicked() {
+                        if ui.button(format!("{} Open Proj...", icons::FOLDER_OPEN)).on_hover_text("Open .rfproj project file").clicked() {
+                            self.open_project_dialog(&ctx);
+                        }
+                        if self.pmx_model.is_some() && ui.button(format!("{} Save Proj", icons::FLOPPY_DISK)).on_hover_text("Save PMX project with all subset material graphs (Ctrl+S)").clicked() {
+                            self.save_project_auto(&ctx);
+                        }
+                        if self.pmx_model.is_some() && ui.button(format!("{} Export All", icons::EXPORT)).on_hover_text("Export all subset materials to Ray-MMD").clicked() {
                             self.export_all_pmx_materials();
                         }
                     });
@@ -4210,11 +4642,19 @@ impl MaterialEditorApp {
 
 fn render_welcome_quick_start(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, close_dialog: &mut bool) {
     ui.add_space(4.0);
-    ui.label(
-        egui::RichText::new("Choose a starting point below to begin authoring physical PBR materials for Ray-MMD:")
-            .size(13.0)
-            .color(Color32::from_rgb(180, 190, 205)),
-    );
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new("Choose a starting point below to begin authoring physical PBR materials for Ray-MMD:")
+                .size(13.0)
+                .color(Color32::from_rgb(180, 190, 205)),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.button(format!("{} Open Project (.rfproj)...", icons::FOLDER_OPEN)).on_hover_text("Open an existing ReForge project file").clicked() {
+                self.open_project_dialog(ctx);
+                *close_dialog = true;
+            }
+        });
+    });
     ui.add_space(10.0);
 
     egui::Grid::new("quick_start_cards")
@@ -4300,15 +4740,22 @@ fn render_welcome_quick_start(&mut self, ui: &mut egui::Ui, ctx: &egui::Context,
                             });
                         });
                         ui.add_space(16.0);
-                        if ui.add_sized([ui.available_width(), 28.0], egui::Button::new(format!("{} Open PMX Model...", icons::FOLDER_OPEN))).on_hover_text("Load a 3D PMX character model for interactive subset inspection and material assignment").clicked() {
-                            if let Some(path) = rfd::FileDialog::new()
-                                .add_filter("PMX Model (*.pmx)", &["pmx"])
-                                .pick_file()
-                            {
-                                self.load_pmx_file(path, ctx);
+                        let half_w = (ui.available_width() - ui.spacing().item_spacing.x) * 0.5;
+                        ui.horizontal(|ui| {
+                            if ui.add_sized([half_w, 28.0], egui::Button::new(format!("{} Open PMX...", icons::CUBE))).on_hover_text("Load a 3D PMX character model for interactive subset inspection and material assignment").clicked() {
+                                if let Some(path) = rfd::FileDialog::new()
+                                    .add_filter("PMX Model (*.pmx)", &["pmx"])
+                                    .pick_file()
+                                {
+                                    self.load_pmx_file(path, ctx);
+                                    *close_dialog = true;
+                                }
+                            }
+                            if ui.add_sized([half_w, 28.0], egui::Button::new(format!("{} Open Project...", icons::FOLDER_OPEN))).on_hover_text("Open an existing ReForge project file (.rfproj)").clicked() {
+                                self.open_project_dialog(ctx);
                                 *close_dialog = true;
                             }
-                        }
+                        });
                     });
                 });
 
@@ -4443,6 +4890,7 @@ fn render_welcome_guided_tour(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context
             ui.label(egui::RichText::new("Key Features in PMX Studio:").strong());
             ui.label("• Direct 3D Picking: Click directly on any object in the 3D viewport (e.g. hair, face, dress, floor) to automatically select and highlight its material subset!");
             ui.label("• Batch Auto-PBR All: Click the button in the left panel to scan every subset and synthesize complete PBR node networks across all CPU cores in parallel.");
+            ui.label("• Unified Projects (.rfproj): Save your entire character model session with all subset node graphs, camera angles, and textures into a single project using Ctrl+S.");
             ui.label("• Wireframe Overlay: Toggle wireframe to inspect polygon density and subset boundaries.");
             ui.label("• 2D Texture Map Inspector: Click 2D Texture Viewer to inspect high-resolution maps with UV triangle wireframes overlaid.");
 
@@ -4529,6 +4977,10 @@ fn render_welcome_shortcuts(&mut self, ui: &mut egui::Ui) {
     let shortcuts = [
         ("Space / Tab", "Quick Add Node", "Open fuzzy search node palette at mouse cursor"),
         ("F1", "Welcome & Tour Guide", "Toggle this quick start and onboarding guide window"),
+        ("Ctrl + S", "Save Project", "Save current PMX or single material project (.rfproj)"),
+        ("Ctrl + Shift + S", "Save Project As", "Save current project to a new file location"),
+        ("Ctrl + O", "Open Project", "Open an existing ReForge project (.rfproj)"),
+        ("Ctrl + N", "New Project", "Start a fresh workspace project"),
         ("Ctrl + Z", "Undo", "Undo last node edit, connection, or slider change"),
         ("Ctrl + Y / Ctrl+Shift+Z", "Redo", "Redo previously undone action"),
         ("Delete / Backspace / X", "Delete Node", "Remove selected node and its active connections"),
@@ -4537,7 +4989,7 @@ fn render_welcome_shortcuts(&mut self, ui: &mut egui::Ui) {
         ("MMB / Shift + LMB", "Pan Camera", "Translate camera view target horizontally & vertically"),
         ("Scroll / RMB Drag", "Zoom Camera", "Smoothly zoom in and out in 3D viewport and 2D map viewer"),
         ("LMB Click on 3D Mesh", "Direct 3D Picking", "Select and highlight material subset in PMX Studio"),
-        ("Drag & Drop", "Load Files", "Drag .pmx model or texture image from Windows Explorer directly into app"),
+        ("Drag & Drop", "Load Files", "Drag .pmx model, .rfproj project, or texture image into app"),
         ("Reset View Button", "Reset 2D Viewer", "Reset zoom to 100% and pan to center in 2D Map Inspector"),
     ];
 
