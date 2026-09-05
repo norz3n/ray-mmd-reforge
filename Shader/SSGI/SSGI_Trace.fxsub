@@ -78,11 +78,11 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 	int frameCounter = 0;
 #endif
 
-	// Isotropic pseudo-random spatial dither for hemisphere rotation (avoids directional trigonometric lattice bands)
-	float ditherX = PseudoRandom(screenPixel);
-	float ditherY = PseudoRandom(screenPixel + float2(13.1f, 17.3f));
-	// High-frequency blue noise for raymarch step jitter along the ray path
-	float stepJitter = InterleavedGradientNoise(screenPixel, frameCounter);
+	// Per-pixel random rotation angle for direction set decorrelation (rotates entire ray constellation across [0, 2*PI))
+	float rotAngle = InterleavedGradientNoise(screenPixel, frameCounter);
+	// Decorrelated spatial dither for elevation and raymarching step jitter
+	float elevationJitter = PseudoRandom(screenPixel);
+	float stepJitter = InterleavedGradientNoise(screenPixel + float2(47.0f, 17.0f), frameCounter);
 
 	float3 totalGi = 0.0f;
 	float minDistanceSq = max(mSSGIBias * mSSGIBias * 0.02f, 0.04f);
@@ -100,9 +100,10 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 	[loop]
 	for (int r = 0; r < SSGI_RAY_COUNT; ++r)
 	{
-		// Uniformly stratified azimuth with isotropic per-pixel rotation
-		float u1 = frac((float(r) + ditherX) / float(SSGI_RAY_COUNT));
-		float u2 = frac(Halton2(r + 1) + ditherY);
+		// Uniformly stratified azimuth rotated by per-pixel random angle (full 360-degree decorrelation)
+		float u1 = frac((float(r) + 0.5f) / float(SSGI_RAY_COUNT) + rotAngle);
+		// Quasi-random elevation with safe grazing-angle bound to prevent false self-intersection
+		float u2 = lerp(0.02f, 0.96f, frac(Halton2(r + 1) + elevationJitter));
 
 		// Cosine-weighted hemisphere distribution
 		float phi = PI_2 * u1;
