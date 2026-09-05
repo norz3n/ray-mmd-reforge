@@ -10,38 +10,29 @@
 #define RAY_MMD_SSGI_COMMON_FXSUB
 
 #if GI_QUALITY == 1
-#	define SSGI_ANGLES 4
-#	define SSGI_STEPS 4
+#	define SSGI_RAY_COUNT 4
+#	define SSGI_STEPS 8
 #	define SSGI_RADIUS 4
 #elif GI_QUALITY == 2
-#	define SSGI_ANGLES 6
-#	define SSGI_STEPS 4
+#	define SSGI_RAY_COUNT 8
+#	define SSGI_STEPS 8
 #	define SSGI_RADIUS 6
 #elif GI_QUALITY == 3
-#	define SSGI_ANGLES 8
-#	define SSGI_STEPS 4
-#	define SSGI_RADIUS 6
+#	define SSGI_RAY_COUNT 16
+#	define SSGI_STEPS 8
+#	define SSGI_RADIUS 8
 #elif GI_QUALITY == 4
-#	define SSGI_ANGLES 6
-#	define SSGI_STEPS 8
-#	define SSGI_RADIUS 8
-#elif GI_QUALITY == 5
-#	define SSGI_ANGLES 8
-#	define SSGI_STEPS 8
-#	define SSGI_RADIUS 8
-#elif GI_QUALITY == 6
-#	define SSGI_ANGLES 10
-#	define SSGI_STEPS 10
+#	define SSGI_RAY_COUNT 32
+#	define SSGI_STEPS 12
 #	define SSGI_RADIUS 10
-#elif GI_QUALITY == 7
-#	define SSGI_ANGLES 12
-#	define SSGI_STEPS 10
-#	define SSGI_RADIUS 12
 #else
-#	define SSGI_ANGLES 6
-#	define SSGI_STEPS 5
+#	define SSGI_RAY_COUNT 8
+#	define SSGI_STEPS 8
 #	define SSGI_RADIUS 6
 #endif
+
+// Compatibility alias for legacy passes
+#define SSGI_ANGLES SSGI_RAY_COUNT
 
 // Controller item bindings
 float mSSGIIntensityPlus : CONTROLOBJECT < string name="ray_controller.pmx"; string item = "SSGI+"; >;
@@ -69,12 +60,76 @@ inline float3 GetSSGINormal(float2 uv)
 }
 
 /**
- * Computes smooth bilateral thickness visibility weight for diffuse occluders.
+ * Constructs an orthonormal tangent space basis (T, B, N) from unit normal N.
+ * Implements Duff et al. (2017) branchless formulation for optimal SM 3.0 execution.
  */
-inline float ComputeThicknessWeight(float zDiff, float viewZ, float distance)
+inline void BuildOrthonormalBasis(in float3 N, out float3 T, out float3 B)
 {
-	float dynamicThickness = max(0.35f, 0.50f + distance * 0.08f);
-	float x = saturate(abs(zDiff) / dynamicThickness);
+	float signZ = (N.z >= 0.0f) ? 1.0f : -1.0f;
+	float a = -1.0f / (signZ + N.z);
+	float b = N.x * N.y * a;
+	T = float3(1.0f + signZ * N.x * N.x * a, signZ * b, -signZ * N.x);
+	B = float3(b, signZ + N.y * N.y * a, -N.y);
+}
+
+/**
+ * Low-discrepancy radical inverse base 2 (van der Corput sequence) in SM 3.0 float ALU.
+ */
+inline float Halton2(int index)
+{
+	float result = 0.0f;
+	float f = 0.5f;
+	[unroll]
+	for (int i = 0; i < 5; ++i)
+	{
+		if (index <= 0) break;
+		result += float(index % 2) * f;
+		index /= 2;
+		f *= 0.5f;
+	}
+	return result;
+}
+
+/**
+ * Low-discrepancy radical inverse base 3 in SM 3.0 float ALU.
+ */
+inline float Halton3(int index)
+{
+	float result = 0.0f;
+	float f = 1.0f / 3.0f;
+	[unroll]
+	for (int i = 0; i < 4; ++i)
+	{
+		if (index <= 0) break;
+		result += float(index % 3) * f;
+		index /= 3;
+		f *= (1.0f / 3.0f);
+	}
+	return result;
+}
+
+/**
+ * Analytical branchless scaling factor to clip a 2D ray step exactly to viewport margins.
+ * Computes axis-aligned bounding intersection without divergence or shooting to infinity.
+ */
+inline float ClipRayToScreenEdge(float2 rayStart, float2 rayStep)
+{
+	float2 targetUV = lerp(0.002f, 0.998f, step(0.0f, rayStep));
+	float2 clipAxes = abs(targetUV - rayStart) / (abs(rayStep) + 1e-7f);
+	return saturate(min(clipAxes.x, clipAxes.y));
+}
+
+/**
+ * Computes smooth bilateral thickness visibility weight for diffuse occluders.
+ * Rejects samples that penetrate deeper than geometry thickness to prevent light bleeding
+ * through thin objects (fingers, hair, thin walls).
+ */
+inline float ComputeThicknessWeight(float zDiff, float viewZ, float distance, float stepLength = 0.0f)
+{
+	float dynamicThickness = max(0.08f, 0.04f + distance * 0.035f + stepLength * 0.40f);
+	if (zDiff < -0.02f || zDiff > dynamicThickness)
+		return 0.0f;
+	float x = saturate(zDiff / dynamicThickness);
 	return 1.0f - (x * x * (3.0f - 2.0f * x));
 }
 

@@ -63,6 +63,13 @@ float3 SSGISampleStableEmissive(float2 uv, float zCenter, float3 centerColor, fl
 
 /**
  * Screen-Space Global Illumination Radiance Integration Pixel Shader.
+ *
+ * Implements Low-Ray-Count Cosine-Weighted Hemisphere Raymarching inspired by UE5 SSRT:
+ * - Cosine-weighted hemisphere distribution around view-space normal
+ * - Blue Noise (Interleaved Gradient Noise) + Halton low-discrepancy stratification
+ * - Analytical 2D Screen Edge Clipping (branchless viewport boundary scaling)
+ * - Adaptive Depth Thickness Gating (prevents light bleed through fingers, hair, thin walls)
+ * - Soft edge vignetting and max distance falloff with seamless environment/sky IBL fallback
  */
 float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) : COLOR
 {
@@ -74,25 +81,21 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 	float3 nOrigin = GetSSGINormal(uvCoord.xy);
 	float3 pOrigin = GetViewPosition(projInfo, uvCoord.xy, zOrigin);
 
-	// Receiver shading model: skin receiving skin radiance keeps the full
-	// albedo weighting (the emitter's dermal albedo is already baked into
-	// ShadingMap), so a boosted SSGI still brightens skin.  Only skin ->
-	// non-skin emission gets the bounce clamp below.
+	// Construct orthonormal tangent space basis around surface normal
+	float3 tangentT, tangentB;
+	BuildOrthonormalBasis(nOrigin, tangentT, tangentB);
+
+	// Receiver shading model check
 	int receiverModel = (int)floor(tex2Dlod(Gbuffer8Map, float4(uvCoord.xy, 0.0f, 0.0f)).a);
 	bool receiverIsSkin = (receiverModel == SHADINGMODELID_SKIN || receiverModel == SHADINGMODELID_SUBSURFACE);
 
-	// Adaptive world radius scaling (mode 1: focused bounce, mode 2: large room-scale gather)
-	// Cone angle widens/narrows the gather cone; stock default (mSSGIConeAngleDefault = 0.5) keeps the radius unchanged
+	// Adaptive gather world radius scaling
 #if GI_ENABLE >= 2
 	float maxWorldDistance = max(mSSGIScale * 150.0f, 5.0f);
-	float projScale = max(abs(projInfo.x), 1e-4f);
-	float screenRadius = clamp(maxWorldDistance / (zOrigin * projScale), 0.02f, 1.25f);
 #else
 	float maxWorldDistance = max(mSSGIScale * 60.0f, 2.0f);
-	float projScale = max(abs(projInfo.x), 1e-4f);
-	float screenRadius = clamp(maxWorldDistance / (zOrigin * projScale), 0.01f, 1.0f);
 #endif
-	screenRadius *= clamp(mSSGIConeAngle * 2.0f, 0.25f, 4.0f);
+	maxWorldDistance *= clamp(mSSGIConeAngle * 2.0f, 0.25f, 4.0f);
 
 	float2 screenPixel = uvCoord.xy * ViewportSize;
 #if AA_QUALITY == 6
@@ -100,12 +103,11 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 #else
 	int frameCounter = 0;
 #endif
-	// White-noise hash: isotropic decorrelation avoids directional banding
-	float noiseAngle = frac(sin(dot(screenPixel + float(frameCounter) * 5.588238f, float2(127.1f, 311.7f))) * 43758.5453f);
-	float noiseRadius = frac(sin(dot(screenPixel + float(frameCounter) * 5.588238f, float2(269.5f, 183.3f))) * 43758.5453f);
 
-	// Stratified sector jitter: keeps angular coherence across adjacent pixels to prevent blotchy clumping
-	float startAngle = noiseAngle * (PI_2 / float(SSGI_ANGLES));
+	// Blue-noise / Interleaved Gradient Noise spatial dither
+	float ditherX = InterleavedGradientNoise(screenPixel, frameCounter);
+	float ditherY = PseudoRandom(screenPixel + float(frameCounter) * 1.61803398875f);
+
 	float3 totalGi = 0.0f;
 	float minDistanceSq = max(mSSGIBias * mSSGIBias * 0.02f, 0.04f);
 
@@ -116,21 +118,42 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 	float giGain = PI * lerp(lerp(1.0f, 3.0f, mSSGIIntensityPlus), 0.0f, mSSGIIntensityMinus)
 		* (1.0f * lerp(1.0f, 3.0f, mDbgSSGIModeGain));
 #endif
-	// Gather gain at neutral user morphs — what SKIN_GI_EMISSION_SCALE was
-	// calibrated against.  Skin bounce is clamped to this level no matter how
-	// far the gain is pushed: skin may receive any amount of light but
-	// re-emits only its dermal albedo, so the SSGI boost should fill the room,
-	// not amplify the skin's own radiance.
 	float giGainRef = PI * (1.0f * lerp(1.0f, 3.0f, mDbgSSGIModeGain))
 		* ((GI_ENABLE >= 2) ? 8.0f : 1.0f);
 
 	[loop]
-	for (int a = 0; a < SSGI_ANGLES; ++a)
+	for (int r = 0; r < SSGI_RAY_COUNT; ++r)
 	{
-		float theta = (float(a) / float(SSGI_ANGLES)) * PI_2 + startAngle;
-		float2 direction = float2(cos(theta), sin(theta));
-		float rayJitter = frac(noiseRadius + float(a) * 0.61803398875f);
+		// Low-discrepancy Halton sequence with Cranley-Patterson blue-noise rotation
+		float u1 = frac(Halton2(r + 1) + ditherX);
+		float u2 = frac(Halton3(r + 1) + ditherY);
 
+		// Cosine-weighted hemisphere distribution
+		float phi = PI_2 * u1;
+		float sinTheta = sqrt(u2);
+		float cosTheta = sqrt(max(0.0f, 1.0f - u2));
+		float sinPhi, cosPhi;
+		sincos(phi, sinPhi, cosPhi);
+		float3 L_tangent = float3(cosPhi * sinTheta, sinPhi * sinTheta, cosTheta);
+		float3 L = normalize(L_tangent.x * tangentT + L_tangent.y * tangentB + L_tangent.z * nOrigin);
+
+		// Clamp ray to camera near plane in view space if ray travels toward camera
+		float maxNearDist = (L.z < -1e-4f) ? (-0.95f * zOrigin / L.z) : maxWorldDistance;
+		float rayDist = min(maxWorldDistance, maxNearDist);
+
+		// Project ray end into screen space
+		float3 pEnd = pOrigin + L * rayDist;
+		float2 uvEnd = (pEnd.xy / max(pEnd.z, 1e-3f) - projInfo.zw) / projInfo.xy;
+		float2 deltaUV = uvEnd - uvCoord.xy;
+
+		// Analytical Screen Edge Clipping: scale ray step vector to stay within viewport
+		float clipFactor = ClipRayToScreenEdge(uvCoord.xy, deltaUV);
+		deltaUV *= clipFactor;
+		float actualDist = rayDist * clipFactor;
+		float zEnd = pOrigin.z + L.z * actualDist;
+		float stepLength = actualDist / float(SSGI_STEPS);
+
+		float rayJitter = frac(ditherX + float(r) * 0.61803398875f);
 		float3 rayColor = 0.0f;
 		float rayOcc = 0.0f;
 		float2 prevUv = uvCoord.xy;
@@ -138,112 +161,114 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 		[loop]
 		for (int s = 0; s < SSGI_STEPS; ++s)
 		{
-			// Linear-quadratic hybrid progression: equidistant spacing avoids skipping emitters while keeping near-field detail
-			float stepProgress = (float(s) + rayJitter) / float(SSGI_STEPS);
-			float stepDist = lerp(stepProgress, stepProgress * stepProgress, 0.25f);
-			float2 currentUv = uvCoord.xy + direction * (screenRadius * stepDist);
+			// Near-field weighted step distribution: finer intervals near origin, expanding outward
+			float sProgress = (float(s) + rayJitter) / float(SSGI_STEPS);
+			float stepDist = lerp(sProgress, sProgress * sProgress, 0.25f);
+			float2 currentUv = uvCoord.xy + deltaUV * stepDist;
 
-			if (currentUv.x < 0.0f || currentUv.x > 1.0f || currentUv.y < 0.0f || currentUv.y > 1.0f)
-				break;
+			// Perspective-correct ray depth interpolation
+			float zRay = 1.0f / lerp(1.0f / zOrigin, 1.0f / max(zEnd, 1e-3f), stepDist);
 
-			// Hi-Z depths are min-reduced over 2x2/4x4 pixels.  Reconstructing a
-			// position from that depth at currentUv while reading its normal/color at
-			// full resolution creates block-shaped false emitters on small receivers.
-			// A fixed four-step gather is cheaper and coherent with one G-buffer tap.
 			float4 g8 = tex2Dlod(Gbuffer8Map, float4(currentUv, 0.0f, 0.0f));
 			float zSample = g8.r;
 
-			if (zSample > 0.0f && zSample < 1000.0f)
+			if (zSample > 1e-3f && zSample < 1000.0f)
 			{
-				float3 pSample = GetViewPosition(projInfo, currentUv, zSample);
-				float3 diff = pSample - pOrigin;
-				float distSq = dot(diff, diff);
+				float zDiff = zRay - zSample;
 
-				// Reject self-sampling (bias check)
-				if (distSq > minDistanceSq)
+				// Ray has crossed or is near the surface
+				if (zDiff >= -0.02f)
 				{
-					float invDist = rsqrt(distSq);
-					float dist = distSq * invDist;
-					float3 lightVector = diff * invDist;
+					float3 pSample = GetViewPosition(projInfo, currentUv, zSample);
+					float3 diff = pSample - pOrigin;
+					float distSq = dot(diff, diff);
 
-					// Receiver cosine factor (strictly positive hemisphere prevents coplanar floor self-illumination rings)
-					float NdotL = dot(nOrigin, lightVector);
-					if (NdotL > 0.03f)
+					// Reject self-sampling at origin
+					if (distSq > minDistanceSq)
 					{
-						int shadingModel = (int)floor(g8.a);
-						bool isEmissive = (shadingModel == SHADINGMODELID_EMISSIVE);
-						bool isSkinEmitter = (shadingModel == SHADINGMODELID_SKIN || shadingModel == SHADINGMODELID_SUBSURFACE);
+						float invDist = rsqrt(distSq);
+						float dist = distSq * invDist;
+						float3 lightVector = diff * invDist;
 
-						// Emitter cosine factor (strictly Lambertian cosine emission prevents corner light accumulation)
-						float3 nSample = GetSSGINormal(currentUv);
-						float NsDotMinusL = dot(nSample, -lightVector);
-						if (NsDotMinusL > 0.0f || isEmissive)
+						// Receiver cosine factor
+						float NdotL = dot(nOrigin, lightVector);
+						if (NdotL > 0.02f)
 						{
-							float emitterCosine = isEmissive ? saturate(NsDotMinusL * 0.5f + 0.5f) : saturate(NsDotMinusL);
-							float geomFactor = saturate(NdotL) * emitterCosine;
-							float distRatio = saturate(dist / maxWorldDistance);
-							float rayFade = saturate(1.0f - stepProgress);
-							float fade = saturate(1.0f - distRatio) * rayFade;
-							fade = fade * fade * (3.0f - 2.0f * fade);
-						#if GI_ENABLE >= 2
-							float falloffLinear = isEmissive ? 0.02f : 0.035f;
-							float falloffQuad   = isEmissive ? 0.001f : 0.0f;
-						#else
-							float falloffLinear = isEmissive ? 0.05f : 0.35f;
-							float falloffQuad   = isEmissive ? 0.005f : 0.0f;
-						#endif
-							float invDistFalloff = 1.0f / (1.0f + dist * falloffLinear + dist * dist * falloffQuad);
-							// Near-field contact damping to prevent self-sampling texture ghosting on fine meshes
-							float nearContactDamping = smoothstep(0.04f, 0.30f, dist);
-							float atten = fade * invDistFalloff * (isEmissive ? smoothstep(0.01f, 0.15f, dist) : nearContactDamping);
+							int shadingModel = (int)floor(g8.a);
+							bool isEmissive = (shadingModel == SHADINGMODELID_EMISSIVE);
+							bool isSkinEmitter = (shadingModel == SHADINGMODELID_SKIN || shadingModel == SHADINGMODELID_SUBSURFACE);
 
-							// Thickness and SSGI emitter visibility weighting
-							float emitterVis = tex2Dlod(SSGIVisibilityMapSamp, float4(currentUv, 0.0f, 0.0f)).a;
-							float thickWeight = isEmissive ? 1.0f : ComputeThicknessWeight(pSample.z - pOrigin.z, pOrigin.z, dist);
-							float w = saturate(geomFactor * atten * thickWeight * emitterVis);
-
-							if (w > 1e-3f)
+							// Emitter normal & backface check: reject geometry facing away from the ray
+							float3 nSample = GetSSGINormal(currentUv);
+							float NsDotMinusL = dot(nSample, -lightVector);
+							if (NsDotMinusL > 0.0f || isEmissive)
 							{
-								float3 sampleColor = tex2Dlod(ShadingMapSamp, float4(currentUv, 0.0f, 0.0f)).rgb;
-								// ShadingMap already contains emitter albedo (applied once in the SSSS
-								// DESTCOLOR*SRC composite) - multiplying by an emitter-albedo ratio here
-								// would double-count (Lo * rho_e). No extra weighting needed.
-								sampleColor = clamp(sampleColor, 0.0f, 100.0f);
+								// Adaptive Depth Thickness Gating: prevents light leak through thin walls, fingers, hair
+								float thickWeight = isEmissive ? 1.0f : ComputeThicknessWeight(zDiff, pOrigin.z, dist, stepLength);
 
-								if (isEmissive)
+								if (thickWeight > 0.0f)
 								{
-									// 1-step bisection: refine hit towards leading edge of emitter for subpixel precision
-									float2 midUv = (prevUv + currentUv) * 0.5f;
-									float4 g8Mid = tex2Dlod(Gbuffer8Map, float4(midUv, 0.0f, 0.0f));
-									if ((int)floor(g8Mid.a) == SHADINGMODELID_EMISSIVE)
+									float emitterCosine = isEmissive ? saturate(NsDotMinusL * 0.5f + 0.5f) : saturate(NsDotMinusL);
+									float geomFactor = saturate(NdotL) * emitterCosine;
+
+									// Soft distance falloff
+									float distRatio = saturate(dist / maxWorldDistance);
+									float rayFade = saturate(1.0f - sProgress);
+									float fade = saturate(1.0f - distRatio) * rayFade;
+									fade = fade * fade * (3.0f - 2.0f * fade);
+
+									// Soft screen edge vignetting
+									float2 edgeDist = min(currentUv, 1.0f - currentUv);
+									float edgeFade = smoothstep(0.0f, 0.08f, min(edgeDist.x, edgeDist.y));
+
+								#if GI_ENABLE >= 2
+									float falloffLinear = isEmissive ? 0.02f : 0.035f;
+									float falloffQuad   = isEmissive ? 0.001f : 0.0f;
+								#else
+									float falloffLinear = isEmissive ? 0.05f : 0.35f;
+									float falloffQuad   = isEmissive ? 0.005f : 0.0f;
+								#endif
+									float invDistFalloff = 1.0f / (1.0f + dist * falloffLinear + dist * dist * falloffQuad);
+									float nearContactDamping = smoothstep(0.04f, 0.30f, dist);
+									float atten = fade * edgeFade * invDistFalloff * (isEmissive ? smoothstep(0.01f, 0.15f, dist) : nearContactDamping);
+
+									float emitterVis = tex2Dlod(SSGIVisibilityMapSamp, float4(currentUv, 0.0f, 0.0f)).a;
+									float w = saturate(geomFactor * atten * thickWeight * emitterVis);
+
+									if (w > 1e-3f)
 									{
-										currentUv = midUv;
-										zSample = g8Mid.r;
+										float3 sampleColor = clamp(tex2Dlod(ShadingMapSamp, float4(currentUv, 0.0f, 0.0f)).rgb, 0.0f, 100.0f);
+
+										if (isEmissive)
+										{
+											// 1-step bisection: refine hit towards leading edge of emitter for subpixel precision
+											float2 midUv = (prevUv + currentUv) * 0.5f;
+											float4 g8Mid = tex2Dlod(Gbuffer8Map, float4(midUv, 0.0f, 0.0f));
+											if ((int)floor(g8Mid.a) == SHADINGMODELID_EMISSIVE)
+											{
+												currentUv = midUv;
+												zSample = g8Mid.r;
+											}
+
+											sampleColor = SSGISampleStableEmissive(currentUv, zSample, sampleColor, sProgress);
+											float emissiveLuma = dot(sampleColor, float3(0.299f, 0.587f, 0.114f));
+											float compressedLuma = emissiveLuma / (1.0f + emissiveLuma * 0.12f);
+											sampleColor = sampleColor * (compressedLuma / max(emissiveLuma, 1e-4f)) * lerp(2.5f, 8.0f, mDbgSSGIEmissiveBoost);
+										}
+										else if (isSkinEmitter && !receiverIsSkin)
+										{
+											sampleColor *= SKIN_GI_EMISSION_SCALE * saturate(giGainRef / max(giGain, 1e-4f));
+										}
+
+										// Front-to-back ray accumulation
+										float hitFactor = w * (1.0f - rayOcc);
+										rayColor += sampleColor * hitFactor;
+										rayOcc += hitFactor;
+
+										if (rayOcc > 0.95f)
+											break;
 									}
-
-									sampleColor = SSGISampleStableEmissive(currentUv, zSample, sampleColor, stepProgress);
-									float emissiveLuma = dot(sampleColor, float3(0.299f, 0.587f, 0.114f));
-									float compressedLuma = emissiveLuma / (1.0f + emissiveLuma * 0.12f);
-									sampleColor = sampleColor * (compressedLuma / max(emissiveLuma, 1e-4f)) * lerp(2.5f, 8.0f, mDbgSSGIEmissiveBoost);
 								}
-								else if (isSkinEmitter && !receiverIsSkin)
-								{
-									// Skin radiance overshoots in screen-space gathers (bright wide lobes);
-									// suppress its bounce into the room, and clamp harder as the user's GI
-									// gain rises above the calibrated reference so boosted SSGI never
-									// amplifies skin beyond its dermal bounce albedo.  Skin receivers are
-									// exempt: skin-to-skin light keeps its full albedo weighting so skin
-									// still brightens with the boost.
-									sampleColor *= SKIN_GI_EMISSION_SCALE * saturate(giGainRef / max(giGain, 1e-4f));
-								}
-
-								// Front-to-back ray accumulation
-								float hitFactor = w * (1.0f - rayOcc);
-								rayColor += sampleColor * hitFactor;
-								rayOcc += hitFactor;
-
-								if (rayOcc > 0.95f)
-									break;
 							}
 						}
 					}
@@ -254,47 +279,23 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 		}
 
 #if GI_ENABLE >= 2
-		// Sky/background radiance fallback: if the ray escaped into open sky in this direction (Indirect mode only).
-		// Uses the true reconstructed view-space direction to each sky tap instead of a synthetic screen-angle
-		// field (which produced wave banding), and splits the contribution over two taps so residual
-		// structure dissolves into grain that the bilateral blur removes.
+		// Seamless Environment / Sky IBL fallback for escaped or boundary rays
 		if (rayOcc < 0.85f)
 		{
-			[unroll]
-			for (int t = 0; t < 4; ++t)
+			float2 skyUv = saturate(uvCoord.xy + deltaUV);
+			float skyDepth = GetSSGILinearDepth(skyUv);
+			if (skyDepth <= 1e-4f)
 			{
-				// Per-pixel jittered tap distances: a fixed tapT makes the reconstructed sky
-				// direction a smooth screen-angle field (visible bands); jitter turns it into
-				// grain that the bilateral blur removes.  Four taps keep a small bright sky
-				// keyhole (a window) from collapsing into a single hard streak.
-				float tapT = lerp(0.30f, 0.95f, frac(rayJitter * 1.61803398875f + float(t) * 0.265f));
-				float2 skyUv = uvCoord.xy + direction * (screenRadius * tapT);
-				if (skyUv.x >= 0.0f && skyUv.x <= 1.0f && skyUv.y >= 0.0f && skyUv.y <= 1.0f)
+				float NdotSky = saturate(dot(nOrigin, L));
+				if (NdotSky > 0.0f)
 				{
-					float skyDepth = GetSSGILinearDepth(skyUv);
-					if (skyDepth <= 1e-4f)
-					{
-						float3 pSky = GetViewPosition(projInfo, skyUv, maxWorldDistance);
-						float3 skyDir = normalize(pSky - pOrigin);
-						float NdotSky = saturate(dot(nOrigin, skyDir));
-						if (NdotSky > 0.0f)
-						{
 #if IBL_QUALITY
-							// EnvLightMap is the HDR screen-space projection of the environment
-							// alone (its DefaultEffect hides all geometry), so a background pixel
-							// holds the true sky radiance for that direction — unlike the
-							// tonemapped LDR scene background in ScnSamp.
-							float3 skyColor = SampleSkyRadiance(skyUv);
+					float3 skyColor = SampleSkyRadiance(skyUv);
 #else
-							float3 skyColor = srgb2linear(tex2Dlod(ScnSamp, float4(skyUv, 0.0f, 0.0f)).rgb);
+					float3 skyColor = srgb2linear(tex2Dlod(ScnSamp, float4(skyUv, 0.0f, 0.0f)).rgb);
 #endif
-							// Total over 4 taps: NdotSky x lerp(0.30, 1.00, SkyLight) x (1-rayOcc) —
-							// the old 0.15/(2 taps) weighting was ~0.03 after occlusion and the sky
-							// effectively never participated in the gather.
-							float skyWeight = NdotSky * lerp(0.30f, 1.00f, mDbgSSGISkyLight) * (1.0f - rayOcc) / 4.0f;
-							rayColor += clamp(skyColor, 0.0f, 10.0f) * skyWeight;
-						}
-					}
+					float skyWeight = NdotSky * lerp(0.30f, 1.00f, mDbgSSGISkyLight) * (1.0f - rayOcc);
+					rayColor += clamp(skyColor, 0.0f, 10.0f) * skyWeight;
 				}
 			}
 		}
@@ -303,7 +304,7 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 		totalGi += rayColor;
 	}
 
-	float3 finalGi = (totalGi / float(SSGI_ANGLES)) * giGain;
+	float3 finalGi = (totalGi / float(SSGI_RAY_COUNT)) * giGain;
 
 	return float4(clamp(finalGi, 0.0f, 100.0f), 1.0f);
 }
