@@ -65,14 +65,7 @@ float4 AtmosphericFogPS(
 	setting.waveLambdaOzone = mOzoneScatteringCoeff * mOzoneMass;
 	setting.waveLambdaRayleigh = rayleight;
 	
-	float fogDepth = materialAlpha.linearDepth;
-	if (materialAlpha.lightModel == SHADINGMODELID_GLASS)
-	{
-		float bgDepth = tex2Dlod(Gbuffer4Map, float4(coord, 0, 0)).r;
-		fogDepth = (bgDepth > 1e-4f) ? bgDepth : 0.0f;
-	}
-
-	float3 fog = ComputeFogChapman(setting, CameraPosition + float3(0, mEarthPeopleHeight * mUnitDistance, 0), V, SunDirection, fogDepth, mFogRange, mFogDensityFar);
+	float3 fog = ComputeFogChapman(setting, CameraPosition + float3(0, mEarthPeopleHeight * mUnitDistance, 0), V, SunDirection, materialAlpha.linearDepth, mFogRange, mFogDensityFar);
 	return float4(fog, 0);
 }
 
@@ -120,14 +113,7 @@ float4 AtmosphericFogMiePS(
 	setting.waveLambdaOzone = mOzoneScatteringCoeff * mOzoneMass;
 	setting.waveLambdaRayleigh = rayleight;
 
-	float fogDepth = materialAlpha.linearDepth;
-	if (materialAlpha.lightModel == SHADINGMODELID_GLASS)
-	{
-		float bgDepth = tex2Dlod(Gbuffer4Map, float4(coord, 0, 0)).r;
-		fogDepth = (bgDepth > 1e-4f) ? bgDepth : 0.0f;
-	}
-
-	float3 fog = ComputeFogChapmanMie(setting, CameraPosition + float3(0, mEarthPeopleHeight * mUnitDistance, 0), V, SunDirection, fogDepth, mFogRange);
+	float3 fog = ComputeFogChapmanMie(setting, CameraPosition + float3(0, mEarthPeopleHeight * mUnitDistance, 0), V, SunDirection, materialAlpha.linearDepth, mFogRange);
 
 #if ATM_CLOUD_ENABLE
 	setting.cloud = mCloudDensity;
@@ -209,14 +195,7 @@ float4 AtmosphericScatteringPS(
 	setting.waveLambdaOzone = mOzoneScatteringCoeff * mOzoneMass;
 	setting.waveLambdaRayleigh = rayleight;
 	
-	float fogDepth = material.linearDepth;
-	if (material.lightModel == SHADINGMODELID_GLASS)
-	{
-		float bgDepth = tex2Dlod(Gbuffer4Map, float4(coord, 0, 0)).r;
-		fogDepth = (bgDepth > 1e-4f) ? bgDepth : 0.0f;
-	}
-
-	float3 fogAmount = ComputeFogChapmanRayleigh(setting, CameraPosition + float3(0, mEarthPeopleHeight * mUnitDistance, 0), V, SunDirection, fogDepth, mFogRange, mFogDensityFar);
+	float3 fogAmount = ComputeFogChapmanRayleigh(setting, CameraPosition + float3(0, mEarthPeopleHeight * mUnitDistance, 0), V, SunDirection, material.linearDepth, mFogRange, mFogDensityFar);
 	fogAmount *= mFogIntensity;
 
 	float visibility = 1;
@@ -227,7 +206,7 @@ float4 AtmosphericScatteringPS(
 #endif
 
 	float3 fogBlur = tex2Dlod(FogBlurMapSamp, float4(coord + ViewportOffset, 0, 0)).rgb;
-	return float4(fogAmount * visibility + fogBlur, luminance(mWaveLength) * fogDepth * mFogDensity * visibility);
+	return float4(fogAmount * visibility + fogBlur, luminance(mWaveLength) * material.linearDepth * mFogDensity * visibility);
 }
 
 #endif

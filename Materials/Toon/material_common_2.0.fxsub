@@ -1794,8 +1794,6 @@ GbufferParam Material2PS(
 		}\
 		pass DrawAlphaObject {\
 			AlphaTestEnable = false; AlphaBlendEnable = false;\
-			ZWriteEnable = false;\
-			CullMode = NONE;\
 			VertexShader = compile vs_3_0 MaterialVS();\
 			PixelShader  = compile ps_3_0 Material2PS();\
 		}\
