@@ -83,6 +83,16 @@ Reforge Exclusive Features (through v1.20.0) :
 * **Crisp Cel Ramp**: anti-aliased two-band terminator with a half-strength core shadow, hardened cast-shadow edges, stepped anime highlights, flat two-step ambient fill, and full SSGI reception on toon materials.
 * **Materials/Toon Library**: the entire material tree duplicated as ready-made cel-shaded presets with per-category shadow colors — skin, hair (including procedural presets), eyes, cloth, foliage — plus base cel and tone-based templates and a README.
 
+**ReForge Material Editor Suite (New Standalone Desktop Tool)**
+* **Native PBR Material Authoring Tool (`Extension/MaterialEditor/MaterialEditor.exe`)**: high-performance standalone Rust desktop application with zero external runtime dependencies, built specifically for authoring and generating Ray-MMD materials.
+* **Blender-Style Node Graph Canvas**: interactive visual node editor with vector icons for synthesizing physical maps from diffuse textures or procedural generators.
+* **Dual Operating Modes**: Single Material Sandbox with instant 3D raymarched primitive previews (sphere, cube, cylinder, plane, Utah teapot) and PMX Model Studio for full character staging.
+* **Direct 3D Viewport Picking**: select and highlight material subsets by clicking directly on 3D character geometry via color-coded ID-buffering.
+* **Full Physical ShaderMap Synthesis**: Tangent-space Normal maps (Sobel/Scharr, DirectX/OpenGL), Ambient Occlusion, Height, Roughness, Metalness, Cavity/Curvature, Procedural Noise, Hair Strands, Eye Cornea Parallax, RNM Blending, and Channel Packing.
+* **Multi-Core Parallel Batch Auto-PBR**: automatically scans and generates complete PBR networks for all subsets in a model across all CPU cores in parallel (Rayon).
+* **Unified Project Files (`.rfproj`)**: save and restore full character sessions with all subset material graphs, camera angles, textures, and settings, plus modular `.rfmat` graph exchange.
+* **Built-in Onboarding & Quick Start**: 5-step interactive guided tour, quick start wizard, and keyboard shortcuts reference cheat sheet (`F1`).
+
 Standard Features (Inherited) :
 ------------
 * Physically-Based Material: albedo, metallic, smoothness/roughness, specular/reflectance, emissive, etc
