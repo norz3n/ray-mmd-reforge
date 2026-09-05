@@ -33,33 +33,7 @@ float3 SampleSkyRadiance(float2 skyUv)
 }
 #endif
 
-inline float SSGIEmissiveTapWeight(float2 uv, float zCenter, float depthTolerance)
-{
-	float4 g8 = tex2Dlod(Gbuffer8Map, float4(uv, 0.0f, 0.0f));
-	float emissive = 1.0f - saturate(abs(floor(g8.a) - SHADINGMODELID_EMISSIVE));
-	return emissive * BilateralDepthWeight(g8.r, zCenter, depthTolerance);
-}
 
-float3 SSGISampleStableEmissive(float2 uv, float zCenter, float3 centerColor, float stepProgress)
-{
-	float2 stepUv = ViewportOffset2 * lerp(2.0f, 5.0f, stepProgress);
-	float depthTolerance = min(max(zCenter * 0.04f, 0.5f), 5.0f);
-
-	float wCenter = 3.0f;
-	float wR = SSGIEmissiveTapWeight(uv + float2(stepUv.x, 0.0f), zCenter, depthTolerance);
-	float wL = SSGIEmissiveTapWeight(uv - float2(stepUv.x, 0.0f), zCenter, depthTolerance);
-	float wU = SSGIEmissiveTapWeight(uv + float2(0.0f, stepUv.y), zCenter, depthTolerance);
-	float wD = SSGIEmissiveTapWeight(uv - float2(0.0f, stepUv.y), zCenter, depthTolerance);
-	float totalW = wCenter + wR + wL + wU + wD;
-
-	float3 color = centerColor * wCenter;
-	color += clamp(tex2Dlod(ShadingMapSamp, float4(uv + float2(stepUv.x, 0.0f), 0.0f, 0.0f)).rgb, 0.0f, 100.0f) * wR;
-	color += clamp(tex2Dlod(ShadingMapSamp, float4(uv - float2(stepUv.x, 0.0f), 0.0f, 0.0f)).rgb, 0.0f, 100.0f) * wL;
-	color += clamp(tex2Dlod(ShadingMapSamp, float4(uv + float2(0.0f, stepUv.y), 0.0f, 0.0f)).rgb, 0.0f, 100.0f) * wU;
-	color += clamp(tex2Dlod(ShadingMapSamp, float4(uv - float2(0.0f, stepUv.y), 0.0f, 0.0f)).rgb, 0.0f, 100.0f) * wD;
-
-	return color / max(totalW, 1e-5f);
-}
 
 /**
  * Screen-Space Global Illumination Radiance Integration Pixel Shader.
@@ -104,9 +78,11 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 	int frameCounter = 0;
 #endif
 
-	// Blue-noise / Interleaved Gradient Noise spatial dither
-	float ditherX = InterleavedGradientNoise(screenPixel, frameCounter);
-	float ditherY = PseudoRandom(screenPixel + float(frameCounter) * 1.61803398875f);
+	// Isotropic pseudo-random spatial dither for hemisphere rotation (avoids directional trigonometric lattice bands)
+	float ditherX = PseudoRandom(screenPixel);
+	float ditherY = PseudoRandom(screenPixel + float2(13.1f, 17.3f));
+	// High-frequency blue noise for raymarch step jitter along the ray path
+	float stepJitter = InterleavedGradientNoise(screenPixel, frameCounter);
 
 	float3 totalGi = 0.0f;
 	float minDistanceSq = max(mSSGIBias * mSSGIBias * 0.02f, 0.04f);
@@ -124,9 +100,9 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 	[loop]
 	for (int r = 0; r < SSGI_RAY_COUNT; ++r)
 	{
-		// Low-discrepancy Halton sequence with Cranley-Patterson blue-noise rotation
-		float u1 = frac(Halton2(r + 1) + ditherX);
-		float u2 = frac(Halton3(r + 1) + ditherY);
+		// Uniformly stratified azimuth with isotropic per-pixel rotation
+		float u1 = frac((float(r) + ditherX) / float(SSGI_RAY_COUNT));
+		float u2 = frac(Halton2(r + 1) + ditherY);
 
 		// Cosine-weighted hemisphere distribution
 		float phi = PI_2 * u1;
@@ -153,7 +129,7 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 		float zEnd = pOrigin.z + L.z * actualDist;
 		float stepLength = actualDist / float(SSGI_STEPS);
 
-		float rayJitter = frac(ditherX + float(r) * 0.61803398875f);
+		float rayJitter = frac(stepJitter + float(r) * 0.61803398875f);
 		float3 rayColor = 0.0f;
 		float rayOcc = 0.0f;
 		float2 prevUv = uvCoord.xy;
@@ -203,12 +179,12 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 							float NsDotMinusL = dot(nSample, -lightVector);
 							if (NsDotMinusL > 0.0f || isEmissive)
 							{
-								// Adaptive Depth Thickness Gating: prevents light leak through thin walls, fingers, hair
-								float thickWeight = isEmissive ? 1.0f : ComputeThicknessWeight(zDiff, pOrigin.z, dist, stepLength);
+								// Adaptive Depth Thickness Gating: prevents light leak through thin walls, fingers, hair, or behind emitters
+								float thickWeight = ComputeThicknessWeight(zDiff, pOrigin.z, dist, stepLength, isEmissive);
 
 								if (thickWeight > 0.0f)
 								{
-									float emitterCosine = isEmissive ? saturate(NsDotMinusL * 0.5f + 0.5f) : saturate(NsDotMinusL);
+									float emitterCosine = isEmissive ? saturate(NsDotMinusL * 0.7f + 0.3f) : saturate(NsDotMinusL);
 									float geomFactor = saturate(NdotL) * emitterCosine;
 
 									// Soft distance falloff
@@ -247,13 +223,11 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 											if ((int)floor(g8Mid.a) == SHADINGMODELID_EMISSIVE)
 											{
 												currentUv = midUv;
-												zSample = g8Mid.r;
+												sampleColor = clamp(tex2Dlod(ShadingMapSamp, float4(currentUv, 0.0f, 0.0f)).rgb, 0.0f, 100.0f);
 											}
 
-											sampleColor = SSGISampleStableEmissive(currentUv, zSample, sampleColor, sProgress);
-											float emissiveLuma = dot(sampleColor, float3(0.299f, 0.587f, 0.114f));
-											float compressedLuma = emissiveLuma / (1.0f + emissiveLuma * 0.12f);
-											sampleColor = sampleColor * (compressedLuma / max(emissiveLuma, 1e-4f)) * lerp(2.5f, 8.0f, mDbgSSGIEmissiveBoost);
+											float emissiveBoost = lerp(1.0f, 3.0f, mDbgSSGIEmissiveBoost);
+											sampleColor *= emissiveBoost;
 										}
 										else if (isSkinEmitter && !receiverIsSkin)
 										{
@@ -304,7 +278,8 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 		totalGi += rayColor;
 	}
 
-	float3 finalGi = (totalGi / float(SSGI_RAY_COUNT)) * giGain;
+	float3 avgGi = totalGi / float(SSGI_RAY_COUNT);
+	float3 finalGi = avgGi * giGain;
 
 	return float4(clamp(finalGi, 0.0f, 100.0f), 1.0f);
 }

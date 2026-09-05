@@ -33,14 +33,14 @@ float4 SSGIFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 
 #if SSDO_QUALITY > 0
 	float rawAO = tex2Dlod(SSDOMapSamp, float4(uvCoord, 0.0f, 0.0f)).w;
-	float occlusion = min((mat.lightModel == SHADINGMODELID_GLASS) ? 1.0f : rawAO, mat.visibility);
+	float occlusion = (mat.lightModel == SHADINGMODELID_GLASS) ? 1.0f : rawAO;
 #if GI_ENABLE >= 2
 	// Multi-bounce occlusion response: indirect diffuse light in concave corners is exponentially absorbed (AO^2),
 	// allowing SSAO/HBAO to deeply and naturally darken crevices without being washed out by room GI.
 	occlusion = occlusion * occlusion;
 #endif
 #else
-	float occlusion = mat.visibility;
+	float occlusion = 1.0f;
 #endif
 
 	bool isSkin = (mat.lightModel == SHADINGMODELID_SKIN || mat.lightModel == SHADINGMODELID_SUBSURFACE);

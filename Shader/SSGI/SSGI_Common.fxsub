@@ -11,24 +11,24 @@
 
 #if GI_QUALITY == 1
 #	define SSGI_RAY_COUNT 4
-#	define SSGI_STEPS 8
-#	define SSGI_RADIUS 4
+#	define SSGI_STEPS 12
+#	define SSGI_RADIUS 12
 #elif GI_QUALITY == 2
 #	define SSGI_RAY_COUNT 8
-#	define SSGI_STEPS 8
-#	define SSGI_RADIUS 6
+#	define SSGI_STEPS 12
+#	define SSGI_RADIUS 10
 #elif GI_QUALITY == 3
-#	define SSGI_RAY_COUNT 16
-#	define SSGI_STEPS 8
+#	define SSGI_RAY_COUNT 12
+#	define SSGI_STEPS 14
 #	define SSGI_RADIUS 8
 #elif GI_QUALITY == 4
-#	define SSGI_RAY_COUNT 32
-#	define SSGI_STEPS 12
+#	define SSGI_RAY_COUNT 20
+#	define SSGI_STEPS 16
 #	define SSGI_RADIUS 10
 #else
 #	define SSGI_RAY_COUNT 8
-#	define SSGI_STEPS 8
-#	define SSGI_RADIUS 6
+#	define SSGI_STEPS 12
+#	define SSGI_RADIUS 10
 #endif
 
 // Compatibility alias for legacy passes
@@ -120,13 +120,16 @@ inline float ClipRayToScreenEdge(float2 rayStart, float2 rayStep)
 }
 
 /**
- * Computes smooth bilateral thickness visibility weight for diffuse occluders.
+ * Computes smooth bilateral thickness visibility weight for diffuse and emissive surfaces.
  * Rejects samples that penetrate deeper than geometry thickness to prevent light bleeding
- * through thin objects (fingers, hair, thin walls).
+ * through thin objects (fingers, hair, thin walls, or distant backgrounds behind emitters).
  */
-inline float ComputeThicknessWeight(float zDiff, float viewZ, float distance, float stepLength = 0.0f)
+inline float ComputeThicknessWeight(float zDiff, float viewZ, float distance, float stepLength = 0.0f, bool isEmissive = false)
 {
-	float dynamicThickness = max(0.08f, 0.04f + distance * 0.035f + stepLength * 0.40f);
+	float dynamicThickness = max(0.08f, 0.04f + distance * 0.035f + stepLength * (isEmissive ? 1.50f : 0.40f));
+	if (isEmissive)
+		dynamicThickness = max(dynamicThickness, 0.35f);
+
 	if (zDiff < -0.02f || zDiff > dynamicThickness)
 		return 0.0f;
 	float x = saturate(zDiff / dynamicThickness);
