@@ -71,6 +71,54 @@ pub enum AppMode {
     PmxStudio,
 }
 
+/// Active tab in the Welcome & Onboarding Guide modal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WelcomeTab {
+    #[default]
+    QuickStart,
+    GuidedTour,
+    Shortcuts,
+}
+
+/// Persistent user preferences for the editor.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct EditorConfig {
+    pub show_welcome_on_startup: bool,
+}
+
+impl Default for EditorConfig {
+    fn default() -> Self {
+        Self {
+            show_welcome_on_startup: true,
+        }
+    }
+}
+
+impl EditorConfig {
+    pub fn config_path() -> PathBuf {
+        std::env::current_exe()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .with_file_name("editor_config.json")
+    }
+
+    pub fn load() -> Self {
+        let path = Self::config_path();
+        if let Ok(data) = std::fs::read_to_string(&path) {
+            if let Ok(cfg) = serde_json::from_str(&data) {
+                return cfg;
+            }
+        }
+        Self::default()
+    }
+
+    pub fn save(&self) {
+        let path = Self::config_path();
+        if let Ok(data) = serde_json::to_string_pretty(self) {
+            let _ = std::fs::write(path, data);
+        }
+    }
+}
+
 /// Material slot for a PMX model subset.
 pub struct PmxSubsetSlot {
     pub subset_index: usize,
@@ -167,6 +215,12 @@ pub struct MaterialEditorApp {
     pub pmx_search_filter: String,
     pub pmx_center_view_mode: usize, // 0: Graph, 1: Full 3D
     pub pmx_viewport_size: egui::Vec2,
+
+    // Welcome & Guided Tour State
+    pub show_welcome_guide: bool,
+    pub welcome_tour_step: usize,
+    pub welcome_active_tab: WelcomeTab,
+    pub show_welcome_on_startup: bool,
 }
 
 impl MaterialEditorApp {
@@ -283,7 +337,16 @@ impl MaterialEditorApp {
             pmx_search_filter: String::new(),
             pmx_center_view_mode: 0,
             pmx_viewport_size: egui::vec2(512.0, 512.0),
+
+            show_welcome_guide: false, // will set below
+            welcome_tour_step: 0,
+            welcome_active_tab: WelcomeTab::QuickStart,
+            show_welcome_on_startup: true,
         };
+
+        let editor_config = EditorConfig::load();
+        app.show_welcome_on_startup = editor_config.show_welcome_on_startup;
+        app.show_welcome_guide = editor_config.show_welcome_on_startup;
 
         app.load_default_preset();
         app.undo_stack.clear();
@@ -2545,6 +2608,11 @@ impl eframe::App for MaterialEditorApp {
             self.node_search_pos = ui.input(|i| i.pointer.hover_pos().unwrap_or(egui::pos2(280.0, 240.0)));
         }
 
+        // F1 to toggle Welcome & Guided Tour Guide
+        if ui.input(|i| i.key_pressed(egui::Key::F1)) {
+            self.show_welcome_guide = !self.show_welcome_guide;
+        }
+
         // Drag & Drop from Windows Explorer
         let dropped_files = ctx.input(|i| i.raw.dropped_files.clone());
         for dropped in dropped_files {
@@ -2774,6 +2842,29 @@ impl eframe::App for MaterialEditorApp {
                     }
                     if ui.button(format!("{} Anime Eye (Cornea Dome + Iris Parallax)", icons::EYE)).on_hover_text("Convex corneal dome normal, Snell's law depth parallax, and limbal ring").clicked() {
                         self.load_cornea_eye_preset();
+                        ui.close();
+                    }
+                });
+
+                ui.menu_button("Help", |ui| {
+                    if ui.button(format!("{} Welcome & Guided Tour (F1)", icons::GRADUATION_CAP)).on_hover_text("Interactive 5-step tutorial and quick start actions (F1)").clicked() {
+                        self.show_welcome_guide = true;
+                        self.welcome_active_tab = WelcomeTab::GuidedTour;
+                        ui.close();
+                    }
+                    if ui.button(format!("{} Quick Start Actions...", icons::LIGHTNING)).on_hover_text("Launch standard PBR, texture synthesis or presets").clicked() {
+                        self.show_welcome_guide = true;
+                        self.welcome_active_tab = WelcomeTab::QuickStart;
+                        ui.close();
+                    }
+                    if ui.button(format!("{} Keyboard Shortcuts...", icons::KEYBOARD)).on_hover_text("Navigation, camera and hotkey cheat sheet").clicked() {
+                        self.show_welcome_guide = true;
+                        self.welcome_active_tab = WelcomeTab::Shortcuts;
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui.button(format!("{} Ray-MMD ReForge Wiki...", icons::BOOK_OPEN)).on_hover_text("Open online documentation in browser").clicked() {
+                        ctx.open_url(egui::OpenUrl::new_tab("https://github.com/norz3n/ray-mmd-reforge/wiki/ReForge-Material-Editor"));
                         ui.close();
                     }
                 });
@@ -4018,6 +4109,9 @@ impl eframe::App for MaterialEditorApp {
             }
         }
 
+        // Welcome & Interactive Guided Tour Window (F1)
+        self.show_welcome_guide_window(&ctx);
+
         // Commit drag/slider undo snapshot once mouse button is released
         if self.pre_drag_snapshot.is_some() && !ui.input(|i| i.pointer.any_down()) {
             if let Some(snap) = self.pre_drag_snapshot.take() {
@@ -4028,5 +4122,427 @@ impl eframe::App for MaterialEditorApp {
         if self.graph_dirty || self.viewer.needs_rebuild || self.preview_dirty || self.pmx_preview_dirty {
             ctx.request_repaint();
         }
+    }
+}
+
+impl MaterialEditorApp {
+    /// Renders the Welcome & Interactive Onboarding Guide window.
+    pub fn show_welcome_guide_window(&mut self, ctx: &egui::Context) {
+    if !self.show_welcome_guide {
+        return;
+    }
+
+    let mut is_open = self.show_welcome_guide;
+    let mut close_dialog = false;
+
+    egui::Window::new(format!("{} Welcome to ReForge Material Editor", icons::GRADUATION_CAP))
+        .open(&mut is_open)
+        .default_size(egui::vec2(860.0, 600.0))
+        .min_size(egui::vec2(720.0, 480.0))
+        .resizable(true)
+        .collapsible(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .show(ctx, |ui| {
+            // Header Banner
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(icons::SPARKLE).size(30.0).color(Color32::from_rgb(100, 200, 255)));
+                ui.vertical(|ui| {
+                    ui.heading(egui::RichText::new("ReForge Material Editor").size(20.0).strong().color(Color32::from_rgb(240, 245, 255)));
+                    ui.label(egui::RichText::new("Interactive PBR Material Studio & PMX Model Suite for Ray-MMD").size(12.0).color(Color32::from_rgb(160, 180, 205)));
+                });
+            });
+
+            ui.add_space(8.0);
+
+            // Tab Selector Bar
+            ui.horizontal(|ui| {
+                if ui.selectable_label(self.welcome_active_tab == WelcomeTab::QuickStart, format!("{} Quick Start", icons::LIGHTNING)).clicked() {
+                    self.welcome_active_tab = WelcomeTab::QuickStart;
+                }
+                if ui.selectable_label(self.welcome_active_tab == WelcomeTab::GuidedTour, format!("{} Guided Tour (5 Steps)", icons::GRADUATION_CAP)).clicked() {
+                    self.welcome_active_tab = WelcomeTab::GuidedTour;
+                }
+                if ui.selectable_label(self.welcome_active_tab == WelcomeTab::Shortcuts, format!("{} Shortcuts Cheat Sheet", icons::KEYBOARD)).clicked() {
+                    self.welcome_active_tab = WelcomeTab::Shortcuts;
+                }
+            });
+
+            ui.separator();
+
+            // Tab Content inside ScrollArea
+            egui::ScrollArea::vertical().max_height(460.0).show(ui, |ui| {
+                match self.welcome_active_tab {
+                    WelcomeTab::QuickStart => {
+                        self.render_welcome_quick_start(ui, ctx, &mut close_dialog);
+                    }
+                    WelcomeTab::GuidedTour => {
+                        self.render_welcome_guided_tour(ui, ctx, &mut close_dialog);
+                    }
+                    WelcomeTab::Shortcuts => {
+                        self.render_welcome_shortcuts(ui);
+                    }
+                }
+            });
+
+            ui.separator();
+
+            // Bottom Persistence and Close Bar
+            ui.horizontal(|ui| {
+                if ui.checkbox(&mut self.show_welcome_on_startup, "Show this welcome screen on startup").changed() {
+                    let mut cfg = EditorConfig::load();
+                    cfg.show_welcome_on_startup = self.show_welcome_on_startup;
+                    cfg.save();
+                }
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(egui::RichText::new("Start Working").strong()).clicked() {
+                        close_dialog = true;
+                    }
+                    ui.label(egui::RichText::new("Press F1 anytime to reopen").color(Color32::from_rgb(140, 140, 160)));
+                });
+            });
+        });
+
+    if !is_open || close_dialog {
+        self.show_welcome_guide = false;
+    }
+}
+
+fn render_welcome_quick_start(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, close_dialog: &mut bool) {
+    ui.add_space(4.0);
+    ui.label(
+        egui::RichText::new("Choose a starting point below to begin authoring physical PBR materials for Ray-MMD:")
+            .size(13.0)
+            .color(Color32::from_rgb(180, 190, 205)),
+    );
+    ui.add_space(10.0);
+
+    egui::Grid::new("quick_start_cards")
+        .num_columns(2)
+        .spacing(egui::vec2(14.0, 14.0))
+        .show(ui, |ui| {
+            // Card 1: Standard PBR Sandbox
+            egui::Frame::group(ui.style())
+                .fill(Color32::from_rgb(26, 29, 36))
+                .stroke(egui::Stroke::new(1.0, Color32::from_rgb(55, 62, 78)))
+                .corner_radius(egui::CornerRadius::same(6))
+                .inner_margin(10.0)
+                .show(ui, |ui| {
+                    ui.set_width(380.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(icons::SPHERE).size(24.0).color(Color32::from_rgb(100, 200, 255)));
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Standard PBR Sandbox").strong().size(15.0));
+                            ui.label(egui::RichText::new("Interactive single-material graph with Height, Normal, Roughness, and AO connected to 3D sphere.").size(11.5).color(Color32::from_rgb(150, 160, 175)));
+                        });
+                    });
+                    ui.add_space(8.0);
+                    if ui.button(format!("{} Launch PBR Sandbox", icons::PLAY)).clicked() {
+                        self.app_mode = AppMode::SingleMaterial;
+                        self.load_default_preset();
+                        *close_dialog = true;
+                    }
+                });
+
+            // Card 2: Auto-PBR from Texture
+            egui::Frame::group(ui.style())
+                .fill(Color32::from_rgb(26, 29, 36))
+                .stroke(egui::Stroke::new(1.0, Color32::from_rgb(55, 62, 78)))
+                .corner_radius(egui::CornerRadius::same(6))
+                .inner_margin(10.0)
+                .show(ui, |ui| {
+                    ui.set_width(380.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(icons::IMAGE).size(24.0).color(Color32::from_rgb(255, 180, 80)));
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Auto-PBR from Texture").strong().size(15.0));
+                            ui.label(egui::RichText::new("Select any diffuse image. The CPU engine synthesizes Height, Normal (DirectX), Cavity, and AO in parallel.").size(11.5).color(Color32::from_rgb(150, 160, 175)));
+                        });
+                    });
+                    ui.add_space(8.0);
+                    if ui.button(format!("{} Pick Texture Image...", icons::FOLDER_OPEN)).clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("Image Texture (*.png, *.jpg, *.tga, *.bmp, *.dds)", &["png", "jpg", "jpeg", "tga", "bmp", "dds"])
+                            .pick_file()
+                        {
+                            self.app_mode = AppMode::SingleMaterial;
+                            self.push_undo_snapshot();
+                            self.auto_generate_pbr_from_image(&path.to_string_lossy());
+                            self.status_message = format!("{} Auto-generated PBR from: {}", icons::LIGHTNING, path.file_name().unwrap_or_default().to_string_lossy());
+                            *close_dialog = true;
+                        }
+                    }
+                });
+
+            ui.end_row();
+
+            // Card 3: PMX Model Studio
+            egui::Frame::group(ui.style())
+                .fill(Color32::from_rgb(26, 29, 36))
+                .stroke(egui::Stroke::new(1.0, Color32::from_rgb(55, 62, 78)))
+                .corner_radius(egui::CornerRadius::same(6))
+                .inner_margin(10.0)
+                .show(ui, |ui| {
+                    ui.set_width(380.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(icons::CUBE).size(24.0).color(Color32::from_rgb(130, 225, 130)));
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("PMX 3D Model Studio").strong().size(15.0));
+                            ui.label(egui::RichText::new("Load a full MMD model (.pmx). Direct 3D mesh picking, per-subset material assignment, and Batch Auto-PBR.").size(11.5).color(Color32::from_rgb(150, 160, 175)));
+                        });
+                    });
+                    ui.add_space(8.0);
+                    if ui.button(format!("{} Open PMX Model...", icons::FOLDER_OPEN)).clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("PMX Model (*.pmx)", &["pmx"])
+                            .pick_file()
+                        {
+                            self.load_pmx_file(path, ctx);
+                            *close_dialog = true;
+                        }
+                    }
+                });
+
+            // Card 4: Specialized Presets Gallery
+            egui::Frame::group(ui.style())
+                .fill(Color32::from_rgb(26, 29, 36))
+                .stroke(egui::Stroke::new(1.0, Color32::from_rgb(55, 62, 78)))
+                .corner_radius(egui::CornerRadius::same(6))
+                .inner_margin(10.0)
+                .show(ui, |ui| {
+                    ui.set_width(380.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(icons::PALETTE).size(24.0).color(Color32::from_rgb(240, 130, 240)));
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new("Production Shading Presets").strong().size(15.0));
+                            ui.label(egui::RichText::new("Pre-configured physical Ray-MMD materials ready to tweak and export.").size(11.5).color(Color32::from_rgb(150, 160, 175)));
+                        });
+                    });
+                    ui.add_space(8.0);
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.small_button(format!("{} Anime Skin SSS", icons::SPARKLE)).clicked() {
+                            self.load_anime_skin_preset();
+                            *close_dialog = true;
+                        }
+                        if ui.small_button(format!("{} Silky Hair", icons::WAVES)).clicked() {
+                            self.load_silky_hair_preset();
+                            *close_dialog = true;
+                        }
+                        if ui.small_button(format!("{} Anime Eye", icons::EYE)).clicked() {
+                            self.load_cornea_eye_preset();
+                            *close_dialog = true;
+                        }
+                        if ui.small_button(format!("{} ClearCoat", icons::SHIELD)).clicked() {
+                            self.load_clear_coat_preset();
+                            *close_dialog = true;
+                        }
+                        if ui.small_button(format!("{} Gold", icons::COIN)).clicked() {
+                            self.load_brushed_gold_preset();
+                            *close_dialog = true;
+                        }
+                        if ui.small_button(format!("{} Sci-Fi Hex", icons::LIGHTNING)).clicked() {
+                            self.load_scifi_emissive_preset();
+                            *close_dialog = true;
+                        }
+                    });
+                });
+
+            ui.end_row();
+        });
+}
+
+fn render_welcome_guided_tour(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context, close_dialog: &mut bool) {
+    let step_titles = [
+        "1. Node Graph & ShaderMaps",
+        "2. 3D Viewport & Sun Light",
+        "3. PMX Model Studio",
+        "4. Hair, Eyes & SSS FX",
+        "5. Exporting to MMD",
+    ];
+
+    ui.horizontal(|ui| {
+        for (idx, title) in step_titles.iter().enumerate() {
+            let is_active = self.welcome_tour_step == idx;
+            let btn_text = egui::RichText::new(*title)
+                .color(if is_active { Color32::from_rgb(80, 210, 255) } else { Color32::from_rgb(160, 165, 180) });
+            if ui.selectable_label(is_active, btn_text).clicked() {
+                self.welcome_tour_step = idx;
+            }
+        }
+    });
+
+    ui.separator();
+    ui.add_space(6.0);
+
+    match self.welcome_tour_step {
+        0 => {
+            ui.heading(egui::RichText::new("Lesson 1: The ShaderMap Pipeline — From Diffuse to PBR").color(Color32::from_rgb(100, 210, 255)));
+            ui.add_space(4.0);
+            ui.label("In Physically Based Rendering (PBR), a diffuse color texture alone is not enough. Ray-MMD requires tangent-space Normals, Smoothness (glossiness), Metalness, and Ambient Occlusion to react realistically to dynamic lighting.");
+            ui.add_space(6.0);
+
+            ui.label(egui::RichText::new("Key Workflow Principles:").strong());
+            ui.label("• HeightGenerator: Converts color luminance into a continuous scalar elevation displacement field.");
+            ui.label("• NormalGenerator: Calculates tangent-space surface normals using high-precision Scharr 3x3 filtering with DirectX (-Y) orientation required by Ray-MMD.");
+            ui.label("• RoughnessRemap: Maps diffuse micro-textures into physically plausible specular roughness ranges.");
+            ui.label("• Ambient Occlusion (AO): Multi-angle ray horizon sampling casts natural crevice contact shadows.");
+            ui.label("• Quick Add Search: Press Space or Tab anywhere on the canvas to open the fuzzy search palette!");
+
+            ui.add_space(10.0);
+            if ui.button(format!("{} Load Demo ShaderMap Graph in Editor", icons::PLAY)).clicked() {
+                self.app_mode = AppMode::SingleMaterial;
+                self.load_default_preset();
+                self.status_message = "Demo ShaderMap graph loaded into canvas.".to_string();
+                *close_dialog = true;
+            }
+        }
+        1 => {
+            ui.heading(egui::RichText::new("Lesson 2: 3D Viewport Navigation & Dynamic Lighting").color(Color32::from_rgb(100, 210, 255)));
+            ui.add_space(4.0);
+            ui.label("The interactive 3D Viewport on the right computes real-time Cook-Torrance GGX microfacet specular and dynamic Image-Based Lighting (IBL).");
+            ui.add_space(6.0);
+
+            ui.label(egui::RichText::new("Viewport Controls:").strong());
+            ui.label("• Orbit Camera: Click & drag Left Mouse Button (LMB).");
+            ui.label("• Pan Camera: Click & drag Middle Mouse Button (MMB) or Shift + LMB.");
+            ui.label("• Zoom Camera: Scroll Mouse Wheel or drag Right Mouse Button (RMB).");
+            ui.label("• Dynamic Sun Light Rotation: Hold Ctrl + LMB and drag across the viewport to rotate the sun in real time! This is the most critical tool for evaluating grazing specular highlights.");
+            ui.label("• Preview Mesh: Use the shape selector on the top toolbar to switch between Sphere, Cube, Cylinder, and Flat Plane.");
+
+            ui.add_space(10.0);
+            if ui.button(format!("{} Try Viewport Orbit Now", icons::SPHERE)).clicked() {
+                self.app_mode = AppMode::SingleMaterial;
+                *close_dialog = true;
+            }
+        }
+        2 => {
+            ui.heading(egui::RichText::new("Lesson 3: PMX Model Studio — Texturing Full MMD Models").color(Color32::from_rgb(100, 210, 255)));
+            ui.add_space(4.0);
+            ui.label("Instead of creating materials on abstract spheres, you can texture complete MMD characters and stages directly on their 3D geometry.");
+            ui.add_space(6.0);
+
+            ui.label(egui::RichText::new("Key Features in PMX Studio:").strong());
+            ui.label("• Direct 3D Picking: Click directly on any object in the 3D viewport (e.g. hair, face, dress, floor) to automatically select and highlight its material subset!");
+            ui.label("• Batch Auto-PBR All: Click the button in the left panel to scan every subset and synthesize complete PBR node networks across all CPU cores in parallel.");
+            ui.label("• Wireframe Overlay: Toggle wireframe to inspect polygon density and subset boundaries.");
+            ui.label("• 2D Texture Map Inspector: Click 2D Texture Viewer to inspect high-resolution maps with UV triangle wireframes overlaid.");
+
+            ui.add_space(10.0);
+            if ui.button(format!("{} Switch to PMX Studio Mode", icons::CUBE)).clicked() {
+                self.app_mode = AppMode::PmxStudio;
+                *close_dialog = true;
+            }
+        }
+        3 => {
+            ui.heading(egui::RichText::new("Lesson 4: Ray-MMD Special FX (Hair, Eye, Skin & Hex-Tiling)").color(Color32::from_rgb(100, 210, 255)));
+            ui.add_space(4.0);
+            ui.label("Ray-MMD ReForge includes physical shading models that go far beyond basic metallic-roughness PBR.");
+            ui.add_space(6.0);
+
+            ui.label(egui::RichText::new("Specialized Generator Nodes:").strong());
+            ui.label("• HairStrandGenerator: Procedural hair fiber relief, wave undulation, and silky tangent shift maps (equivalent to shift4.png plugged into Custom B). Emits #define PROCEDURAL_HAIR 1 for highlight breakup.");
+            ui.label("• EyeCorneaGenerator: Solves concave/sunken anime eye meshes by creating a convex cornea dome (CONVEX_NORMAL 1) and radial depth parallax (EYE_PARALLAX_ENABLE 1) with physical Snell's law refraction.");
+            ui.label("• Skin PreIntegrated SSS: Dual-specular lobe with subcutaneous blood terminator scatter fringe guided by Curvature.");
+            ui.label("• Hex-Tiling (Mikkelsen 2022): Eliminates visible repeating texture grid patterns on large stage floors or terrains.");
+
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if ui.button(format!("{} Load Silky Hair Preset", icons::WAVES)).clicked() {
+                    self.app_mode = AppMode::SingleMaterial;
+                    self.load_silky_hair_preset();
+                    *close_dialog = true;
+                }
+                if ui.button(format!("{} Load Anime Eye Preset", icons::EYE)).clicked() {
+                    self.app_mode = AppMode::SingleMaterial;
+                    self.load_cornea_eye_preset();
+                    *close_dialog = true;
+                }
+            });
+        }
+        4 => {
+            ui.heading(egui::RichText::new("Lesson 5: One-Click Export & Setup in MikuMikuDance").color(Color32::from_rgb(100, 210, 255)));
+            ui.add_space(4.0);
+            ui.label("When your material or model is ready, exporting compiles everything into production-ready Ray-MMD shader files.");
+            ui.add_space(6.0);
+
+            ui.label(egui::RichText::new("Generated Material Package:").strong());
+            ui.label("• material.fx: Custom HLSL shader pre-configured with your exact shading model, constants, and feature macros.");
+            ui.label("• Synchronized Textures: Saved as _albedo.png, _normal.png, _smoothness.png, _metalness.png, _ao.png, _normal_sub.png, and _custom_b.png.");
+            ui.add_space(4.0);
+
+            ui.label(egui::RichText::new("How to Assign in MikuMikuDance:").strong());
+            ui.label("1. Open MMD and load your .pmx model and ray.x controller.");
+            ui.label("2. Open the MMEffect window (top-right menu) -> Effect Mapping.");
+            ui.label("3. Switch to the MaterialMap tab.");
+            ui.label("4. Double-click your model's subset, click 'Set Effect', and select the exported .fx file!");
+            ui.label("5. Done! Your physical PBR material will instantly render with real-time lighting, SSGI, and reflections.");
+
+            ui.add_space(10.0);
+            if ui.button(format!("{} Finish Tour & Start Creating", icons::CHECK_CIRCLE)).clicked() {
+                *close_dialog = true;
+            }
+        }
+        _ => {}
+    }
+
+    ui.add_space(14.0);
+    ui.separator();
+    ui.horizontal(|ui| {
+        if self.welcome_tour_step > 0 && ui.button(format!("{} Previous Step", icons::ARROW_LEFT)).clicked() {
+            self.welcome_tour_step -= 1;
+        }
+        ui.label(format!("Step {} of {}", self.welcome_tour_step + 1, step_titles.len()));
+        if self.welcome_tour_step < step_titles.len() - 1 && ui.button(format!("Next Step {}", icons::ARROW_RIGHT)).clicked() {
+            self.welcome_tour_step += 1;
+        }
+    });
+}
+
+fn render_welcome_shortcuts(&mut self, ui: &mut egui::Ui) {
+    ui.add_space(4.0);
+    ui.label(
+        egui::RichText::new("Essential keyboard shortcuts and mouse gestures for maximum productivity:")
+            .size(13.0)
+            .color(Color32::from_rgb(180, 190, 205)),
+    );
+    ui.add_space(10.0);
+
+    let shortcuts = [
+        ("Space / Tab", "Quick Add Node", "Open fuzzy search node palette at mouse cursor"),
+        ("F1", "Welcome & Tour Guide", "Toggle this quick start and onboarding guide window"),
+        ("Ctrl + Z", "Undo", "Undo last node edit, connection, or slider change"),
+        ("Ctrl + Y / Ctrl+Shift+Z", "Redo", "Redo previously undone action"),
+        ("Delete / Backspace / X", "Delete Node", "Remove selected node and its active connections"),
+        ("Ctrl + LMB Drag", "Rotate Sun Light", "Rotate physical directional light in 3D viewport"),
+        ("LMB Drag", "Orbit Camera", "Rotate camera around preview object in 3D viewport"),
+        ("MMB / Shift + LMB", "Pan Camera", "Translate camera view target horizontally & vertically"),
+        ("Scroll / RMB Drag", "Zoom Camera", "Smoothly zoom in and out in 3D viewport and 2D map viewer"),
+        ("LMB Click on 3D Mesh", "Direct 3D Picking", "Select and highlight material subset in PMX Studio"),
+        ("Drag & Drop", "Load Files", "Drag .pmx model or texture image from Windows Explorer directly into app"),
+        ("Reset View Button", "Reset 2D Viewer", "Reset zoom to 100% and pan to center in 2D Map Inspector"),
+    ];
+
+    egui::Grid::new("shortcuts_table")
+        .striped(true)
+        .min_col_width(160.0)
+        .spacing(egui::vec2(16.0, 8.0))
+        .show(ui, |ui| {
+            ui.label(egui::RichText::new("Shortcut").strong().color(Color32::from_rgb(100, 200, 255)));
+            ui.label(egui::RichText::new("Action").strong().color(Color32::from_rgb(100, 200, 255)));
+            ui.label(egui::RichText::new("Description").strong().color(Color32::from_rgb(100, 200, 255)));
+            ui.end_row();
+
+            for (key, action, desc) in shortcuts {
+                ui.label(
+                    egui::RichText::new(key)
+                        .monospace()
+                        .strong()
+                        .color(Color32::from_rgb(255, 215, 100)),
+                );
+                ui.label(egui::RichText::new(action).strong());
+                ui.label(egui::RichText::new(desc).color(Color32::from_rgb(180, 185, 195)));
+                ui.end_row();
+            }
+        });
     }
 }
