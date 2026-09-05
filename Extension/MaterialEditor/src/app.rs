@@ -412,6 +412,19 @@ impl MaterialEditorApp {
         app
     }
 
+    /// Returns a cascading coordinate for spawning newly added nodes to prevent stacking.
+    pub fn next_spawn_pos(&self) -> egui::Pos2 {
+        let count = if self.app_mode == AppMode::SingleMaterial {
+            self.snarl.node_ids().count()
+        } else if let Some(idx) = self.active_pmx_subset {
+            self.pmx_slots.get(idx).map(|s| s.snarl.node_ids().count()).unwrap_or(0)
+        } else {
+            0
+        };
+        let offset = (count as f32 % 10.0) * 28.0;
+        egui::pos2(120.0 + offset, 140.0 + offset)
+    }
+
     /// Sets up default PBR graph with Diffuse -> Height -> Normal -> AO -> Material Output.
     pub fn load_default_preset(&mut self) {
         self.push_undo_snapshot();
@@ -419,7 +432,7 @@ impl MaterialEditorApp {
 
         // 1. Color Input (Base Color)
         let color_node = self.snarl.insert_node(
-            egui::pos2(80.0, 100.0),
+            egui::pos2(60.0, 120.0),
             MaterialNode::ColorInput {
                 color: [0.75, 0.72, 0.68, 1.0],
             },
@@ -427,7 +440,7 @@ impl MaterialEditorApp {
 
         // 2. Height Generator
         let height_node = self.snarl.insert_node(
-            egui::pos2(320.0, 100.0),
+            egui::pos2(300.0, 120.0),
             MaterialNode::HeightGenerator {
                 contrast: 1.5,
                 brightness: 0.0,
@@ -437,7 +450,7 @@ impl MaterialEditorApp {
 
         // 3. Normal Generator (Sobel DirectX)
         let normal_node = self.snarl.insert_node(
-            egui::pos2(560.0, 60.0),
+            egui::pos2(560.0, 40.0),
             MaterialNode::NormalGenerator {
                 scale: 2.0,
                 filter: NormalFilter::Scharr,
@@ -458,7 +471,7 @@ impl MaterialEditorApp {
 
         // 5. Roughness Generator
         let rough_node = self.snarl.insert_node(
-            egui::pos2(560.0, 420.0),
+            egui::pos2(560.0, 440.0),
             MaterialNode::RoughnessGenerator {
                 invert: false,
                 contrast: 1.2,
@@ -469,7 +482,7 @@ impl MaterialEditorApp {
 
         // 6. Master Material Output
         let output_node = self.snarl.insert_node(
-            egui::pos2(860.0, 100.0),
+            egui::pos2(920.0, 60.0),
             MaterialNode::RayMaterialOutput {
                 material_name: "reforge_material".to_string(),
                 shading_model: crate::graph::node::ShadingModel::Default,
@@ -630,13 +643,13 @@ impl MaterialEditorApp {
         self.snarl = Snarl::new();
 
         let color_node = self.snarl.insert_node(
-            egui::pos2(80.0, 100.0),
+            egui::pos2(60.0, 120.0),
             MaterialNode::ColorInput {
                 color: [0.98, 0.88, 0.82, 1.0], // Peach anime skin tone
             },
         );
         let height_node = self.snarl.insert_node(
-            egui::pos2(320.0, 100.0),
+            egui::pos2(300.0, 120.0),
             MaterialNode::HeightGenerator {
                 contrast: 0.8,
                 brightness: 0.0,
@@ -644,7 +657,7 @@ impl MaterialEditorApp {
             },
         );
         let normal_node = self.snarl.insert_node(
-            egui::pos2(560.0, 60.0),
+            egui::pos2(560.0, 40.0),
             MaterialNode::NormalGenerator {
                 scale: 0.4,
                 filter: NormalFilter::Scharr,
@@ -662,7 +675,7 @@ impl MaterialEditorApp {
             },
         );
         let rough_node = self.snarl.insert_node(
-            egui::pos2(560.0, 420.0),
+            egui::pos2(560.0, 440.0),
             MaterialNode::RoughnessGenerator {
                 invert: false,
                 contrast: 1.0,
@@ -671,7 +684,7 @@ impl MaterialEditorApp {
             },
         );
         let output_node = self.snarl.insert_node(
-            egui::pos2(860.0, 100.0),
+            egui::pos2(920.0, 60.0),
             MaterialNode::RayMaterialOutput {
                 material_name: "anime_skin_sss".to_string(),
                 shading_model: crate::graph::node::ShadingModel::Skin,
@@ -732,13 +745,13 @@ impl MaterialEditorApp {
         self.snarl = Snarl::new();
 
         let color_node = self.snarl.insert_node(
-            egui::pos2(80.0, 100.0),
+            egui::pos2(60.0, 100.0),
             MaterialNode::ColorInput {
                 color: [1.0, 0.78, 0.28, 1.0], // Gold
             },
         );
         let noise_node = self.snarl.insert_node(
-            egui::pos2(320.0, 100.0),
+            egui::pos2(300.0, 100.0),
             MaterialNode::ProceduralNoise {
                 noise_type: NoiseType::Perlin,
                 scale: 16.0,
@@ -748,7 +761,7 @@ impl MaterialEditorApp {
             },
         );
         let normal_node = self.snarl.insert_node(
-            egui::pos2(560.0, 80.0),
+            egui::pos2(560.0, 60.0),
             MaterialNode::NormalGenerator {
                 scale: 0.6,
                 filter: NormalFilter::Scharr,
@@ -756,7 +769,7 @@ impl MaterialEditorApp {
             },
         );
         let aniso_node = self.snarl.insert_node(
-            egui::pos2(560.0, 260.0),
+            egui::pos2(560.0, 280.0),
             MaterialNode::CustomMapGenerator {
                 model: crate::graph::node::ShadingModel::Anisotropy,
                 param_a: 0.25,
@@ -766,7 +779,7 @@ impl MaterialEditorApp {
             },
         );
         let output_node = self.snarl.insert_node(
-            egui::pos2(860.0, 100.0),
+            egui::pos2(920.0, 60.0),
             MaterialNode::RayMaterialOutput {
                 material_name: "brushed_gold".to_string(),
                 shading_model: crate::graph::node::ShadingModel::Anisotropy,
@@ -823,13 +836,13 @@ impl MaterialEditorApp {
         self.snarl = Snarl::new();
 
         let color_node = self.snarl.insert_node(
-            egui::pos2(80.0, 100.0),
+            egui::pos2(60.0, 100.0),
             MaterialNode::ColorInput {
                 color: [0.18, 0.22, 0.65, 1.0], // Royal Blue
             },
         );
         let noise_node = self.snarl.insert_node(
-            egui::pos2(320.0, 100.0),
+            egui::pos2(300.0, 100.0),
             MaterialNode::ProceduralNoise {
                 noise_type: NoiseType::Voronoi,
                 scale: 24.0,
@@ -839,7 +852,7 @@ impl MaterialEditorApp {
             },
         );
         let normal_node = self.snarl.insert_node(
-            egui::pos2(560.0, 80.0),
+            egui::pos2(560.0, 60.0),
             MaterialNode::NormalGenerator {
                 scale: 0.9,
                 filter: NormalFilter::Scharr,
@@ -847,7 +860,7 @@ impl MaterialEditorApp {
             },
         );
         let cloth_node = self.snarl.insert_node(
-            egui::pos2(560.0, 260.0),
+            egui::pos2(560.0, 280.0),
             MaterialNode::CustomMapGenerator {
                 model: crate::graph::node::ShadingModel::Cloth,
                 param_a: 1.0,
@@ -857,7 +870,7 @@ impl MaterialEditorApp {
             },
         );
         let output_node = self.snarl.insert_node(
-            egui::pos2(860.0, 100.0),
+            egui::pos2(920.0, 60.0),
             MaterialNode::RayMaterialOutput {
                 material_name: "silk_cloth".to_string(),
                 shading_model: crate::graph::node::ShadingModel::Cloth,
@@ -915,7 +928,7 @@ impl MaterialEditorApp {
         self.snarl = Snarl::new();
 
         let color_node = self.snarl.insert_node(
-            egui::pos2(80.0, 100.0),
+            egui::pos2(60.0, 100.0),
             MaterialNode::ColorInput {
                 color: [0.85, 0.05, 0.08, 1.0], // Cherry Red
             },
@@ -931,7 +944,7 @@ impl MaterialEditorApp {
             },
         );
         let output_node = self.snarl.insert_node(
-            egui::pos2(600.0, 100.0),
+            egui::pos2(700.0, 60.0),
             MaterialNode::RayMaterialOutput {
                 material_name: "car_clear_coat".to_string(),
                 shading_model: crate::graph::node::ShadingModel::ClearCoat,
@@ -986,7 +999,7 @@ impl MaterialEditorApp {
         self.snarl = Snarl::new();
 
         let color_node = self.snarl.insert_node(
-            egui::pos2(80.0, 100.0),
+            egui::pos2(60.0, 100.0),
             MaterialNode::ColorInput {
                 color: [0.92, 0.96, 1.0, 0.2],
             },
@@ -1002,7 +1015,7 @@ impl MaterialEditorApp {
             },
         );
         let output_node = self.snarl.insert_node(
-            egui::pos2(600.0, 100.0),
+            egui::pos2(700.0, 60.0),
             MaterialNode::RayMaterialOutput {
                 material_name: "glass_cornea".to_string(),
                 shading_model: crate::graph::node::ShadingModel::Glass,
@@ -1057,7 +1070,7 @@ impl MaterialEditorApp {
         self.snarl = Snarl::new();
 
         let color_node = self.snarl.insert_node(
-            egui::pos2(80.0, 100.0),
+            egui::pos2(60.0, 100.0),
             MaterialNode::ColorInput {
                 color: [0.08, 0.09, 0.12, 1.0],
             },
@@ -1076,7 +1089,7 @@ impl MaterialEditorApp {
             },
         );
         let output_node = self.snarl.insert_node(
-            egui::pos2(620.0, 100.0),
+            egui::pos2(700.0, 60.0),
             MaterialNode::RayMaterialOutput {
                 material_name: "scifi_hex_emissive".to_string(),
                 shading_model: crate::graph::node::ShadingModel::Default,
@@ -1138,7 +1151,7 @@ impl MaterialEditorApp {
         );
 
         let strand_node = self.snarl.insert_node(
-            egui::pos2(300.0, 100.0),
+            egui::pos2(300.0, 60.0),
             MaterialNode::HairStrandGenerator {
                 strand_density: 300.0,
                 roughness: 0.35,
@@ -1150,7 +1163,7 @@ impl MaterialEditorApp {
         );
 
         let aniso_node = self.snarl.insert_node(
-            egui::pos2(560.0, 260.0),
+            egui::pos2(580.0, 160.0),
             MaterialNode::CustomMapGenerator {
                 model: crate::graph::node::ShadingModel::Anisotropy,
                 param_a: 0.85,
@@ -1161,7 +1174,7 @@ impl MaterialEditorApp {
         );
 
         let output_node = self.snarl.insert_node(
-            egui::pos2(880.0, 100.0),
+            egui::pos2(920.0, 60.0),
             MaterialNode::RayMaterialOutput {
                 material_name: "silky_hair".to_string(),
                 shading_model: crate::graph::node::ShadingModel::Anisotropy,
@@ -1218,7 +1231,7 @@ impl MaterialEditorApp {
         self.snarl = Snarl::new();
 
         let cornea_node = self.snarl.insert_node(
-            egui::pos2(200.0, 100.0),
+            egui::pos2(80.0, 80.0),
             MaterialNode::EyeCorneaGenerator {
                 iris_depth: 0.05,
                 cornea_ior: 1.376,
@@ -1230,7 +1243,7 @@ impl MaterialEditorApp {
         );
 
         let output_node = self.snarl.insert_node(
-            egui::pos2(680.0, 100.0),
+            egui::pos2(560.0, 60.0),
             MaterialNode::RayMaterialOutput {
                 material_name: "cornea_eye".to_string(),
                 shading_model: crate::graph::node::ShadingModel::ClearCoat,
@@ -2656,7 +2669,7 @@ impl MaterialEditorApp {
         let mut snarl = Snarl::new();
 
         let img_node = snarl.insert_node(
-            egui::pos2(80.0, 100.0),
+            egui::pos2(60.0, 120.0),
             MaterialNode::ImageInput {
                 file_path: file_path.to_string(),
                 is_srgb: true,
@@ -2665,7 +2678,7 @@ impl MaterialEditorApp {
         );
 
         let height_node = snarl.insert_node(
-            egui::pos2(320.0, 100.0),
+            egui::pos2(300.0, 120.0),
             MaterialNode::HeightGenerator {
                 contrast: 1.5,
                 brightness: 0.0,
@@ -2683,7 +2696,7 @@ impl MaterialEditorApp {
         );
 
         let ao_node = snarl.insert_node(
-            egui::pos2(560.0, 200.0),
+            egui::pos2(560.0, 240.0),
             MaterialNode::AOGenerator {
                 radius: 16,
                 samples: 16,
@@ -2693,7 +2706,7 @@ impl MaterialEditorApp {
         );
 
         let rough_node = snarl.insert_node(
-            egui::pos2(560.0, 360.0),
+            egui::pos2(560.0, 440.0),
             MaterialNode::RoughnessGenerator {
                 invert: false,
                 contrast: 1.2,
@@ -2703,7 +2716,7 @@ impl MaterialEditorApp {
         );
 
         let metal_node = snarl.insert_node(
-            egui::pos2(560.0, 520.0),
+            egui::pos2(560.0, 640.0),
             MaterialNode::MetalnessGenerator {
                 threshold: 0.5,
                 falloff: 0.2,
@@ -2713,7 +2726,7 @@ impl MaterialEditorApp {
         );
 
         let curv_node = snarl.insert_node(
-            egui::pos2(560.0, 680.0),
+            egui::pos2(560.0, 820.0),
             MaterialNode::CurvatureGenerator {
                 radius: 2,
                 intensity: 1.5,
@@ -2722,7 +2735,7 @@ impl MaterialEditorApp {
         );
 
         let out_node = snarl.insert_node(
-            egui::pos2(880.0, 100.0),
+            egui::pos2(920.0, 60.0),
             MaterialNode::RayMaterialOutput {
                 material_name: material_name.to_string(),
                 shading_model: crate::graph::node::ShadingModel::Subsurface,
@@ -3567,8 +3580,9 @@ impl eframe::App for MaterialEditorApp {
                     }
                     if ui.button(format!("{} Add Metalness Generator", icons::COIN)).clicked() {
                         self.push_undo_snapshot();
+                        let pos = self.next_spawn_pos();
                         self.snarl.insert_node(
-                            egui::pos2(120.0, 150.0),
+                            pos,
                             MaterialNode::MetalnessGenerator {
                                 threshold: 0.5,
                                 falloff: 0.2,
@@ -3580,8 +3594,9 @@ impl eframe::App for MaterialEditorApp {
                     }
                     if ui.button(format!("{} Add Emissive Mask Generator", icons::LIGHTBULB)).clicked() {
                         self.push_undo_snapshot();
+                        let pos = self.next_spawn_pos();
                         self.snarl.insert_node(
-                            egui::pos2(120.0, 150.0),
+                            pos,
                             MaterialNode::EmissiveGenerator {
                                 min_lum: 0.5,
                                 max_lum: 1.0,
@@ -3597,8 +3612,9 @@ impl eframe::App for MaterialEditorApp {
                     }
                     if ui.button(format!("{} Add Custom A/B Generator", icons::MASK_HAPPY)).on_hover_text("Generate Custom A (SSS/Sheen/Roughness) and Custom B (Tint/Flow)").clicked() {
                         self.push_undo_snapshot();
+                        let pos = self.next_spawn_pos();
                         self.snarl.insert_node(
-                            egui::pos2(120.0, 150.0),
+                            pos,
                             MaterialNode::CustomMapGenerator {
                                 model: crate::graph::node::ShadingModel::Subsurface,
                                 param_a: 1.0,
@@ -3614,8 +3630,9 @@ impl eframe::App for MaterialEditorApp {
                     ui.label(egui::RichText::new("INPUTS").strong());
                     if ui.button(format!("{} Texture Image", icons::IMAGE)).clicked() {
                         self.push_undo_snapshot();
+                        let pos = self.next_spawn_pos();
                         self.snarl.insert_node(
-                            egui::pos2(100.0, 100.0),
+                            pos,
                             MaterialNode::ImageInput {
                                 file_path: String::new(),
                                 is_srgb: true,
@@ -3626,8 +3643,9 @@ impl eframe::App for MaterialEditorApp {
                     }
                     if ui.button(format!("{} Color Value", icons::PALETTE)).clicked() {
                         self.push_undo_snapshot();
+                        let pos = self.next_spawn_pos();
                         self.snarl.insert_node(
-                            egui::pos2(100.0, 100.0),
+                            pos,
                             MaterialNode::ColorInput {
                                 color: [1.0, 1.0, 1.0, 1.0],
                             },
@@ -3636,8 +3654,9 @@ impl eframe::App for MaterialEditorApp {
                     }
                     if ui.button(format!("{} Float Value", icons::SLIDERS)).clicked() {
                         self.push_undo_snapshot();
+                        let pos = self.next_spawn_pos();
                         self.snarl.insert_node(
-                            egui::pos2(100.0, 100.0),
+                            pos,
                             MaterialNode::FloatInput {
                                 value: 1.0,
                                 min: 0.0,
@@ -3651,8 +3670,9 @@ impl eframe::App for MaterialEditorApp {
                     ui.label(egui::RichText::new("SHADERMAP GENERATORS").strong());
                     if ui.button(format!("{} Height Generator", icons::WAVES)).clicked() {
                         self.push_undo_snapshot();
+                        let pos = self.next_spawn_pos();
                         self.snarl.insert_node(
-                            egui::pos2(100.0, 100.0),
+                            pos,
                             MaterialNode::HeightGenerator {
                                 contrast: 1.0,
                                 brightness: 0.0,
@@ -3663,8 +3683,9 @@ impl eframe::App for MaterialEditorApp {
                     }
                     if ui.button(format!("{} Normal Generator", icons::COMPASS)).clicked() {
                         self.push_undo_snapshot();
+                        let pos = self.next_spawn_pos();
                         self.snarl.insert_node(
-                            egui::pos2(100.0, 100.0),
+                            pos,
                             MaterialNode::NormalGenerator {
                                 scale: 1.0,
                                 filter: NormalFilter::Scharr,
@@ -3675,8 +3696,9 @@ impl eframe::App for MaterialEditorApp {
                     }
                     if ui.button(format!("{} Ambient Occlusion (AO)", icons::CIRCLE_HALF)).clicked() {
                         self.push_undo_snapshot();
+                        let pos = self.next_spawn_pos();
                         self.snarl.insert_node(
-                            egui::pos2(100.0, 100.0),
+                            pos,
                             MaterialNode::AOGenerator {
                                 radius: 16,
                                 samples: 16,
@@ -3688,8 +3710,9 @@ impl eframe::App for MaterialEditorApp {
                     }
                     if ui.button(format!("{} Curvature / Cavity", icons::APERTURE)).clicked() {
                         self.push_undo_snapshot();
+                        let pos = self.next_spawn_pos();
                         self.snarl.insert_node(
-                            egui::pos2(100.0, 100.0),
+                            pos,
                             MaterialNode::CurvatureGenerator {
                                 radius: 2,
                                 intensity: 2.0,
@@ -3700,8 +3723,9 @@ impl eframe::App for MaterialEditorApp {
                     }
                     if ui.button(format!("{} Roughness Remap", icons::FADERS)).clicked() {
                         self.push_undo_snapshot();
+                        let pos = self.next_spawn_pos();
                         self.snarl.insert_node(
-                            egui::pos2(100.0, 100.0),
+                            pos,
                             MaterialNode::RoughnessGenerator {
                                 invert: false,
                                 contrast: 1.0,
@@ -3713,8 +3737,9 @@ impl eframe::App for MaterialEditorApp {
                     }
                     if ui.button(format!("{} Custom Map Generator", icons::MASK_HAPPY)).clicked() {
                         self.push_undo_snapshot();
+                        let pos = self.next_spawn_pos();
                         self.snarl.insert_node(
-                            egui::pos2(100.0, 100.0),
+                            pos,
                             MaterialNode::CustomMapGenerator {
                                 model: crate::graph::node::ShadingModel::Skin,
                                 param_a: 1.0,
@@ -3727,8 +3752,9 @@ impl eframe::App for MaterialEditorApp {
                     }
                     if ui.button(format!("{} Procedural Noise", icons::WAVEFORM)).clicked() {
                         self.push_undo_snapshot();
+                        let pos = self.next_spawn_pos();
                         self.snarl.insert_node(
-                            egui::pos2(100.0, 100.0),
+                            pos,
                             MaterialNode::ProceduralNoise {
                                 noise_type: crate::image_proc::NoiseType::Perlin,
                                 scale: 4.0,
@@ -3741,8 +3767,9 @@ impl eframe::App for MaterialEditorApp {
                     }
                     if ui.button(format!("{} Hair Strand Generator", icons::WAVES)).clicked() {
                         self.push_undo_snapshot();
+                        let pos = self.next_spawn_pos();
                         self.snarl.insert_node(
-                            egui::pos2(100.0, 100.0),
+                            pos,
                             MaterialNode::HairStrandGenerator {
                                 strand_density: 30.0,
                                 roughness: 0.35,
@@ -3756,8 +3783,9 @@ impl eframe::App for MaterialEditorApp {
                     }
                     if ui.button(format!("{} Eye Cornea & Iris Parallax", icons::EYE)).clicked() {
                         self.push_undo_snapshot();
+                        let pos = self.next_spawn_pos();
                         self.snarl.insert_node(
-                            egui::pos2(100.0, 100.0),
+                            pos,
                             MaterialNode::EyeCorneaGenerator {
                                 iris_depth: 0.05,
                                 cornea_ior: 1.376,
@@ -3774,8 +3802,9 @@ impl eframe::App for MaterialEditorApp {
                     ui.label(egui::RichText::new("FILTERS & COMBINERS").strong());
                     if ui.button(format!("{} Normal Blend (RNM)", icons::GIT_MERGE)).clicked() {
                         self.push_undo_snapshot();
+                        let pos = self.next_spawn_pos();
                         self.snarl.insert_node(
-                            egui::pos2(100.0, 100.0),
+                            pos,
                             MaterialNode::NormalBlend {
                                 detail_scale: 1.0,
                                 detail_tile: 10.0,
@@ -3785,8 +3814,9 @@ impl eframe::App for MaterialEditorApp {
                     }
                     if ui.button(format!("{} Channel Packer (RGBA)", icons::PACKAGE)).clicked() {
                         self.push_undo_snapshot();
+                        let pos = self.next_spawn_pos();
                         self.snarl.insert_node(
-                            egui::pos2(100.0, 100.0),
+                            pos,
                             MaterialNode::ChannelPacker {
                                 default_r: 128,
                                 default_g: 0,
@@ -3798,16 +3828,18 @@ impl eframe::App for MaterialEditorApp {
                     }
                     if ui.button(format!("{} Channel Splitter", icons::SCISSORS)).clicked() {
                         self.push_undo_snapshot();
+                        let pos = self.next_spawn_pos();
                         self.snarl.insert_node(
-                            egui::pos2(100.0, 100.0),
+                            pos,
                             MaterialNode::ChannelSplitter,
                         );
                         self.graph_dirty = true;
                     }
                     if ui.button(format!("{} Color Blend", icons::PAINT_BUCKET)).clicked() {
                         self.push_undo_snapshot();
+                        let pos = self.next_spawn_pos();
                         self.snarl.insert_node(
-                            egui::pos2(100.0, 100.0),
+                            pos,
                             MaterialNode::ColorBlend {
                                 mode: crate::graph::node::BlendMode::Mix,
                                 factor: 0.5,
@@ -3820,8 +3852,9 @@ impl eframe::App for MaterialEditorApp {
                     ui.label(egui::RichText::new("OUTPUTS").strong());
                     if ui.button(format!("{} Ray-MMD Master Output", icons::TARGET)).clicked() {
                         self.push_undo_snapshot();
+                        let pos = self.next_spawn_pos();
                         self.snarl.insert_node(
-                            egui::pos2(100.0, 100.0),
+                            pos,
                             MaterialNode::RayMaterialOutput {
                                 material_name: "reforge_material".to_string(),
                                 shading_model: crate::graph::node::ShadingModel::Default,

@@ -381,23 +381,25 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
         let node = &mut snarl[node_id];
         let mut changed = false;
 
-        // Compact Blender spacing & slider width
-        ui.spacing_mut().slider_width = 80.0;
-        ui.spacing_mut().item_spacing = egui::vec2(4.0, 2.5);
-        ui.spacing_mut().button_padding = egui::vec2(5.0, 1.5);
+        ui.vertical(|ui| {
+            ui.set_min_width(160.0);
+            // Compact Blender spacing & slider width
+            ui.spacing_mut().slider_width = 85.0;
+            ui.spacing_mut().item_spacing = egui::vec2(4.0, 3.0);
+            ui.spacing_mut().button_padding = egui::vec2(5.0, 2.0);
 
-        // Render live node thumbnail if available
-        if !matches!(node, MaterialNode::RayMaterialOutput { .. }) {
-            if let Some(tex) = self.node_thumbnails.get(&node_id) {
-                ui.horizontal(|ui| {
-                    ui.image((tex.id(), egui::vec2(36.0, 36.0)));
-                    ui.label(egui::RichText::new("Preview").weak().small());
-                });
-                ui.add_space(1.0);
+            // Render live node thumbnail if available
+            if !matches!(node, MaterialNode::RayMaterialOutput { .. }) {
+                if let Some(tex) = self.node_thumbnails.get(&node_id) {
+                    ui.horizontal(|ui| {
+                        ui.image((tex.id(), egui::vec2(36.0, 36.0)));
+                        ui.label(egui::RichText::new("Preview").weak().small());
+                    });
+                    ui.add_space(2.0);
+                }
             }
-        }
 
-        match node {
+            match node {
             MaterialNode::ImageInput {
                 file_path,
                 is_srgb,
@@ -833,7 +835,8 @@ impl SnarlViewer<MaterialNode> for MaterialSnarlViewer {
                     });
                 });
             }
-        }
+        };
+        });
 
         if changed {
             self.needs_rebuild = true;
