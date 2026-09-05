@@ -4228,21 +4228,23 @@ fn render_welcome_quick_start(&mut self, ui: &mut egui::Ui, ctx: &egui::Context,
                 .corner_radius(egui::CornerRadius::same(6))
                 .inner_margin(12.0)
                 .show(ui, |ui| {
-                    ui.set_width(380.0);
-                    ui.set_min_height(145.0);
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(icons::SPHERE).size(24.0).color(Color32::from_rgb(100, 200, 255)));
-                        ui.vertical(|ui| {
-                            ui.label(egui::RichText::new("Standard PBR Sandbox").strong().size(15.0));
-                            ui.label(egui::RichText::new("Interactive single-material graph with Height, Normal, Roughness, and AO connected to 3D sphere.").size(11.5).color(Color32::from_rgb(150, 160, 175)));
+                    ui.vertical(|ui| {
+                        ui.set_width(380.0);
+                        ui.set_min_height(145.0);
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(icons::SPHERE).size(24.0).color(Color32::from_rgb(100, 200, 255)));
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new("Standard PBR Sandbox").strong().size(15.0));
+                                ui.label(egui::RichText::new("Interactive single-material graph with Height, Normal, Roughness, and AO connected to 3D sphere.").size(11.5).color(Color32::from_rgb(150, 160, 175)));
+                            });
                         });
+                        ui.add_space(16.0);
+                        if ui.add_sized([ui.available_width(), 28.0], egui::Button::new(format!("{} Launch PBR Sandbox", icons::PLAY))).on_hover_text("Open interactive node workspace with 3D sphere preview").clicked() {
+                            self.app_mode = AppMode::SingleMaterial;
+                            self.load_default_preset();
+                            *close_dialog = true;
+                        }
                     });
-                    ui.add_space(14.0);
-                    if ui.add_sized([ui.available_width(), 26.0], egui::Button::new(format!("{} Launch PBR Sandbox", icons::PLAY))).on_hover_text("Open interactive node workspace with 3D sphere preview").clicked() {
-                        self.app_mode = AppMode::SingleMaterial;
-                        self.load_default_preset();
-                        *close_dialog = true;
-                    }
                 });
 
             // Card 2: Auto-PBR from Texture
@@ -4252,28 +4254,30 @@ fn render_welcome_quick_start(&mut self, ui: &mut egui::Ui, ctx: &egui::Context,
                 .corner_radius(egui::CornerRadius::same(6))
                 .inner_margin(12.0)
                 .show(ui, |ui| {
-                    ui.set_width(380.0);
-                    ui.set_min_height(145.0);
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(icons::IMAGE).size(24.0).color(Color32::from_rgb(255, 180, 80)));
-                        ui.vertical(|ui| {
-                            ui.label(egui::RichText::new("Auto-PBR from Texture").strong().size(15.0));
-                            ui.label(egui::RichText::new("Select any diffuse image. The CPU engine synthesizes Height, Normal (DirectX), Cavity, and AO in parallel.").size(11.5).color(Color32::from_rgb(150, 160, 175)));
+                    ui.vertical(|ui| {
+                        ui.set_width(380.0);
+                        ui.set_min_height(145.0);
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(icons::IMAGE).size(24.0).color(Color32::from_rgb(255, 180, 80)));
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new("Auto-PBR from Texture").strong().size(15.0));
+                                ui.label(egui::RichText::new("Select any diffuse image. The CPU engine synthesizes Height, Normal (DirectX), Cavity, and AO in parallel.").size(11.5).color(Color32::from_rgb(150, 160, 175)));
+                            });
                         });
-                    });
-                    ui.add_space(14.0);
-                    if ui.add_sized([ui.available_width(), 26.0], egui::Button::new(format!("{} Pick Texture Image...", icons::FOLDER_OPEN))).on_hover_text("Select a 2D diffuse texture to auto-generate normal, height, roughness, and AO").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("Image Texture (*.png, *.jpg, *.tga, *.bmp, *.dds)", &["png", "jpg", "jpeg", "tga", "bmp", "dds"])
-                            .pick_file()
-                        {
-                            self.app_mode = AppMode::SingleMaterial;
-                            self.push_undo_snapshot();
-                            self.auto_generate_pbr_from_image(&path.to_string_lossy());
-                            self.status_message = format!("{} Auto-generated PBR from: {}", icons::LIGHTNING, path.file_name().unwrap_or_default().to_string_lossy());
-                            *close_dialog = true;
+                        ui.add_space(16.0);
+                        if ui.add_sized([ui.available_width(), 28.0], egui::Button::new(format!("{} Pick Texture Image...", icons::FOLDER_OPEN))).on_hover_text("Select a 2D diffuse texture to auto-generate normal, height, roughness, and AO").clicked() {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter("Image Texture (*.png, *.jpg, *.tga, *.bmp, *.dds)", &["png", "jpg", "jpeg", "tga", "bmp", "dds"])
+                                .pick_file()
+                            {
+                                self.app_mode = AppMode::SingleMaterial;
+                                self.push_undo_snapshot();
+                                self.auto_generate_pbr_from_image(&path.to_string_lossy());
+                                self.status_message = format!("{} Auto-generated PBR from: {}", icons::LIGHTNING, path.file_name().unwrap_or_default().to_string_lossy());
+                                *close_dialog = true;
+                            }
                         }
-                    }
+                    });
                 });
 
             ui.end_row();
@@ -4285,25 +4289,27 @@ fn render_welcome_quick_start(&mut self, ui: &mut egui::Ui, ctx: &egui::Context,
                 .corner_radius(egui::CornerRadius::same(6))
                 .inner_margin(12.0)
                 .show(ui, |ui| {
-                    ui.set_width(380.0);
-                    ui.set_min_height(145.0);
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(icons::CUBE).size(24.0).color(Color32::from_rgb(130, 225, 130)));
-                        ui.vertical(|ui| {
-                            ui.label(egui::RichText::new("PMX 3D Model Studio").strong().size(15.0));
-                            ui.label(egui::RichText::new("Load a full MMD model (.pmx). Direct 3D mesh picking, per-subset material assignment, and Batch Auto-PBR.").size(11.5).color(Color32::from_rgb(150, 160, 175)));
+                    ui.vertical(|ui| {
+                        ui.set_width(380.0);
+                        ui.set_min_height(145.0);
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(icons::CUBE).size(24.0).color(Color32::from_rgb(130, 225, 130)));
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new("PMX 3D Model Studio").strong().size(15.0));
+                                ui.label(egui::RichText::new("Load a full MMD model (.pmx). Direct 3D mesh picking, per-subset material assignment, and Batch Auto-PBR.").size(11.5).color(Color32::from_rgb(150, 160, 175)));
+                            });
                         });
-                    });
-                    ui.add_space(14.0);
-                    if ui.add_sized([ui.available_width(), 26.0], egui::Button::new(format!("{} Open PMX Model...", icons::FOLDER_OPEN))).on_hover_text("Load a 3D PMX character model for interactive subset inspection and material assignment").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("PMX Model (*.pmx)", &["pmx"])
-                            .pick_file()
-                        {
-                            self.load_pmx_file(path, ctx);
-                            *close_dialog = true;
+                        ui.add_space(16.0);
+                        if ui.add_sized([ui.available_width(), 28.0], egui::Button::new(format!("{} Open PMX Model...", icons::FOLDER_OPEN))).on_hover_text("Load a 3D PMX character model for interactive subset inspection and material assignment").clicked() {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter("PMX Model (*.pmx)", &["pmx"])
+                                .pick_file()
+                            {
+                                self.load_pmx_file(path, ctx);
+                                *close_dialog = true;
+                            }
                         }
-                    }
+                    });
                 });
 
             // Card 4: Specialized Presets Gallery
@@ -4313,48 +4319,50 @@ fn render_welcome_quick_start(&mut self, ui: &mut egui::Ui, ctx: &egui::Context,
                 .corner_radius(egui::CornerRadius::same(6))
                 .inner_margin(12.0)
                 .show(ui, |ui| {
-                    ui.set_width(380.0);
-                    ui.set_min_height(145.0);
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(icons::PALETTE).size(24.0).color(Color32::from_rgb(240, 130, 240)));
-                        ui.vertical(|ui| {
-                            ui.label(egui::RichText::new("Production Shading Presets").strong().size(15.0));
-                            ui.label(egui::RichText::new("Pre-configured physical Ray-MMD materials ready to tweak and export.").size(11.5).color(Color32::from_rgb(150, 160, 175)));
+                    ui.vertical(|ui| {
+                        ui.set_width(380.0);
+                        ui.set_min_height(145.0);
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(icons::PALETTE).size(24.0).color(Color32::from_rgb(240, 130, 240)));
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new("Production Shading Presets").strong().size(15.0));
+                                ui.label(egui::RichText::new("Pre-configured physical Ray-MMD materials ready to tweak and export.").size(11.5).color(Color32::from_rgb(150, 160, 175)));
+                            });
                         });
-                    });
-                    ui.add_space(8.0);
-                    let btn_w = (ui.available_width() - ui.spacing().item_spacing.x).max(80.0) * 0.5;
-                    ui.horizontal(|ui| {
-                        if ui.add_sized([btn_w, 22.0], egui::Button::new(format!("{} Anime Skin SSS", icons::SPARKLE))).on_hover_text("Subsurface scattering skin with soft transmission").clicked() {
-                            self.load_anime_skin_preset();
-                            *close_dialog = true;
-                        }
-                        if ui.add_sized([btn_w, 22.0], egui::Button::new(format!("{} Silky Hair", icons::WAVES))).on_hover_text("Anisotropic Kajiya-Kay specular hair shader").clicked() {
-                            self.load_silky_hair_preset();
-                            *close_dialog = true;
-                        }
-                    });
-                    ui.add_space(3.0);
-                    ui.horizontal(|ui| {
-                        if ui.add_sized([btn_w, 22.0], egui::Button::new(format!("{} Anime Eye", icons::EYE))).on_hover_text("Dual-layer cornea refraction with deep parallax iris").clicked() {
-                            self.load_cornea_eye_preset();
-                            *close_dialog = true;
-                        }
-                        if ui.add_sized([btn_w, 22.0], egui::Button::new(format!("{} ClearCoat", icons::SHIELD))).on_hover_text("Automotive two-layer lacquer with sharp gloss coat").clicked() {
-                            self.load_clear_coat_preset();
-                            *close_dialog = true;
-                        }
-                    });
-                    ui.add_space(3.0);
-                    ui.horizontal(|ui| {
-                        if ui.add_sized([btn_w, 22.0], egui::Button::new(format!("{} Brushed Gold", icons::COIN))).on_hover_text("Physical micro-grooved metallic reflectance").clicked() {
-                            self.load_brushed_gold_preset();
-                            *close_dialog = true;
-                        }
-                        if ui.add_sized([btn_w, 22.0], egui::Button::new(format!("{} Sci-Fi Hex", icons::LIGHTNING))).on_hover_text("Self-illuminated pulsing neon grid emission").clicked() {
-                            self.load_scifi_emissive_preset();
-                            *close_dialog = true;
-                        }
+                        ui.add_space(8.0);
+                        let btn_w = (ui.available_width() - ui.spacing().item_spacing.x).max(80.0) * 0.5;
+                        ui.horizontal(|ui| {
+                            if ui.add_sized([btn_w, 22.0], egui::Button::new(format!("{} Anime Skin SSS", icons::SPARKLE))).on_hover_text("Subsurface scattering skin with soft transmission").clicked() {
+                                self.load_anime_skin_preset();
+                                *close_dialog = true;
+                            }
+                            if ui.add_sized([btn_w, 22.0], egui::Button::new(format!("{} Silky Hair", icons::WAVES))).on_hover_text("Anisotropic Kajiya-Kay specular hair shader").clicked() {
+                                self.load_silky_hair_preset();
+                                *close_dialog = true;
+                            }
+                        });
+                        ui.add_space(3.0);
+                        ui.horizontal(|ui| {
+                            if ui.add_sized([btn_w, 22.0], egui::Button::new(format!("{} Anime Eye", icons::EYE))).on_hover_text("Dual-layer cornea refraction with deep parallax iris").clicked() {
+                                self.load_cornea_eye_preset();
+                                *close_dialog = true;
+                            }
+                            if ui.add_sized([btn_w, 22.0], egui::Button::new(format!("{} ClearCoat", icons::SHIELD))).on_hover_text("Automotive two-layer lacquer with sharp gloss coat").clicked() {
+                                self.load_clear_coat_preset();
+                                *close_dialog = true;
+                            }
+                        });
+                        ui.add_space(3.0);
+                        ui.horizontal(|ui| {
+                            if ui.add_sized([btn_w, 22.0], egui::Button::new(format!("{} Brushed Gold", icons::COIN))).on_hover_text("Physical micro-grooved metallic reflectance").clicked() {
+                                self.load_brushed_gold_preset();
+                                *close_dialog = true;
+                            }
+                            if ui.add_sized([btn_w, 22.0], egui::Button::new(format!("{} Sci-Fi Hex", icons::LIGHTNING))).on_hover_text("Self-illuminated pulsing neon grid emission").clicked() {
+                                self.load_scifi_emissive_preset();
+                                *close_dialog = true;
+                            }
+                        });
                     });
                 });
 
