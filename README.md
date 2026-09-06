@@ -24,7 +24,7 @@ Requirement :
 * Direct3D 9 With Shader Model 3.0 (ps_3_0)
 * **Powerful GPU recommended** due to advanced shading techniques.
 
-Reforge Exclusive Features (through v1.20.3) :
+Reforge Exclusive Features (through v1.20.4) :
 ------------
 
 **Direct Screen-Space Core**
