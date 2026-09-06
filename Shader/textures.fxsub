@@ -239,27 +239,6 @@ sampler SSRMapSamp = sampler_state {
 	AddressU = CLAMP; AddressV = CLAMP;
 };
 #endif
-#if GI_ENABLE
-texture SSGIVisibilityMap : OFFSCREENRENDERTARGET<
-	string Description = "SSGI visibility for ray";
-	float2 ViewportRatio = {1.0, 1.0};
-	string Format = "A8";
-	float4 ClearColor = { 1, 1, 1, 1 };
-	float ClearDepth = 1.0;
-	string DefaultEffect =
-		"self = hide;"
-		"*fog.pmx=hide;"
-		"*controller*.pmx=hide;"
-		"*editor*.pmx=hide;"
-		"Volumetric*.pmx=hide;"
-		"*.*=shadow/SSGI visibility 1.0.fx;";
->;
-sampler SSGIVisibilityMapSamp = sampler_state {
-	texture = <SSGIVisibilityMap>;
-	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
-	AddressU = CLAMP; AddressV = CLAMP;
-};
-#endif
 #if SKY_VISIBILITY_ENABLE
 shared texture SkyVisibilityMap : OFFSCREENRENDERTARGET<
 	string Description = "Top-down scene heightfield for sky visibility";
@@ -280,6 +259,27 @@ shared texture SkyVisibilityMap : OFFSCREENRENDERTARGET<
 sampler SkyVisibilityMapSamp = sampler_state {
 	texture = <SkyVisibilityMap>;
 	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+#endif
+#if GI_ENABLE
+texture SSGIVisibilityMap : OFFSCREENRENDERTARGET<
+	string Description = "SSGI visibility for ray";
+	float2 ViewportRatio = {1.0, 1.0};
+	string Format = "A8";
+	float4 ClearColor = { 1, 1, 1, 1 };
+	float ClearDepth = 1.0;
+	string DefaultEffect =
+		"self = hide;"
+		"*fog.pmx=hide;"
+		"*controller*.pmx=hide;"
+		"*editor*.pmx=hide;"
+		"Volumetric*.pmx=hide;"
+		"*.*=shadow/SSGI visibility 1.0.fx;";
+>;
+sampler SSGIVisibilityMapSamp = sampler_state {
+	texture = <SSGIVisibilityMap>;
+	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
 #endif

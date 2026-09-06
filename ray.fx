@@ -18,11 +18,6 @@ float mSSAORadiusP : CONTROLOBJECT<string name="ray_controller.pmx"; string item
 float mSSAORadiusM : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "SSAORadius-";>;
 float mSSDOP : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "SSDO+";>;
 float mSSDOM : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "SSDO-";>;
-#if SKY_VISIBILITY_ENABLE
-#define SKY_VIS_CONTROLLER_AVAILABLE 1
-float mSkyVisibilityP : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "SkyVis+";>;
-float mSkyVisibilityM : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "SkyVis-";>;
-#endif
 float mSSSSP : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "SSSS+";>;
 float mSSSSM : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "SSSS-";>;
 float mExposureP : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "Exposure+";>;
@@ -89,6 +84,49 @@ float mCstSpeedM2       : CONTROLOBJECT<string name="CausticsController"; string
 float mCstDispersionP2  : CONTROLOBJECT<string name="CausticsController"; string item = "Dispersion+";>;
 float mCstDispersionM2  : CONTROLOBJECT<string name="CausticsController"; string item = "Dispersion-";>;
 float3 mCstWaterPos2    : CONTROLOBJECT<string name="CausticsController"; string item = "Position";>;
+#endif
+
+#if SKY_VISIBILITY_ENABLE
+#define SKY_VIS_CONTROLLER_AVAILABLE 1
+// SkyVisibilityController.pmx (Dedicated separate controller - placed before SSGI)
+float mSkyVisIntensityP1 : CONTROLOBJECT<string name="SkyVisibilityController.pmx"; string item = "Intensity+";>;
+float mSkyVisIntensityM1 : CONTROLOBJECT<string name="SkyVisibilityController.pmx"; string item = "Intensity-";>;
+float mSkyVisP1          : CONTROLOBJECT<string name="SkyVisibilityController.pmx"; string item = "SkyVis+";>;
+float mSkyVisM1          : CONTROLOBJECT<string name="SkyVisibilityController.pmx"; string item = "SkyVis-";>;
+float mSkyVisRadiusP1    : CONTROLOBJECT<string name="SkyVisibilityController.pmx"; string item = "Radius+";>;
+float mSkyVisRadiusM1    : CONTROLOBJECT<string name="SkyVisibilityController.pmx"; string item = "Radius-";>;
+float mSkyVisFloorP1     : CONTROLOBJECT<string name="SkyVisibilityController.pmx"; string item = "Floor+";>;
+float mSkyVisFloorM1     : CONTROLOBJECT<string name="SkyVisibilityController.pmx"; string item = "Floor-";>;
+float mSkyVisContrastP1  : CONTROLOBJECT<string name="SkyVisibilityController.pmx"; string item = "Contrast+";>;
+float mSkyVisContrastM1  : CONTROLOBJECT<string name="SkyVisibilityController.pmx"; string item = "Contrast-";>;
+float3 mSkyVisPos1       : CONTROLOBJECT<string name="SkyVisibilityController.pmx"; string item = "Position";>;
+
+float mSkyVisIntensityP2 : CONTROLOBJECT<string name="SkyVisibilityController"; string item = "Intensity+";>;
+float mSkyVisIntensityM2 : CONTROLOBJECT<string name="SkyVisibilityController"; string item = "Intensity-";>;
+float mSkyVisP2          : CONTROLOBJECT<string name="SkyVisibilityController"; string item = "SkyVis+";>;
+float mSkyVisM2          : CONTROLOBJECT<string name="SkyVisibilityController"; string item = "SkyVis-";>;
+float mSkyVisRadiusP2    : CONTROLOBJECT<string name="SkyVisibilityController"; string item = "Radius+";>;
+float mSkyVisRadiusM2    : CONTROLOBJECT<string name="SkyVisibilityController"; string item = "Radius-";>;
+float mSkyVisFloorP2     : CONTROLOBJECT<string name="SkyVisibilityController"; string item = "Floor+";>;
+float mSkyVisFloorM2     : CONTROLOBJECT<string name="SkyVisibilityController"; string item = "Floor-";>;
+float mSkyVisContrastP2  : CONTROLOBJECT<string name="SkyVisibilityController"; string item = "Contrast+";>;
+float mSkyVisContrastM2  : CONTROLOBJECT<string name="SkyVisibilityController"; string item = "Contrast-";>;
+float3 mSkyVisPos2       : CONTROLOBJECT<string name="SkyVisibilityController"; string item = "Position";>;
+
+static float mSkyVisIntensityP = max(max(mSkyVisIntensityP1, mSkyVisIntensityP2), max(mSkyVisP1, mSkyVisP2));
+static float mSkyVisIntensityM = max(max(mSkyVisIntensityM1, mSkyVisIntensityM2), max(mSkyVisM1, mSkyVisM2));
+static float mSkyVisRadiusP    = max(mSkyVisRadiusP1, mSkyVisRadiusP2);
+static float mSkyVisRadiusM    = max(mSkyVisRadiusM1, mSkyVisRadiusM2);
+static float mSkyVisFloorP     = max(mSkyVisFloorP1, mSkyVisFloorP2);
+static float mSkyVisFloorM     = max(mSkyVisFloorM1, mSkyVisFloorM2);
+static float mSkyVisContrastP  = max(mSkyVisContrastP1, mSkyVisContrastP2);
+static float mSkyVisContrastM  = max(mSkyVisContrastM1, mSkyVisContrastM2);
+static float3 mSkyVisPos       = any(mSkyVisPos1) ? mSkyVisPos1 : mSkyVisPos2;
+
+static float mSkyVisIntensityCtrl = lerp(lerp(mSkyVisibilityIntensity, mSkyVisibilityIntensity * 3.0f, mSkyVisIntensityP), 0.0f, mSkyVisIntensityM);
+static float mSkyVisRadiusScale   = lerp(lerp(1.0f, 2.5f, mSkyVisRadiusP), 0.25f, mSkyVisRadiusM);
+static float mSkyVisFloorCtrl     = lerp(lerp(mSkyVisibilityMinFloor, 0.6f, mSkyVisFloorP), 0.0f, mSkyVisFloorM);
+static float mSkyVisContrastCtrl  = lerp(lerp(1.0f, 2.5f, mSkyVisContrastP), 0.4f, mSkyVisContrastM);
 #endif
 
 float mDbgSSGIIntensity1 : CONTROLOBJECT<string name="DebugController.pmx"; string item = "SSGIIntensity";>;
