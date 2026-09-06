@@ -93,10 +93,15 @@ float EdgeFilter(float2 center, float2 a0, float2 a1, float2 a2, float2 a3)
 {
 	const float THRESH = 30./255.;
 	float4 lum = float4(a0.x, a1.x , a2.x, a3.x);
-	float4 w = 1.0 - step(THRESH, abs(lum - center.x));
+	// Linear taper instead of a binary step: neighbors near the luma threshold
+	// previously flipped in and out of the kernel at full weight, making the
+	// reconstructed chroma jump pixel-to-pixel wherever the ambient field had a
+	// gradient close to THRESH (read as desaturated gray-blue blotches on warm
+	// skin). The ramp keeps the same cutoff semantics but blends the rejection.
+	float4 w = saturate(1.0f - abs(lum - center.x) / THRESH);
 	float W = w.x + w.y + w.z + w.w;
-	w.x = (W == 0.0) ? 1.0 : w.x;
-	W   = (W == 0.0) ? 1.0 : W;
+	w.x = (W < 1e-4f) ? 1.0f : w.x;
+	W   = (W < 1e-4f) ? 1.0f : W;
 	return (w.x * a0.y + w.y * a1.y + w.z * a2.y + w.w * a3.y) / W;
 }
 
