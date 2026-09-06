@@ -24,22 +24,24 @@ Requirement :
 * Direct3D 9 With Shader Model 3.0 (ps_3_0)
 * **Powerful GPU recommended** due to advanced shading techniques.
 
-Reforge Exclusive Features (through v1.20.0) :
+Reforge Exclusive Features (through v1.20.3) :
 ------------
 
 **Direct Screen-Space Core**
 * **Direct 1:1 Screen-Space Architecture**: eliminated the heavy 11-pass hierarchical depth pyramid (Hi-Z), freeing 11 RenderTarget textures in VRAM and removing per-frame downsampling passes in favor of direct G-buffer raymarching, McGuire 2014 2D DDA, and Newton root-finding.
 * **Octahedral Normal Encoding**: compact and high-precision octahedral representation for unit normal vectors in G-buffer and math pipelines.
 
-**Global Illumination**
-* **Screen Space Global Illumination (SSGI)**: rewritten modular architecture using hybrid linear-quadratic raymarching at full 1:1 resolution, replacing both legacy VXGI and Hi-Z dependent traces.
-* **Indirect Multi-Bounce Mode**: Jimenez-style albedo compensation, hemispherical Lambertian emission lobe, quadratic AO attenuation, and outdoor sky radiance gather.
+**Global Illumination (SSGI 3.0)**
+* **Screen Space Global Illumination (SSGI 3.0)**: complete 3D cosine-weighted hemisphere raymarching engine inspired by UE5 Lumen SSRT. Replaces 2D screen-disk gather with branchless Duff 2017 orthonormal tangent space transform, stratified Halton (2, 3) sampling, per-pixel Interleaved Gradient Noise (IGN) rotation, analytical screen-edge clipping (`ClipRayToScreenEdge`), and adaptive depth thickness gating.
+* **Dyadic À-Trous Cross-Bilateral Denoising**: two-pass edge-preserving filter with $5 \times 5$ Karis 0.20 outlier rejection and tangent-plane distance weights (`BilateralPlaneWeight`) eliminating noise and blur artifacts while retaining sharp geometric contact edges.
+* **Indirect Multi-Bounce & Sky Radiance**: Jimenez-style albedo compensation, hemispherical Lambertian emission lobe, quadratic AO attenuation, and outdoor sky radiance fallback.
 * **Rough Specular GI**: cone-angle-controlled glossy indirect reflections with tunable debug morphs.
-* **Visibility Masking**: dedicated SSGI visibility pass with quality presets to suppress self-illumination feedback on skin.
+* **Visibility Masking**: dedicated SSGI visibility pass (`SSGIVisibilityMap`) with quality presets to suppress self-illumination feedback on skin.
 * **Photometric Compression**: Reinhard soft-knee curve for natural dynamic range in lit scenes.
 
 **Reflections & Occlusion**
 * **McGuire 2014 2D DDA Screen-Space Reflections**: full-featured screen-space ray tracing engine with hybrid bisection & secant root-finding, subpixel binary refinement, and LOD-0 mirror gloss resolve without jitter or contact gaps.
+* **Top-Down Sky Visibility & Heightfield Macro AO**: Snowdrop Engine (GDC 2016) directional horizon search and cone-tracing macro ambient occlusion preventing outdoor skylight and ambient IBL from leaking into covered spaces, under canopies, bridges, roofs, and doorways. Controlled via dedicated `SkyVisibilityController.pmx`.
 * **Ground-Truth Ambient Occlusion (GTAO / GTSO)**: reference XeGTAO cosine horizon integration, Jimenez multi-bounce approximation, temporal history stabilization, and directional bent normals.
 * **Hybrid HBAO / SSDO**: horizon-based and directional occlusion for accurate contact shading.
 * **Contact Shadows**: screen-space contact shadows with depth-discontinuity artifact fixes.
@@ -53,7 +55,7 @@ Reforge Exclusive Features (through v1.20.0) :
 
 **Materials & BRDF**
 * **Energy-Preserving Oren-Nayar (EON) BRDF**: exact Portsmouth, Kutz & Hill (JCGT 2025) diffuse model preserving energy across all roughness levels.
-* **Pre-Integrated Skin Curvature SSS & Dual-Lobe GGX Specular**: physically based multi-spectral skin diffusion wrapping light smoothly into shadow ($N \cdot L \le -0.35$) with wavelength-separated penetration ($w_r = 0.40, w_g = 0.18, w_b = 0.06$), saturated chromatic blood terminator bleeding, and dual-layer dermal/epidermal specular reflections.
+* **Pre-Integrated Skin Curvature SSS & Dual-Lobe GGX Specular**: physically based multi-spectral skin diffusion wrapping light smoothly into deep shadow with an intrinsic epidermal baseline wrap (`baseWrap = float3(0.45, 0.22, 0.08)`) and an infinitely smooth $C^1$ quadratic terminator (`saturate(1 - (N.L)^2)`), eliminating harsh terminator cuts across flat and cylindrical anatomy. Dual-layer dermal/epidermal specular reflections.
 * **Expanded 48-Preset Material Library**: comprehensive PBR and Toon material suites across Architecture (parquet, wet asphalt, tiles, rough wood, brick, concrete, polished marble), Cloth (leather, latex, denim, wool, stockings, lace), Nature (dirt, mud, snow with micro-glitter, ice, sand, tree bark), and Sci-Fi (anisotropic carbon fiber, hologram with hashed alpha, cyber grid, diamond).
 * **Procedural Eye Cornea Parallax & Micro-Glitter**: true refractive cornea dome with iris parallax depth mapping (`material_eye_anime.fx`) and multi-layer procedural micro-glitter sparkle presets (`material_glitter.fx`).
 * **Procedural Hair Materials**: mathematical anisotropic hair normals plus Kajiya-Kay highlights — ported hbee hair presets with no heavy static textures.
