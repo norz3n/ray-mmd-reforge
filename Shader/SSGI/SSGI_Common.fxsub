@@ -12,23 +12,23 @@
 #if GI_QUALITY == 1
 #	define SSGI_RAY_COUNT 4
 #	define SSGI_STEPS 12
-#	define SSGI_RADIUS 12
+#	define SSGI_RADIUS 16
 #elif GI_QUALITY == 2
 #	define SSGI_RAY_COUNT 8
 #	define SSGI_STEPS 12
-#	define SSGI_RADIUS 10
+#	define SSGI_RADIUS 16
 #elif GI_QUALITY == 3
 #	define SSGI_RAY_COUNT 12
 #	define SSGI_STEPS 14
-#	define SSGI_RADIUS 8
+#	define SSGI_RADIUS 16
 #elif GI_QUALITY == 4
 #	define SSGI_RAY_COUNT 20
 #	define SSGI_STEPS 16
-#	define SSGI_RADIUS 10
+#	define SSGI_RADIUS 18
 #else
 #	define SSGI_RAY_COUNT 8
 #	define SSGI_STEPS 12
-#	define SSGI_RADIUS 10
+#	define SSGI_RADIUS 16
 #endif
 
 // Compatibility alias for legacy passes
