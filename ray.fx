@@ -18,6 +18,11 @@ float mSSAORadiusP : CONTROLOBJECT<string name="ray_controller.pmx"; string item
 float mSSAORadiusM : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "SSAORadius-";>;
 float mSSDOP : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "SSDO+";>;
 float mSSDOM : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "SSDO-";>;
+#if SKY_VISIBILITY_ENABLE
+#define SKY_VIS_CONTROLLER_AVAILABLE 1
+float mSkyVisibilityP : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "SkyVis+";>;
+float mSkyVisibilityM : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "SkyVis-";>;
+#endif
 float mSSSSP : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "SSSS+";>;
 float mSSSSM : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "SSSS-";>;
 float mExposureP : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "Exposure+";>;
