@@ -644,14 +644,14 @@ technique DeferredLighting<
 		ZEnable = false; ZWriteEnable = false;
 		StencilEnable = true; StencilFunc = EQUAL; StencilRef = 1; StencilWriteMask = 0;
 		VertexShader = compile vs_3_0 SSSGaussBlurVS();
-		PixelShader  = compile ps_3_0 SSSGaussBlurPS(ShadingMapTempPointSamp, ShadingMapTempPointSamp, float2(1.0, 0.0));
+		PixelShader  = compile ps_3_0 SSSGaussBlurPS(ShadingMapTempSamp, ShadingMapTempSamp, float2(1.0, 0.0));
 	}
 	pass SSSSBlurY<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		StencilEnable = true; StencilFunc = EQUAL; StencilRef = 1; StencilWriteMask = 0;
 		VertexShader = compile vs_3_0 SSSGaussBlurVS();
-		PixelShader  = compile ps_3_0 SSSGaussBlurPS(ShadingMapPointSamp, ShadingMapTempPointSamp,float2(0.0, 1.0));
+		PixelShader  = compile ps_3_0 SSSGaussBlurPS(ShadingMapSamp, ShadingMapTempSamp, float2(0.0, 1.0));
 	}
 	pass ShadingOpacityAlbedo<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = true; AlphaTestEnable = false;

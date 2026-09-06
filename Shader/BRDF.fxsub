@@ -100,18 +100,22 @@ float3 SubsurfaceShadingPreIntegratedSkin(MaterialParam material, float3 N, floa
 	float curvature = max(material.customDataA, 0.01f);
 	float scatter = saturate(curvature * 2.5f);
 	
-	// Wavelength-dependent wrap: red penetrates deepest (0.40), green moderately (0.18), blue minimally (0.06)
-	float3 wrap = float3(0.40f, 0.18f, 0.06f) * scatter;
+	// Wavelength-dependent wrap with intrinsic epidermal baseline + subdermal curvature scaling:
+	// Red light penetrates deepest (0.45), green moderately (0.22), blue minimally (0.08)
+	float3 baseWrap = float3(0.45f, 0.22f, 0.08f);
+	float3 wrap = lerp(baseWrap, float3(0.70f, 0.38f, 0.18f), scatter);
 	float3 ndotl_wrap = saturate((ndotl + wrap) / (1.0f + wrap));
 	float3 scatter_profile = ndotl_wrap * ndotl_wrap;
 	
 	float3 energy_normalization = 1.0f / (1.0f + wrap * 0.5f);
-	float edge_mask = saturate(1.0f - abs(ndotl));
-	float3 blood_scatter = float3(0.35f, 0.04f, 0.01f) * edge_mask * scatter * energy_normalization;
+	// Smooth C^1 quadratic edge mask avoids the sharp derivative crease of 1 - abs(ndotl)
+	float edge_mask = saturate(1.0f - ndotl * ndotl);
+	float3 blood_scatter = float3(0.35f, 0.06f, 0.015f) * edge_mask * max(scatter, 0.35f) * energy_normalization;
 	
-	// Saturated chromatic dispersion fringe along the shadow boundary (Penner terminator glow)
-	float terminatorFringe = exp(-pow2(ndotl / max(curvature * 0.35f, 0.08f))) * scatter;
-	float3 chromaticBlood = float3(0.45f, 0.08f, 0.015f) * terminatorFringe;
+	// Saturated chromatic dispersion fringe along the shadow boundary (smooth width avoids localized spot spikes)
+	float fringeWidth = lerp(0.18f, 0.32f, scatter);
+	float terminatorFringe = exp(-pow2(ndotl / fringeWidth)) * max(scatter, 0.35f);
+	float3 chromaticBlood = float3(0.45f, 0.10f, 0.025f) * terminatorFringe;
 
 	float3 brdf = (scatter_profile * energy_normalization) + blood_scatter + chromaticBlood;
 	float3 sssColor = ComputeSpectralSubsurfaceColor(material.albedo, material.customDataB);
@@ -594,10 +598,10 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 #if TOON_ENABLE
 	// Half-Lambert cel ramps and skin wrap are defined into shadow;
 	// only standard PBR hard-terminates at nl <= 0
-	if (nl <= (isSkin ? -0.35f : 0.0f) && material.lightModel != SHADINGMODELID_CEL)
+	if (nl <= (isSkin ? -0.55f : 0.0f) && material.lightModel != SHADINGMODELID_CEL)
 		return (float2x3)0;
 #else
-	if (nl <= (isSkin ? -0.35f : 0.0f))
+	if (nl <= (isSkin ? -0.55f : 0.0f))
 		return (float2x3)0;
 #endif
 

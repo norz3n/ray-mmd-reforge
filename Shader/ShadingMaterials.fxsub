@@ -138,7 +138,8 @@ void ShadingMaterial(MaterialParam material, float3 V, float3 L, float2 coord, o
 #if TOON_ENABLE
 	float2x3 energy = SurfaceEnergy(material, material.normal, L, V, shadow);
 #else
-	float2x3 energy = SurfaceEnergy(material, material.normal, L, V, min(shadow, saturate(dot(material.normal, L) * 4)));
+	float shadowTerm = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE) ? shadow : min(shadow, saturate(dot(material.normal, L) * 4));
+	float2x3 energy = SurfaceEnergy(material, material.normal, L, V, shadowTerm);
 #endif
 	float3 subsurface = SubsurfaceShading(material, material.normal, L, V, coord);
 
@@ -300,8 +301,10 @@ float4 ShadingOpacityAlbedoPS(in float2 coord: TEXCOORD0) : COLOR
 
 	// The SSSS composite multiplies all lighting by this albedo (DESTCOLOR * SRC blend),
 	// so skin must be dermal-clamped here too or the clamp in DecodeGbuffer is bypassed
-	int lightModel = DecodeLightModel(tex2Dlod(Gbuffer8Map, float4(coord, 0, 0)));
-	if (lightModel == SHADINGMODELID_SKIN || lightModel == SHADINGMODELID_SUBSURFACE)
+	int lightModelOpaque = DecodeLightModel(tex2Dlod(Gbuffer4Map, float4(coord, 0, 0)));
+	int lightModelAlpha  = DecodeLightModel(tex2Dlod(Gbuffer8Map, float4(coord, 0, 0)));
+	if (lightModelOpaque == SHADINGMODELID_SKIN || lightModelOpaque == SHADINGMODELID_SUBSURFACE ||
+		lightModelAlpha == SHADINGMODELID_SKIN || lightModelAlpha == SHADINGMODELID_SUBSURFACE)
 		albedo = ClampDermalAlbedo(albedo);
 
 	return float4(albedo, 0);

@@ -2179,8 +2179,8 @@ GbufferParam MaterialPS(
 	float3 ddyN = ddy(normal);
 	float deltaP_sq = dot(ddxP, ddxP) + dot(ddyP, ddyP);
 	float deltaN_sq = dot(ddxN, ddxN) + dot(ddyN, ddyN);
-	float curvature = sqrt(deltaN_sq / (deltaP_sq + 1e-5f));
-	material.customDataA = saturate(curvature * material.customDataA * 50.0f); // Multiply base parameter by screen-space curvature
+	float curvature = sqrt(deltaN_sq / max(deltaP_sq, 1e-3f));
+	material.customDataA = saturate(max(material.customDataA, curvature * 18.0f));
 #endif
 	material.customDataB = GetCustomDataB(coord0);
 	material.emissive = GetEmissiveColor(coord0);
@@ -2267,8 +2267,8 @@ GbufferParam Material2PS(
 	float3 ddyN = ddy(normal);
 	float deltaP_sq = dot(ddxP, ddxP) + dot(ddyP, ddyP);
 	float deltaN_sq = dot(ddxN, ddxN) + dot(ddyN, ddyN);
-	float curvature = sqrt(deltaN_sq / (deltaP_sq + 1e-5f));
-	material.customDataA = saturate(curvature * material.customDataA * 50.0f);
+	float curvature = sqrt(deltaN_sq / max(deltaP_sq, 1e-3f));
+	material.customDataA = saturate(max(material.customDataA, curvature * 18.0f));
 #endif
 	material.customDataB = GetCustomDataB(coord0);
 	material.emissive = GetEmissiveColor(coord0);

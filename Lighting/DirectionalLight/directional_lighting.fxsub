@@ -330,8 +330,9 @@ void LightSourcePS(
 #endif
 #if SSGS_QUALITY >= 1
 	shadow *= GetGlobalShadow(P2, materialAlpha.normal, viewLightDirection, coord.xy / coord.w);
-#endif
-	clip(shadow - 1e-5);
+	bool isSkinMat = (materialAlpha.lightModel == SHADINGMODELID_SKIN || materialAlpha.lightModel == SHADINGMODELID_SUBSURFACE);
+	if (!isSkinMat)
+		clip(shadow - 1e-5);
 #endif
 
 	// Base layer decoded only now: it must not stay live through the
