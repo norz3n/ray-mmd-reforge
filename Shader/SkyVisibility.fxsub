@@ -1,0 +1,148 @@
+#ifndef _SKY_VISIBILITY_FXSUB_
+#define _SKY_VISIBILITY_FXSUB_
+
+#if SKY_VISIBILITY_ENABLE
+
+/**
+ * Computes the 2D orthographic map center in world space.
+ * Offsets slightly forward along the camera view direction to maximize
+ * coverage of the visible stage in front of the camera.
+ */
+inline float2 GetSkyVisMapCenter()
+{
+	float texelSize = mSkyVisibilityRange / (float)SKY_VISIBILITY_MAP_SIZE;
+#if defined(SKY_VIS_CONTROLLER_AVAILABLE)
+	if (any(mSkyVisPos.xz))
+	{
+		return floor(mSkyVisPos.xz / texelSize) * texelSize;
+	}
+#endif
+	float2 forward2D = CameraDirection.xz;
+	float fLen = length(forward2D);
+	float2 viewOffset = (fLen > 1e-3f) ? (forward2D / fLen) * (mSkyVisibilityRange * 0.2f) : 0.0f;
+	return floor((CameraPosition.xz + viewOffset) / texelSize) * texelSize;
+}
+
+/*
+ * Top-Down Sky Visibility / Heightfield Ambient Occlusion (Snowdrop Engine / GDC 2016)
+ *
+ * Computes long-range macro ambient occlusion from large overhead structures
+ * (bridges, roofs, canopies, tunnels) preventing outdoor skylight / ambient IBL
+ * from leaking into covered spaces.
+ *
+ * @param worldPos    World-space receiver position (MMD units)
+ * @param worldNormal World-space surface normal
+ * @return Sky visibility factor in [mSkyVisibilityMinFloor, 1.0] (1.0 = open sky, minFloor = deeply occluded interior)
+ */
+float ComputeSkyVisibility(float3 worldPos, float3 worldNormal)
+{
+	float2 mapCenter = GetSkyVisMapCenter();
+	float2 offset = worldPos.xz - mapCenter;
+
+	float2 uv;
+	uv.x = offset.x / mSkyVisibilityRange + 0.5f;
+	uv.y = -offset.y / mSkyVisibilityRange + 0.5f;
+
+	// Boundary check: outside coverage area, smoothly fade to 1.0 (unoccluded)
+	if (any(uv < 0.0f) || any(uv > 1.0f))
+		return 1.0f;
+
+	// Edge fade: smoothly transition across the outer 10% of the box to prevent any visible seams
+	float2 distFromEdge = saturate(min(uv, 1.0f - uv) * 10.0f);
+	float edgeFade = distFromEdge.x * distFromEdge.y;
+
+	static const float2 sSkyVisDirs[8] = {
+		float2( 1.0f,  0.0f),
+		float2(-1.0f,  0.0f),
+		float2( 0.0f,  1.0f),
+		float2( 0.0f, -1.0f),
+		float2( 0.70710678f,  0.70710678f),
+		float2(-0.70710678f,  0.70710678f),
+		float2( 0.70710678f, -0.70710678f),
+		float2(-0.70710678f, -0.70710678f)
+	};
+
+#if SKY_VISIBILITY_ENABLE == 1
+	// Fast mode: 4 cardinal directions, 2 distance steps
+	const int NUM_DIRS = 4;
+	const int NUM_STEPS = 2;
+	static const float sSkyVisRadii[2] = { 5.0f, 30.0f };
+#else
+	// High / Cinematic mode: 8 directions (cardinal + diagonal), 3 distance steps
+	const int NUM_DIRS = 8;
+	const int NUM_STEPS = 3;
+	static const float sSkyVisRadii[3] = { 3.5f, 16.0f, 55.0f };
+#endif
+
+	float radiusScale = 1.0f;
+	float strength = mSkyVisibilityIntensity;
+	float minFloor = mSkyVisibilityMinFloor;
+	float contrast = 1.0f;
+
+#if defined(SKY_VIS_CONTROLLER_AVAILABLE)
+	radiusScale = mSkyVisRadiusScale;
+	strength = mSkyVisIntensityCtrl;
+	minFloor = mSkyVisFloorCtrl;
+	contrast = mSkyVisContrastCtrl;
+#endif
+
+	float totalOcclusion = 0.0f;
+	float totalWeight = 0.0f;
+
+	[unroll]
+	for (int d = 0; d < NUM_DIRS; ++d)
+	{
+		float2 dir = sSkyVisDirs[d];
+		// Normal-oriented directional weighting: cosine lobe in horizontal plane + upward hemisphere
+		float NdotD = dot(worldNormal.xz, dir);
+		float dirWeight = saturate(worldNormal.y * 0.5f + 0.5f + NdotD * 0.5f);
+
+		float maxSinTheta = 0.0f;
+
+		[unroll]
+		for (int s = 0; s < NUM_STEPS; ++s)
+		{
+			float r = sSkyVisRadii[s] * radiusScale;
+			float2 sampleUV = uv + float2(dir.x, -dir.y) * (r / mSkyVisibilityRange);
+			if (all(sampleUV >= 0.0f) && all(sampleUV <= 1.0f))
+			{
+				float4 sData = tex2Dlod(SkyVisibilityMapSamp, float4(sampleUV, 0, 0));
+				if (sData.a > 0.5f)
+				{
+					float dh = sData.r - worldPos.y;
+					// Ignore minor floor steps and self-occlusion curbs (< 0.5 units)
+					if (dh > 0.5f)
+					{
+						dh = min(dh, mSkyVisibilityMaxHeight);
+						float sinTheta = dh / sqrt(dh * dh + r * r);
+						maxSinTheta = max(maxSinTheta, sinTheta);
+					}
+				}
+			}
+		}
+
+		totalOcclusion += maxSinTheta * dirWeight;
+		totalWeight += dirWeight;
+	}
+
+	float avgOcclusion = totalOcclusion / max(totalWeight, 1e-4f);
+
+	// Downward-facing surfaces (ceilings, undersides) naturally receive minimal skylight
+	float downPenalty = saturate(worldNormal.y * 0.75f + 0.75f);
+	avgOcclusion = 1.0f - (1.0f - avgOcclusion) * downPenalty;
+
+	// Contrast adjustment
+	avgOcclusion = pow(avgOcclusion, contrast);
+
+	float skyVis = saturate(1.0f - avgOcclusion * strength);
+	skyVis = max(minFloor, skyVis);
+
+	// Seamlessly fade out occlusion towards the outer boundaries of the map
+	skyVis = lerp(1.0f, skyVis, edgeFade);
+
+	return skyVis;
+}
+
+#endif // SKY_VISIBILITY_ENABLE
+
+#endif // _SKY_VISIBILITY_FXSUB_

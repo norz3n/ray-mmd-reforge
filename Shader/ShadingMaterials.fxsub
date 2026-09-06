@@ -1,3 +1,6 @@
+#if SKY_VISIBILITY_ENABLE
+#	include "shader/SkyVisibility.fxsub"
+#endif
 
 #if SUN_LIGHT_ENABLE
 float3 ComputeSunIntensity(float zenithAngleCos, float EE = 10)
@@ -228,6 +231,19 @@ void ShadingImageBasedLighting(sampler source, MaterialParam material, float4 sc
 
 	diffuse *= shadow;
 	specular *= shadow * shadow * shadow;
+
+#if SKY_VISIBILITY_ENABLE
+	if (material.lightModel != SHADINGMODELID_EMISSIVE)
+	{
+		float4 projConstant = GetProjConstant();
+		float3 posVS = GetViewPosition(projConstant, coord, material.linearDepth);
+		float3 posWS = mul(float4(posVS, 1.0f), matViewInverse).xyz;
+		float3 worldNormal = mul(material.normal, (float3x3)matViewInverse);
+		float skyVis = ComputeSkyVisibility(posWS, worldNormal);
+		diffuse *= skyVis;
+		specular *= skyVis;
+	}
+#endif
 
 #if TOON_ENABLE
 	if (material.lightModel == SHADINGMODELID_CEL || material.lightModel == SHADINGMODELID_TONEBASED)

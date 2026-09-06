@@ -1,0 +1,101 @@
+#ifndef _SKY_VISIBILITY_PASS_FXSUB_
+#define _SKY_VISIBILITY_PASS_FXSUB_
+
+#include "../ray.conf"
+#include "../ray_advanced.conf"
+#include "../shader/math.fxsub"
+#include "../shader/common.fxsub"
+
+#if CASTER_ALPHA_MAP_ENABLE
+texture DiffuseMap: MATERIALTEXTURE;
+sampler DiffuseMapSamp = sampler_state
+{
+	texture = <DiffuseMap>;
+	MINFILTER = POINT; MAGFILTER = POINT; MIPFILTER = POINT;
+	ADDRESSU = WRAP; ADDRESSV = WRAP;
+};
+#endif
+
+float3 mSkyVisPos1 : CONTROLOBJECT<string name="SkyVisibilityController.pmx"; string item = "Position";>;
+float3 mSkyVisPos2 : CONTROLOBJECT<string name="SkyVisibilityController"; string item = "Position";>;
+static float3 mSkyVisPos = any(mSkyVisPos1) ? mSkyVisPos1 : mSkyVisPos2;
+
+void SkyVisibilityMapVS(
+	in float4 Position : POSITION,
+	in float2 Texcoord : TEXCOORD0,
+	out float2 oTexcoord0 : TEXCOORD0,
+	out float4 oTexcoord1 : TEXCOORD1,
+	out float4 oPosition : POSITION)
+{
+	oTexcoord0 = Texcoord;
+
+	float3 worldPos = mul(Position, matWorld).xyz;
+	float texelSize = mSkyVisibilityRange / (float)SKY_VISIBILITY_MAP_SIZE;
+	float2 mapCenter;
+	if (any(mSkyVisPos.xz))
+	{
+		mapCenter = floor(mSkyVisPos.xz / texelSize) * texelSize;
+	}
+	else
+	{
+		float2 forward2D = CameraDirection.xz;
+		float fLen = length(forward2D);
+		float2 viewOffset = (fLen > 1e-3f) ? (forward2D / fLen) * (mSkyVisibilityRange * 0.2f) : 0.0f;
+		mapCenter = floor((CameraPosition.xz + viewOffset) / texelSize) * texelSize;
+	}
+
+	float2 offset = worldPos.xz - mapCenter;
+	float halfRange = mSkyVisibilityRange * 0.5f;
+
+	float clipX = offset.x / halfRange;
+	float clipY = offset.y / halfRange;
+
+	float heightSpan = max(mSkyVisibilityHeightMax - mSkyVisibilityHeightMin, 1.0f);
+	float clipZ = saturate((mSkyVisibilityHeightMax - worldPos.y) / heightSpan);
+
+	oPosition = float4(clipX, clipY, clipZ, 1.0f);
+	oTexcoord1 = float4(worldPos.y, 0.0f, 0.0f, 1.0f);
+}
+
+float4 SkyVisibilityMapPS(
+	in float2 coord0 : TEXCOORD0,
+	in float4 coord1 : TEXCOORD1) : COLOR
+{
+#if CASTER_ALPHA_ENABLE
+	float alpha = MaterialDiffuse.a;
+#if CASTER_ALPHA_MAP_ENABLE
+	if (use_texture) alpha *= tex2D(DiffuseMapSamp, coord0.xy).a;
+#endif
+	clip(alpha - CasterAlphaThreshold);
+#endif
+
+	return float4(coord1.x, 0.0f, 0.0f, 1.0f);
+}
+
+technique DepthTech<string MMDPass = "object_ss";
+>{
+	pass SkyVisibilityPass {
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = true; ZWriteEnable = true; ZFunc = LESSEQUAL;
+		CullMode = NONE;
+		VertexShader = compile vs_3_0 SkyVisibilityMapVS();
+		PixelShader  = compile ps_3_0 SkyVisibilityMapPS();
+	}
+}
+
+technique DepthTec<string MMDPass = "object";
+>{
+	pass SkyVisibilityPass {
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = true; ZWriteEnable = true; ZFunc = LESSEQUAL;
+		CullMode = NONE;
+		VertexShader = compile vs_3_0 SkyVisibilityMapVS();
+		PixelShader  = compile ps_3_0 SkyVisibilityMapPS();
+	}
+}
+
+technique EdgeTec<string MMDPass = "edge";>{}
+technique ShadowTec<string MMDPass = "shadow";>{}
+technique ZplotTec<string MMDPass = "zplot";>{}
+
+#endif // _SKY_VISIBILITY_PASS_FXSUB_
