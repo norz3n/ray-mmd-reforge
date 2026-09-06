@@ -27,7 +27,10 @@ void SkyVisibilityMapVS(
 
 	float3 worldPos = mul(Position, matWorld).xyz;
 	float texelSize = mSkyVisibilityRange / (float)SKY_VISIBILITY_MAP_SIZE;
-	float2 mapCenter = floor(CameraPosition.xz / texelSize) * texelSize;
+	float2 forward2D = CameraDirection.xz;
+	float fLen = length(forward2D);
+	float2 viewOffset = (fLen > 1e-3f) ? (forward2D / fLen) * (mSkyVisibilityRange * 0.2f) : 0.0f;
+	float2 mapCenter = floor((CameraPosition.xz + viewOffset) / texelSize) * texelSize;
 
 	float2 offset = worldPos.xz - mapCenter;
 	float halfRange = mSkyVisibilityRange * 0.5f;
