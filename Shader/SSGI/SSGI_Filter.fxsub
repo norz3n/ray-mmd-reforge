@@ -13,7 +13,9 @@
 #include "shader/BilateralCommon.fxsub"
 
 /**
- * Geometry-aware radiance outlier clamp. It kills trace speckles before blur spreads them.
+ * Geometry-aware radiance outlier clamp and stochastic speckle prefilter.
+ * Employs Karis luminance weighting and cross-bilateral geometry gating
+ * to suppress stochastic ray noise spikes before separable blurring.
  */
 float4 SSGIOutlierRejectPS(
 	in float2 uvCoord : TEXCOORD0,
@@ -24,31 +26,47 @@ float4 SSGIOutlierRejectPS(
 	if (!(zCenter > 0.0f && zCenter < 1000.0f))
 		return float4(0.0f, 0.0f, 0.0f, 0.0f);
 
+	float4 projInfo = GetProjConstant();
 	float3 nCenter = GetSSGINormal(uvCoord);
+	float3 pCenter = GetViewPosition(projInfo, uvCoord, zCenter);
+
 	float2 tapStep = ViewportOffset2;
-	float depthTolerance = min(max(zCenter * 0.035f, 0.65f), 5.0f);
+	float planeThreshold = max(zCenter * 0.045f, 0.45f);
+	float depthTolerance = max(zCenter * 0.075f, 0.70f);
+
 	float totalW = 0.0f;
 	float3 totalC = 0.0f;
 
 	[unroll]
 	for (int y = -2; y <= 2; ++y)
 	{
-		float wy = (y == 0) ? 6.0f : ((y == -1 || y == 1) ? 4.0f : 1.0f);
+		float wy = (y == 0) ? 6.0f : ((abs(y) == 1) ? 4.0f : 1.0f);
 		[unroll]
 		for (int x = -2; x <= 2; ++x)
 		{
-			float wx = (x == 0) ? 6.0f : ((x == -1 || x == 1) ? 4.0f : 1.0f);
+			float wx = (x == 0) ? 6.0f : ((abs(x) == 1) ? 4.0f : 1.0f);
 			float2 tapUv = uvCoord + float2(x, y) * tapStep;
 
 			float zTap = GetSSGILinearDepth(tapUv);
 			if (!(zTap > 0.0f && zTap < 1000.0f))
 				continue;
 
+			float3 pTap = GetViewPosition(projInfo, tapUv, zTap);
+			float planeDist = abs(dot(nCenter, pTap - pCenter));
+			float planeWeight = BilateralPlaneWeight(planeDist, planeThreshold);
 			float depthWeight = BilateralDepthWeight(zTap, zCenter, depthTolerance);
-			float normalWeight = saturate(0.35f + 0.65f * BilateralNormalWeight(GetSSGINormal(tapUv), nCenter));
-			float weight = (wx * wy) * depthWeight * normalWeight;
+			float geomWeight = max(planeWeight, depthWeight * 0.40f);
+
+			float3 nTap = GetSSGINormal(tapUv);
+			float normalWeight = saturate(0.30f + 0.70f * BilateralNormalWeight(nTap, nCenter));
 
 			float3 sampleColor = clamp(tex2Dlod(source, float4(tapUv, 0.0f, 0.0f)).rgb, 0.0f, 100.0f);
+			float sampleLuma = dot(sampleColor, float3(0.299f, 0.587f, 0.114f));
+
+			// Karis luminance weighting: suppresses extreme fireflies without distorting linear field
+			float lumaWeight = 1.0f / (1.0f + 0.20f * sampleLuma);
+			float weight = (wx * wy) * geomWeight * normalWeight * lumaWeight;
+
 			totalC += sampleColor * weight;
 			totalW += weight;
 		}
@@ -59,7 +77,9 @@ float4 SSGIOutlierRejectPS(
 }
 
 /**
- * Separable finish pass. Atrous removes speckles; this makes the remaining GI field visibly soft.
+ * Separable À-Trous Cross-Bilateral Filter Pass.
+ * Expands step footprint across stages (stride 1 -> stride 2) to reconstruct smooth low-frequency GI
+ * while strictly preserving normal creases, geometric silhouettes, and depth contours.
  */
 float4 SSGIBlurPS(
 	in float2 uvCoord : TEXCOORD0,
@@ -76,45 +96,64 @@ float4 SSGIBlurPS(
 	float3 nCenter = GetSSGINormal(uvCoord);
 	float3 pCenter = GetViewPosition(projInfo, uvCoord, zCenter);
 
-	float stepActual = (stepScale > 1.5f) ? 3.0f : 1.0f;
+	// Dyadic step progression: step 1.0 (dense) then step 2.0 (wavelet scale) prevents grid lattice aliasing
+	float stepActual = (stepScale > 1.5f) ? 2.0f : 1.0f;
 	float2 blurDir = (isHorizontal > 0.5f ? float2(ViewportOffset2.x, 0.0f) : float2(0.0f, ViewportOffset2.y)) * stepActual;
-	float depthTolerance = min(max(zCenter * 0.05f, 1.2f), 8.0f);
-	float planeThreshold = min(max(zCenter * 0.045f, 0.80f), 6.0f);
+	float planeThreshold = max(zCenter * (0.050f * stepActual), 0.50f * stepActual);
+	float depthTolerance = max(zCenter * (0.080f * stepActual), 0.80f * stepActual);
+
+	float blurSigma = float(SSGI_RADIUS) * 0.5f;
+	float spatialFalloff = 1.0f / (2.0f * blurSigma * blurSigma);
+
 	float totalW = 1.0f;
-	float4 totalC = clamp(tex2Dlod(source, float4(uvCoord, 0.0f, 0.0f)), 0.0f, 100.0f);
+	float3 totalC = clamp(tex2Dlod(source, float4(uvCoord, 0.0f, 0.0f)).rgb, 0.0f, 100.0f);
 
 	[unroll]
 	for (int i = 1; i <= SSGI_RADIUS; ++i)
 	{
-		float spatialWeight = BilateralSpatialWeight((float)i, 0.008f);
-		float2 shift = blurDir * (float)i;
+		float spatialWeight = exp(-float(i * i) * spatialFalloff);
+		float2 shift = blurDir * float(i);
+
 		float2 uvA = uvCoord + shift;
 		float2 uvB = uvCoord - shift;
+
 		float zA = GetSSGILinearDepth(uvA);
 		float zB = GetSSGILinearDepth(uvB);
-		zA = (zA > 0.0f && zA < 1000.0f) ? zA : (zCenter + 10000.0f);
-		zB = (zB > 0.0f && zB < 1000.0f) ? zB : (zCenter + 10000.0f);
 
-		float depthWeightA = BilateralDepthWeight(zA, zCenter, depthTolerance);
-		float depthWeightB = BilateralDepthWeight(zB, zCenter, depthTolerance);
+		if (zA > 0.0f && zA < 1000.0f)
+		{
+			float3 pA = GetViewPosition(projInfo, uvA, zA);
+			float planeDistA = abs(dot(nCenter, pA - pCenter));
+			float planeWeightA = BilateralPlaneWeight(planeDistA, planeThreshold);
+			float depthWeightA = BilateralDepthWeight(zA, zCenter, depthTolerance);
+			float geomWeightA = max(planeWeightA, depthWeightA * 0.35f);
 
-		float normalWeightA = saturate(0.35f + 0.65f * BilateralNormalWeight(GetSSGINormal(uvA), nCenter));
-		float normalWeightB = saturate(0.35f + 0.65f * BilateralNormalWeight(GetSSGINormal(uvB), nCenter));
+			float3 nA = GetSSGINormal(uvA);
+			float normalWeightA = saturate(0.25f + 0.75f * BilateralNormalWeight(nA, nCenter));
+			float wA = spatialWeight * geomWeightA * normalWeightA;
 
-		float planeDistA = abs(dot(nCenter, GetViewPosition(projInfo, uvA, zA) - pCenter));
-		float planeDistB = abs(dot(nCenter, GetViewPosition(projInfo, uvB, zB) - pCenter));
-		float planeWeightA = max(BilateralPlaneWeight(planeDistA, planeThreshold), depthWeightA * 0.45f);
-		float planeWeightB = max(BilateralPlaneWeight(planeDistB, planeThreshold), depthWeightB * 0.45f);
+			totalC += clamp(tex2Dlod(source, float4(uvA, 0.0f, 0.0f)).rgb, 0.0f, 100.0f) * wA;
+			totalW += wA;
+		}
 
-		float wA = spatialWeight * depthWeightA * planeWeightA * normalWeightA;
-		float wB = spatialWeight * depthWeightB * planeWeightB * normalWeightB;
+		if (zB > 0.0f && zB < 1000.0f)
+		{
+			float3 pB = GetViewPosition(projInfo, uvB, zB);
+			float planeDistB = abs(dot(nCenter, pB - pCenter));
+			float planeWeightB = BilateralPlaneWeight(planeDistB, planeThreshold);
+			float depthWeightB = BilateralDepthWeight(zB, zCenter, depthTolerance);
+			float geomWeightB = max(planeWeightB, depthWeightB * 0.35f);
 
-		totalC += clamp(tex2Dlod(source, float4(uvA, 0.0f, 0.0f)), 0.0f, 100.0f) * wA;
-		totalC += clamp(tex2Dlod(source, float4(uvB, 0.0f, 0.0f)), 0.0f, 100.0f) * wB;
-		totalW += wA + wB;
+			float3 nB = GetSSGINormal(uvB);
+			float normalWeightB = saturate(0.25f + 0.75f * BilateralNormalWeight(nB, nCenter));
+			float wB = spatialWeight * geomWeightB * normalWeightB;
+
+			totalC += clamp(tex2Dlod(source, float4(uvB, 0.0f, 0.0f)).rgb, 0.0f, 100.0f) * wB;
+			totalW += wB;
+		}
 	}
 
-	return clamp(totalC / max(totalW, 1e-5f), 0.0f, 100.0f);
+	return float4(totalC / max(totalW, 1e-5f), 0.0f);
 }
 
 #endif // RAY_MMD_SSGI_FILTER_FXSUB

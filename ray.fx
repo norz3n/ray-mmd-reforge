@@ -796,13 +796,13 @@ technique DeferredLighting<
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSGIBlurPS(SSGIMapSampTemp, 1.0f, 2.5f);
+		PixelShader  = compile ps_3_0 SSGIBlurPS(SSGIMapSampTemp, 1.0f, 2.0f);
 	}
 	pass SSGIBlurY2<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSGIBlurPS(SSGIMapSamp, 0.0f, 2.5f);
+		PixelShader  = compile ps_3_0 SSGIBlurPS(SSGIMapSamp, 0.0f, 2.0f);
 	}
 	pass SSGIFinalCombine<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = true; AlphaTestEnable = false;
