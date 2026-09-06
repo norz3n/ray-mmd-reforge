@@ -70,6 +70,10 @@ float3 SubsurfaceTranslucency(MaterialParam material, float3 N, float3 L, float3
 	// always lands on the front surface itself (geoThickness ~ 0), so translucency fired at
 	// full strength regardless of actual limb thickness; overshooting probes hit the far
 	// background and correctly extinguish transmission through thick geometry.
+	// The measured thickness only gates the forward (through-)lobe: wrapScatter is a LOCAL
+	// terminator diffusion term and must not respond to geometry far behind the limb —
+	// letting probes hit the body/hair behind a limb along the light ray extinguished the
+	// wrap and painted dark blotches wherever a limb overlapped other geometry.
 	float thicknessScale = 1.0f;
 	if (any(coord))
 	{
@@ -87,11 +91,11 @@ float3 SubsurfaceTranslucency(MaterialParam material, float3 N, float3 L, float3
 		thicknessScale = exp(-geoThickness * 4.5f);
 	}
 
-	// Curvature & geometric thickness extinction
+	// Curvature extinction is a local surface response
 	float curvature = max(material.customDataA, 0.01f);
-	float opticalDensity = exp(-curvature * 2.8f) * thicknessScale;
+	float opticalDensity = exp(-curvature * 2.8f);
 
-	return spectralTrans * ((forwardScatter + wrapScatter) * opticalDensity * 0.6f);
+	return spectralTrans * ((forwardScatter * thicknessScale + wrapScatter) * opticalDensity * 0.6f);
 }
 
 float3 SubsurfaceShadingPreIntegratedSkin(MaterialParam material, float3 N, float3 L)

@@ -165,7 +165,14 @@ void ShadingMaterial(MaterialParam material, float3 V, float3 L, float2 coord, o
 	if (isSkinMat)
 	{
 		float3 budget = max(lightColor * SKIN_SSS_ENERGY_BUDGET, 1e-5f);
-		diffuse *= budget / max(diffuse, budget);
+		// C^1 monotone soft knee instead of a hard per-channel min(): a hard clip snapped the
+		// warm SSS excess flat while cool channels kept varying, painting desaturated gray-blue
+		// blotches at the knee. Exact below the knee, smooth Hermite ramp, exact cap at budget.
+		float3 knee = budget * 0.25f;
+		float3 entry = budget - knee;
+		float3 tau = saturate((diffuse - entry) / max(knee, 1e-6f));
+		float3 kneeCurve = tau + tau * tau - tau * tau * tau;
+		diffuse = min(diffuse, entry + knee * kneeCurve);
 	}
 
 	specular = energy[1] * lightColor;

@@ -156,11 +156,18 @@ void ShadingMaterial(MaterialParam material, float3 worldView, out float3 diffus
 		diffuse += ImageBasedLightSubsurface(material, N, prefilteredDiffuse);
 
 		// Energy-budget cap: ambient + back-light SSS may not exceed the front irradiance —
-		// otherwise ambient-lit skin outshines white surfaces and feeds an inflated GI emitter
+		// otherwise ambient-lit skin outshines white surfaces and feeds an inflated GI emitter.
+		// C^1 soft knee (monotone Hermite ramp) instead of a hard clip: the hard knee snapped the warm
+		// SSS chroma excess flat at the budget boundary, painting desaturated gray-blue
+		// blotches into the ambient the deferred IBL later decodes.
 		if (material.lightModel != SHADINGMODELID_GLASS)
 		{
 			float3 budget = max(prefilteredDiffuse * mEnvIntensityDiff * SKIN_SSS_ENERGY_BUDGET, 1e-5f);
-			diffuse *= budget / max(diffuse, budget);
+			float3 knee = budget * 0.25f;
+			float3 entry = budget - knee;
+			float3 tau = saturate((diffuse - entry) / max(knee, 1e-6f));
+			float3 kneeCurve = tau + tau * tau - tau * tau * tau;
+			diffuse = min(diffuse, entry + knee * kneeCurve);
 		}
 	}
 

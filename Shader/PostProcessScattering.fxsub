@@ -90,10 +90,9 @@ float4 SSSGaussBlurPS(
 
 	float3 P = GetViewPosition(projConstant, coord, linearDepth);
 
-	// Perspective correction factor
-	float perspectiveScaleX = dot(normalize(N.xz + 1e-6f), normalize(-P.xz + 1e-6f));
-	float perspectiveScaleY = dot(normalize(N.yz + 1e-6f), normalize(-P.yz + 1e-6f));
-	float perspectiveScale = max(dot(direction, float2(perspectiveScaleX, perspectiveScaleY)), 0.3f);
+	// Perspective correction: single NdotV scalar keeps both passes symmetric.
+	// ponytail: direction-split projection was tried but caused oval dark patches; upgrade if per-axis correction is ever needed.
+	float perspectiveScale = lerp(0.3f, 1.0f, saturate(dot(N, normalize(-P))));
 
 	int profileIndex = (lightModel == SHADINGMODELID_SKIN) ? 0 : 1;
 	float sssAmount = saturate(customDataA);
@@ -109,14 +108,13 @@ float4 SSSGaussBlurPS(
 
 	float2 sampleStep = direction * (sssRadius / max(linearDepth, 0.1f)) * float2(1.0f / ViewportAspect, 1.0f);
 
-	// Kernel footprint clamp to prevent miniature models from blowing out on close-ups
-	float2 maxStep = 24.0f * ViewportOffset2;
-	float stepLenSq = dot(sampleStep, sampleStep);
-	float maxLenSq = dot(maxStep, maxStep);
-	if (stepLenSq > maxLenSq)
-	{
-		sampleStep *= sqrt(maxLenSq / stepLenSq);
-	}
+	// Scalar ratio-clamp: treats horizontal and vertical passes identically,
+	// avoiding the oval kernel produced by the old 2D Euclidean clamp.
+	// Still caps miniature-model blow-out. ponytail: upgrade to per-axis clamp if anisotropic SSS ever needed.
+	const float kMaxStepRatio = 0.04f;
+	float stepRatio = sssRadius / max(linearDepth, 0.1f);
+	if (stepRatio > kMaxStepRatio)
+		sampleStep *= kMaxStepRatio / stepRatio;
 
 	// 11-Tap separable convolution with bilateral depth & normal weighting
 	[unroll]

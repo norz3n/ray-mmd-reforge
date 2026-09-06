@@ -2179,7 +2179,14 @@ GbufferParam MaterialPS(
 	float3 ddyN = ddy(normal);
 	float deltaP_sq = dot(ddxP, ddxP) + dot(ddyP, ddyP);
 	float deltaN_sq = dot(ddxN, ddxN) + dot(ddyN, ddyN);
-	float curvature = sqrt(deltaN_sq / max(deltaP_sq, 1e-3f));
+	// True geometric curvature: normal rotation per unit surface distance (1/R).
+	// The derivative pair cancels the per-pixel footprint, so the value depends
+	// only on the mesh's own curvature - invariant to model size AND camera
+	// distance. The previous absolute floor (max(deltaP_sq, 1e-3)) decoupled the
+	// measure from position, so the field saturated/shifted with camera distance
+	// and broke across differently sized models. Edge/discontinuity quads
+	// (hair over skin, rims) still land high here since |dN/dP| grows there.
+	float curvature = sqrt(deltaN_sq / (deltaP_sq + 1e-6f));
 	material.customDataA = saturate(max(material.customDataA, curvature * 18.0f));
 #endif
 	material.customDataB = GetCustomDataB(coord0);
@@ -2267,7 +2274,14 @@ GbufferParam Material2PS(
 	float3 ddyN = ddy(normal);
 	float deltaP_sq = dot(ddxP, ddxP) + dot(ddyP, ddyP);
 	float deltaN_sq = dot(ddxN, ddxN) + dot(ddyN, ddyN);
-	float curvature = sqrt(deltaN_sq / max(deltaP_sq, 1e-3f));
+	// True geometric curvature: normal rotation per unit surface distance (1/R).
+	// The derivative pair cancels the per-pixel footprint, so the value depends
+	// only on the mesh's own curvature - invariant to model size AND camera
+	// distance. The previous absolute floor (max(deltaP_sq, 1e-3)) decoupled the
+	// measure from position, so the field saturated/shifted with camera distance
+	// and broke across differently sized models. Edge/discontinuity quads
+	// (hair over skin, rims) still land high here since |dN/dP| grows there.
+	float curvature = sqrt(deltaN_sq / (deltaP_sq + 1e-6f));
 	material.customDataA = saturate(max(material.customDataA, curvature * 18.0f));
 #endif
 	material.customDataB = GetCustomDataB(coord0);
