@@ -109,8 +109,8 @@ float4 SSSGaussBlurPS(
 
 	float2 sampleStep = direction * (sssRadius / max(linearDepth, 0.1f)) * float2(1.0f / ViewportAspect, 1.0f);
 
-	// Kernel footprint clamp to prevent miniature models from blowing out
-	float2 maxStep = 48.0f * ViewportOffset2;
+	// Kernel footprint clamp to prevent miniature models from blowing out on close-ups
+	float2 maxStep = 24.0f * ViewportOffset2;
 	float stepLenSq = dot(sampleStep, sampleStep);
 	float maxLenSq = dot(maxStep, maxStep);
 	if (stepLenSq > maxLenSq)
@@ -129,15 +129,19 @@ float4 SSSGaussBlurPS(
 		float4 sampleColor1 = tex2Dlod(source, float4(offset1, 0, 0));
 		float4 sampleColor2 = tex2Dlod(source, float4(offset2, 0, 0));
 
-		// Scale-invariant bilateral depth tolerance (comfortably accommodates limb curvature)
-		float depthTolerance = max(tapOffset * sssRadius * 4.5f, max(linearDepth * 0.06f, 0.08f));
+		// Scale-invariant bilateral depth tolerance:
+		// Proportional to physical tap span in world space + relative linear depth scale.
+		// Avoids absolute world-space floors (e.g. 0.08) that bleed through miniature/doll-size models.
+		float depthTolerance = max(tapOffset * sssRadius * 3.5f, max(linearDepth * 0.035f, 1e-4f));
 		float depthWeight1 = saturate(1.0f - abs(sampleColor1.a - linearDepth) / depthTolerance);
 		float depthWeight2 = saturate(1.0f - abs(sampleColor2.a - linearDepth) / depthTolerance);
 
 		float3 N1 = DecodeNormal(tex2Dlod(Gbuffer2Map, float4(offset1, 0, 0)).xyz);
 		float3 N2 = DecodeNormal(tex2Dlod(Gbuffer2Map, float4(offset2, 0, 0)).xyz);
-		float normalWeight1 = saturate(dot(N1, N) * 0.5f + 0.5f);
-		float normalWeight2 = saturate(dot(N2, N) * 0.5f + 0.5f);
+		float dotN1 = dot(N1, N);
+		float dotN2 = dot(N2, N);
+		float normalWeight1 = (dotN1 > 0.0f) ? pow(dotN1, 1.25f) : 0.0f;
+		float normalWeight2 = (dotN2 > 0.0f) ? pow(dotN2, 1.25f) : 0.0f;
 
 		float3 w1 = cPairWeights[profileIndex][i] * (normalWeight1 * depthWeight1);
 		float3 w2 = cPairWeights[profileIndex][i] * (normalWeight2 * depthWeight2);
