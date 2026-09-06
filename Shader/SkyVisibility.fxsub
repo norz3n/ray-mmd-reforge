@@ -127,9 +127,11 @@ float ComputeSkyVisibility(float3 worldPos, float3 worldNormal)
 
 	float avgOcclusion = totalOcclusion / max(totalWeight, 1e-4f);
 
-	// Downward-facing surfaces (ceilings, undersides) naturally receive minimal skylight
-	float downPenalty = saturate(worldNormal.y * 0.75f + 0.75f);
-	avgOcclusion = 1.0f - (1.0f - avgOcclusion) * downPenalty;
+	// Downward-facing surfaces (ceilings, undersides) naturally receive minimal skylight from above
+	if (worldNormal.y < 0.0f)
+	{
+		avgOcclusion = max(avgOcclusion, saturate(-worldNormal.y * 1.2f));
+	}
 
 	// Contrast adjustment
 	avgOcclusion = pow(avgOcclusion, contrast);

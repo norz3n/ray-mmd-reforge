@@ -123,7 +123,7 @@ static float mSkyVisContrastP  = max(mSkyVisContrastP1, mSkyVisContrastP2);
 static float mSkyVisContrastM  = max(mSkyVisContrastM1, mSkyVisContrastM2);
 static float3 mSkyVisPos       = any(mSkyVisPos1) ? mSkyVisPos1 : mSkyVisPos2;
 
-static float mSkyVisIntensityCtrl = lerp(lerp(mSkyVisibilityIntensity, mSkyVisibilityIntensity * 3.0f, mSkyVisIntensityP), 0.0f, mSkyVisIntensityM);
+static float mSkyVisIntensityCtrl = lerp(lerp(mSkyVisibilityIntensity, 1.35f, mSkyVisIntensityP), 0.0f, mSkyVisIntensityM);
 static float mSkyVisRadiusScale   = lerp(lerp(1.0f, 2.5f, mSkyVisRadiusP), 0.25f, mSkyVisRadiusM);
 static float mSkyVisFloorCtrl     = lerp(lerp(mSkyVisibilityMinFloor, 0.6f, mSkyVisFloorP), 0.0f, mSkyVisFloorM);
 static float mSkyVisContrastCtrl  = lerp(lerp(1.0f, 2.5f, mSkyVisContrastP), 0.4f, mSkyVisContrastM);
