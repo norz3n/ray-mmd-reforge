@@ -24,7 +24,7 @@ Requirement :
 * Direct3D 9 With Shader Model 3.0 (ps_3_0)
 * **Powerful GPU recommended** due to advanced shading techniques.
 
-Reforge Exclusive Features (through v1.20.16) :
+Reforge Exclusive Features (through v1.20.18) :
 ------------
 
 **Direct Screen-Space Core**
@@ -33,6 +33,8 @@ Reforge Exclusive Features (through v1.20.16) :
 
 **Global Illumination (SSPT / RTGI & SSGI 3.0)**
 * **Screen-Space Path Tracing (SSPT / RTGI 3.0 - `GI_ENABLE 3`, Default)**: next-generation path-traced room radiance engine inspired by Marty McFly's qUINT RTGI. Implements low-discrepancy Monte Carlo cosine-weighted hemisphere path tracing with golden angle rotation (`SSPT_GOLDEN_ANGLE = 2.39996323`), 1D Bayer dither stratification, and projected-axis orthonormal tangent frame (`BuildTangentMatrix`).
+* **Motion-Adaptive Temporal Denoising & Normal Rejection**: dedicated post-filter temporal accumulation passes (`SSGITemporalDenoise`) with motion-adaptive responsiveness (dynamic alpha scaling from 0.05 to 0.35 based on screen-space camera velocity), surface normal rejection (`dot(curNormal, prevNormal)`), and dynamic variance clipping, eliminating lighting ghost trails and static noise smearing during camera movement.
+* **Continuous Elapsed-Time Dithering**: decoupled spatiotemporal ray dithering from playback animation time to continuous system elapsed time, ensuring temporal ray dithering never freezes during paused viewport camera interactions.
 * **Progressive Quadratic Ray Stepping & Depth Thickness Gating**: dense near-field precision with broad room reach (`lambda = s * sqrt(s)`), analytical depth thickness gating (`delta = (pSample - pRay) * invThickness`) preventing light leaking through walls, fingers, and hair.
 * **Secondary Bounce Feedback & Viewport-Boundary Radiance**: multi-bounce reflection feedback loop (`SSPT_BOUNCES 1`) with emissive transfer and escaped-ray sky radiance sampling preventing dark camera-edge halos.
 * **Deferred Ambient Occlusion Post-GI Composite**: deferred SSDO execution and introduced a dedicated post-GI pass (`Shader/PostProcessAOComposite.fxsub`) running after `SSGIFinalCombine`. Uniformly applies Jimenez multi-bounce AO across total composited radiance (direct + IBL + GI), preventing strong indirect bounces from bleaching contact shadows and crevices while preserving clean glass and emissive passthrough.
