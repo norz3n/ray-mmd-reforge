@@ -48,7 +48,7 @@ float3 SampleSkyRadiance(float2 skyUv)
 float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) : COLOR
 {
 	float zOrigin = GetSSGILinearDepth(uvCoord.xy);
-	if (!(zOrigin > 0.0f && zOrigin < 1000.0f))
+	if (!(zOrigin > 0.0f && zOrigin < 200.0f))
 		clip(-1);
 
 	float4 projInfo = GetProjConstant();
