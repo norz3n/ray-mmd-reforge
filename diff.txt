@@ -1,0 +1,13 @@
+diff --git a/ray.fx b/ray.fx
+index fc801889..d7bcfa1b 100644
+--- a/ray.fx
++++ b/ray.fx
+@@ -632,7 +632,7 @@ technique DeferredLighting<
+ #if GI_ENABLE
+ 	// Reject trace outliers first; blur and resolve reconstruct a low-frequency GI field.
+ 	"RenderColorTarget=SSGIMap;     Clear=Color; Pass=SSGI;"
+-	"RenderColorTarget=SSGIMapTemp; Pass=SSGIPrefilter;"
++	"RenderColorTarget0=SSGIMapTemp; RenderColorTarget1=SSGIMapHistory; Pass=SSGIPrefilter;"
+ 	"RenderColorTarget=SSGIMap;     Pass=SSGIBlurX;"
+ 	"RenderColorTarget=SSGIMapTemp; Pass=SSGIBlurY;"
+ 	"RenderColorTarget=SSGIMap;     Pass=SSGIBlurX2;"

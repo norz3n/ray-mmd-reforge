@@ -415,7 +415,7 @@ static float mCausticsDispScale  = lerp(lerp(1.0f, 3.0f, mCstDispersionP), 0.0f,
 #include "shader/math.fxsub"
 #include "shader/common.fxsub"
 #include "shader/textures.fxsub"
-#if (AA_QUALITY == 6) || POST_MOTION_BLUR_ENABLE || AO_TEMPORAL_DENOISE || (GI_ENABLE == 3)
+#if (AA_QUALITY == 6) || POST_MOTION_BLUR_ENABLE || AO_TEMPORAL_DENOISE || (GI_ENABLE > 0)
 #	include "shader/PostProcessMatrix.fxsub"
 #endif
 #include "shader/gbuffer.fxsub"
@@ -637,6 +637,8 @@ technique DeferredLighting<
 	"RenderColorTarget=SSGIMapTemp; Pass=SSGIBlurY;"
 	"RenderColorTarget=SSGIMap;     Pass=SSGIBlurX2;"
 	"RenderColorTarget=SSGIMapTemp; Pass=SSGIBlurY2;"
+	"RenderColorTarget0=SSGIMap; RenderColorTarget1=SSGIMapHistory; Pass=SSGITemporalDenoise;"
+	"RenderColorTarget1=;"
 	"RenderColorTarget=ShadingMap;  Pass=SSGIFinalCombine;"
 
 	// AO runs AFTER GI so that darkening applies to the full composite (direct + IBL + GI).
@@ -816,7 +818,7 @@ technique DeferredLighting<
 	"RenderColorTarget=TAAMatrixMap; Pass=TAAMatrixUpdatePass;"
 #endif
 #else
-#if AA_QUALITY == 6 || AO_TEMPORAL_DENOISE || (GI_ENABLE == 3)
+#if AA_QUALITY == 6 || AO_TEMPORAL_DENOISE || (GI_ENABLE > 0)
 	"RenderColorTarget=TAAMatrixMap; Pass=TAAMatrixUpdatePass;"
 #endif
 #if POST_SHARPEN_ENABLE
@@ -1089,6 +1091,12 @@ technique DeferredLighting<
 		ZEnable = false; ZWriteEnable = false;
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
 		PixelShader  = compile ps_3_0 SSGIBlurPS(SSGIMapSamp, 0.0f, 2.0f);
+	}
+	pass SSGITemporalDenoise<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 SSGITemporalPS(SSGIMapSampTemp, SSGIMapHistorySamp);
 	}
 	pass SSGIFinalCombine<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = true; AlphaTestEnable = false;
@@ -1554,7 +1562,7 @@ technique DeferredLighting<
 		PixelShader  = compile ps_3_0 TAAPS(ShadingMapTempSamp);
 	}
 #endif
-#if AA_QUALITY == 6 || POST_MOTION_BLUR_ENABLE || AO_TEMPORAL_DENOISE || (GI_ENABLE == 3)
+#if AA_QUALITY == 6 || POST_MOTION_BLUR_ENABLE || AO_TEMPORAL_DENOISE || (GI_ENABLE > 0)
 	pass TAAMatrixUpdatePass<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;

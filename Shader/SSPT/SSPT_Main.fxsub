@@ -12,12 +12,14 @@
 #include "shader/SSPT/SSPT_Common.fxsub"
 #include "shader/SSPT/SSPT_Trace.fxsub"
 #include "shader/SSPT/SSPT_Filter.fxsub"
+#include "shader/SSPT/SSPTTemporal.fxsub"
 #include "shader/SSPT/SSPT_Resolve.fxsub"
 
 // Export standard pass bindings for ray.fx technique pipeline
 #define SSGIPassPS SSPTPassPS
 #define SSGIOutlierRejectPS SSPTOutlierRejectPS
 #define SSGIBlurPS SSPTBlurPS
+#define SSGITemporalPS SSPTTemporalPS
 #define SSGIFinalCombinePS SSPTFinalCombinePS
 
 #endif // RAY_MMD_SSPT_MAIN_FXSUB

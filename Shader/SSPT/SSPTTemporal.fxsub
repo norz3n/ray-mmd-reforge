@@ -1,0 +1,79 @@
+#ifndef RAY_MMD_SSPT_TEMPORAL_FXSUB
+#define RAY_MMD_SSPT_TEMPORAL_FXSUB
+
+struct SSPTTemporalOutput
+{
+	float4 color0 : COLOR0;
+	float4 color1 : COLOR1;
+};
+
+SSPTTemporalOutput SSPTTemporalPS(
+	in float2 uvCoord : TEXCOORD0,
+	in float3 viewDir : TEXCOORD1,
+	uniform sampler source,
+	uniform sampler history)
+{
+	SSPTTemporalOutput output;
+	
+	float3 currColor = tex2Dlod(source, float4(uvCoord, 0.0f, 0.0f)).rgb;
+	
+	float zCenter = GetSSPTLinearDepth(uvCoord);
+	if (!(zCenter > 0.0f && zCenter < 1000.0f))
+	{
+		output.color0 = float4(currColor, 0.0f);
+		output.color1 = float4(currColor, zCenter);
+		return output;
+	}
+
+	float4 projInfo = GetProjConstant();
+	float3 pCenter = GetViewPosition(projInfo, uvCoord, zCenter);
+	float3 worldPosition = mul(float4(pCenter, 1.0f), matViewInverse).xyz;
+
+	float4x4 matViewProjectPrev = GetPrevViewProject();
+	float4 prevClipPos = mul(float4(worldPosition, 1.0f), matViewProjectPrev);
+	float2 prevUV = (prevClipPos.xy / max(prevClipPos.w, 1e-5f)) * float2(0.5f, -0.5f) + 0.5f;
+
+	if (any(prevUV < 0.0f) || any(prevUV > 1.0f))
+	{
+		output.color0 = float4(currColor, 0.0f);
+		output.color1 = float4(currColor, zCenter);
+		return output;
+	}
+
+	float4 histData = tex2Dlod(history, float4(prevUV, 0.0f, 0.0f));
+	float3 historyColor = histData.rgb;
+	float prevDepth = histData.a;
+
+	float depthDiff = abs(prevDepth - zCenter) / max(zCenter, 1e-3f);
+	float rejectWeight = saturate(depthDiff * 5.0f);
+	float alpha = lerp(0.05f, 1.0f, rejectWeight);
+
+	// Neighborhood clamping to prevent ghosting
+	float2 tapStep = ViewportOffset2;
+	float3 minColor = currColor;
+	float3 maxColor = currColor;
+
+	[unroll]
+	for (int i = -1; i <= 1; ++i)
+	{
+		[unroll]
+		for (int j = -1; j <= 1; ++j)
+		{
+			if (i != 0 || j != 0)
+			{
+				float3 neighbor = tex2Dlod(source, float4(uvCoord + float2(i, j) * tapStep, 0.0f, 0.0f)).rgb;
+				minColor = min(minColor, neighbor);
+				maxColor = max(maxColor, neighbor);
+			}
+		}
+	}
+	historyColor = clamp(historyColor, minColor, maxColor);
+
+	float3 denoised = lerp(historyColor, currColor, alpha);
+
+	output.color0 = float4(denoised, 0.0f);
+	output.color1 = float4(denoised, zCenter);
+	return output;
+}
+
+#endif

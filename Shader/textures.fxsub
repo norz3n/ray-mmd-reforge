@@ -593,4 +593,15 @@ sampler SSGIMapSampTemp = sampler_state {
 	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
 	AddressU = CLAMP;  AddressV = CLAMP;
 };
+texture SSGIMapHistory : RENDERCOLORTARGET<
+	float2 ViewportRatio = {1.0, 1.0};
+	bool AntiAlias = false;
+	string Format = "A16B16G16R16F";
+	float4 ClearColor = {0, 0, 0, 0};
+>;
+sampler SSGIMapHistorySamp = sampler_state {
+	texture = <SSGIMapHistory>;
+	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
+	AddressU = CLAMP;  AddressV = CLAMP;
+};
 #endif

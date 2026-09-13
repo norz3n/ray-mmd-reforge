@@ -32,7 +32,7 @@ float4 SSPTFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 	if (mat.lightModel == SHADINGMODELID_GLASS)
 		return 0.0f;
 
-	float3 rawGi = tex2Dlod(SSGIMapSampTemp, float4(uvCoord, 0.0f, 0.0f)).rgb;
+	float3 rawGi = tex2Dlod(SSGIMapSamp, float4(uvCoord, 0.0f, 0.0f)).rgb;
 	rawGi = clamp(rawGi, 0.0f, 100.0f);
 
 	// Pre-albedo gathered irradiance, reused for indirect specular

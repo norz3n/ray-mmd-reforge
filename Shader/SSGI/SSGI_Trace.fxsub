@@ -48,7 +48,7 @@ float3 SampleSkyRadiance(float2 skyUv)
 float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) : COLOR
 {
 	float zOrigin = GetSSGILinearDepth(uvCoord.xy);
-	if (!(zOrigin > 0.0f && zOrigin < 200.0f))
+	if (!(zOrigin > 0.0f && zOrigin < 1000.0f))
 		clip(-1);
 
 	float4 projInfo = GetProjConstant();
@@ -274,7 +274,7 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 #else
 					float3 skyColor = srgb2linear(tex2Dlod(ScnSamp, float4(skyUv, 0.0f, 0.0f)).rgb);
 #endif
-					float skyWeight = NdotSky * mDbgSSGISkyLight * (1.0f - rayOcc);
+					float skyWeight = NdotSky * lerp(0.30f, 1.00f, mDbgSSGISkyLight) * (1.0f - rayOcc);
 					rayColor += clamp(skyColor, 0.0f, 10.0f) * skyWeight;
 				}
 			}
