@@ -74,16 +74,12 @@ float4 SSGIPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 	maxWorldDistance *= clamp(mSSGIConeAngle * 2.0f, 0.25f, 4.0f);
 
 	float2 screenPixel = uvCoord.xy * ViewportSize;
-#if AA_QUALITY == 6
-	int frameCounter = (int)fmod(time * 60.0f, 16.0f);
-#else
-	int frameCounter = 0;
-#endif
+	int frameCounter = (int)fmod(elapsed * 60.0f, 16.0f);
 
 	// Per-pixel random rotation angle for direction set decorrelation (rotates entire ray constellation across [0, 2*PI))
 	float rotAngle = InterleavedGradientNoise(screenPixel, frameCounter);
 	// Decorrelated spatial dither for elevation and raymarching step jitter
-	float elevationJitter = PseudoRandom(screenPixel);
+	float elevationJitter = InterleavedGradientNoise(screenPixel + float2(31.0f, 13.0f), frameCounter);
 	float stepJitter = InterleavedGradientNoise(screenPixel + float2(47.0f, 17.0f), frameCounter);
 
 	float3 totalGi = 0.0f;

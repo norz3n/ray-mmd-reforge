@@ -44,12 +44,29 @@ SSPTTemporalOutput SSPTTemporalPS(
 	float3 historyColor = histData.rgb;
 	float prevDepth = histData.a;
 
-	float depthDiff = abs(prevDepth - zCenter) / max(zCenter, 1e-3f);
-	float rejectWeight = saturate(depthDiff * 5.0f);
-	float alpha = lerp(0.05f, 1.0f, rejectWeight);
+	float expectedPrevZ = prevClipPos.w;
+	float depthDiff = abs(prevDepth - expectedPrevZ) / max(expectedPrevZ, 1e-3f);
+	float depthReject = saturate(depthDiff * 8.0f);
 
-	// Neighborhood clamping to prevent ghosting
+	float3 curNormal = GetSSPTNormal(uvCoord);
+	float3 prevNormal = GetSSPTNormal(prevUV);
+	float normalDiff = saturate((1.0f - saturate(dot(curNormal, prevNormal))) * 4.0f);
+
+	float rejectWeight = max(depthReject, normalDiff);
+
+	// Motion-adaptive responsiveness: calculate screen-space pixel displacement from camera motion
+	float2 pixelMotion = (uvCoord - prevUV) * ViewportSize;
+	float motionLen = length(pixelMotion);
+	float motionWeight = saturate(motionLen * 0.05f);
+
+	// In static scenes: baseAlpha = 0.05 (95% history). During fast motion: alpha scales up to 0.35 to eliminate ghost trails
+	float baseAlpha = lerp(0.05f, 0.35f, motionWeight);
+	float alpha = lerp(baseAlpha, 1.0f, rejectWeight);
+
+	// Variance Clipping to prevent view-dependent lighting ghosting
 	float2 tapStep = ViewportOffset2;
+	float3 m1 = currColor;
+	float3 m2 = currColor * currColor;
 	float3 minColor = currColor;
 	float3 maxColor = currColor;
 
@@ -62,12 +79,22 @@ SSPTTemporalOutput SSPTTemporalPS(
 			if (i != 0 || j != 0)
 			{
 				float3 neighbor = tex2Dlod(source, float4(uvCoord + float2(i, j) * tapStep, 0.0f, 0.0f)).rgb;
+				m1 += neighbor;
+				m2 += neighbor * neighbor;
 				minColor = min(minColor, neighbor);
 				maxColor = max(maxColor, neighbor);
 			}
 		}
 	}
-	historyColor = clamp(historyColor, minColor, maxColor);
+	
+	float3 mu = m1 / 9.0f;
+	float3 sigma = sqrt(abs(m2 / 9.0f - mu * mu));
+	// Tighten variance box under fast motion to aggressively eliminate ghosting
+	float gamma = lerp(1.25f, 0.75f, motionWeight);
+	float3 boxMin = max(mu - gamma * sigma, minColor);
+	float3 boxMax = min(mu + gamma * sigma, maxColor);
+
+	historyColor = clamp(historyColor, boxMin, boxMax);
 
 	float3 denoised = lerp(historyColor, currColor, alpha);
 
