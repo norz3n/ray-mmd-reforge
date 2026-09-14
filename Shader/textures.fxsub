@@ -238,6 +238,53 @@ sampler SSRMapSamp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
+// Source-side reflection visibility: how strongly each material appears in OTHER
+// materials' reflections. SSRMap is the receiver side (how much a surface reflects);
+// this map filters the reflected scene content at the trace hit point instead.
+// Clears to 1 (fully visible); attaching "SSR reflect visibility N.fx" to a
+// material's MME tab scales how much of it other surfaces may reflect.
+texture SSRReflectMap : OFFSCREENRENDERTARGET<
+	string Description = "SSR reflect visibility for ray";
+	float2 ViewportRatio = {1.0, 1.0};
+	string Format = "A8";
+	float4 ClearColor = { 1, 1, 1, 1 };
+	float ClearDepth = 1.0;
+	string DefaultEffect =
+		"self = hide;"
+		"*fog.pmx=hide;"
+		"*controller*.pmx=hide;"
+		"*editor*.pmx=hide;"
+		"Volumetric*.pmx=hide;"
+		"*.*=shadow/SSR reflect visibility 1.0.fx;";
+>;
+sampler SSRReflectMapSamp = sampler_state {
+	texture = <SSRReflectMap>;
+	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
+// Self-reflection suppression flag: materials flagged here never bounce SSR
+// between each other (skin/hair self-smudging on face close-ups), while still
+// reflecting and being reflected by unflagged materials. Clears to 0 (no
+// suppression); attach "SSR self visibility N.fx" to a material's MME tab.
+texture SSRSelfMap : OFFSCREENRENDERTARGET<
+	string Description = "SSR self-reflection suppression for ray";
+	float2 ViewportRatio = {1.0, 1.0};
+	string Format = "A8";
+	float4 ClearColor = { 0, 0, 0, 0 };
+	float ClearDepth = 1.0;
+	string DefaultEffect =
+		"self = hide;"
+		"*fog.pmx=hide;"
+		"*controller*.pmx=hide;"
+		"*editor*.pmx=hide;"
+		"Volumetric*.pmx=hide;"
+		"*.*=shadow/SSR self visibility 0.0.fx;";
+>;
+sampler SSRSelfMapSamp = sampler_state {
+	texture = <SSRSelfMap>;
+	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
 #endif
 #if SKY_VISIBILITY_ENABLE
 shared texture SkyVisibilityMap : OFFSCREENRENDERTARGET<

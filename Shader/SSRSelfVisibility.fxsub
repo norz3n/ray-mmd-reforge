@@ -1,0 +1,60 @@
+#include "../ray.conf"
+#include "../shader/common.fxsub"
+
+/**
+ * Ray-MMD ReForge: SSR Self-Reflection Suppression
+ *
+ * Fills SSRSelfMap: a per-material flag that stops flagged materials from
+ * bouncing screen-space reflections between each other (e.g. skin and hair
+ * smudging across face close-ups), while they keep reflecting every unflagged
+ * material and remain fully visible in unflagged materials' reflections.
+ *
+ * Same preset-driven logic as SSRVisibility.fxsub / SSRReflectVisibility.fxsub:
+ * the pass writes the flag constant only (0.0 = normal, 1.0 = never self-bounce,
+ * in-between = proportional suppression of flagged-to-flagged hits). Nothing is
+ * clipped, so presets win on every material including additive ones.
+ *
+ * The SSR trace multiplies the two sampled flags (receiver pixel x hit pixel):
+ * suppression fires only when BOTH ends are flagged.
+ */
+#if SSR_SELF_VISIBILITY_ENABLE
+void SelfObjectVS(
+	in float4 Position : POSITION,
+	in float2 Texcoord : TEXCOORD0,
+	out float2 oTexcoord : TEXCOORD0,
+	out float4 oPosition : POSITION)
+{
+	oTexcoord = Texcoord;
+	oPosition = mul(Position, matViewProject);
+}
+
+float4 SelfObjectPS(float2 coord : TEXCOORD0) : COLOR
+{
+	return float4(selfVisibility, selfVisibility, selfVisibility, selfVisibility);
+}
+
+technique SelfTec<string MMDPass = "object";>
+{
+	pass DrawObject {
+		AlphaTestEnable = false; AlphaBlendEnable = false;
+		VertexShader = compile vs_3_0 SelfObjectVS();
+		PixelShader  = compile ps_3_0 SelfObjectPS();
+	}
+}
+
+technique SelfTecBS<string MMDPass = "object_ss";>
+{
+	pass DrawObject {
+		AlphaTestEnable = false; AlphaBlendEnable = false;
+		VertexShader = compile vs_3_0 SelfObjectVS();
+		PixelShader  = compile ps_3_0 SelfObjectPS();
+	}
+}
+#else
+technique SelfTec<string MMDPass = "object";>{}
+technique SelfTecBS<string MMDPass = "object_ss";>{}
+#endif
+
+technique EdgeTec<string MMDPass = "edge";>{}
+technique ShadowTec<string MMDPass = "shadow";>{}
+technique ZplotTec<string MMDPass = "zplot";>{}

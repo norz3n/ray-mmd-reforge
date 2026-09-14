@@ -303,8 +303,21 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 
 	float confidence = edgeVignette * distanceFalloff * hitFacing;
 
+	// Self-reflection suppression (SSRSelfMap): flagged materials never bounce
+	// SSR between each other (skin/hair self-smudging on face close-ups), while
+	// still reflecting and being reflected by unflagged materials. Fires only
+	// when both the receiver pixel and the hit pixel carry the flag.
+	float selfReceiver = tex2Dlod(SSRSelfMapSamp, float4(coord.xy, 0.0f, 0.0f)).a;
+	float selfHit = tex2Dlod(SSRSelfMapSamp, float4(hitUV, 0.0f, 0.0f)).a;
+	confidence *= 1.0f - selfReceiver * selfHit;
+
+	// Source-side reflect visibility (SSRReflectMap): how strongly the hit surface
+	// itself is allowed to appear in this reflection. Scaled into both radiance and
+	// confidence so fully hidden materials fall back to the env/IBL specular cleanly.
+	float reflectVis = tex2Dlod(SSRReflectMapSamp, float4(hitUV, 0.0f, 0.0f)).a;
+
 	float4 hitRadiance = tex2Dlod(ShadingMapSamp, float4(hitUV, 0.0f, 0.0f));
-	return float4(hitRadiance.rgb, 1.0f) * confidence;
+	return float4(hitRadiance.rgb, 1.0f) * (confidence * reflectVis);
 }
 
 #endif // RAY_MMD_SSR_TRACE_FXSUB
