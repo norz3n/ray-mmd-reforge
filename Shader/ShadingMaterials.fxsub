@@ -205,8 +205,8 @@ void ShadingImageBasedLighting(sampler source, MaterialParam material, float4 sc
 	DecodeYcbcr(source, coord, screenPosition, ViewportOffset2, diffuse, specular);
 
 #if SSDO_QUALITY
-	// Bent normal is still used for directional specular occlusion on IBL;
-	// diffuse AO is deferred to PostProcessAOComposite after SSGI runs.
+	// Bent normal drives directional specular occlusion on IBL; diffuse AO is
+	// applied in-material below (AO is computed before shading runs).
 	float4 ssdoData  = tex2Dlod(SSDOMapSamp, float4(coord, 0, 0));
 	float3 bentNormal = normalize(ssdoData.xyz * 2.0f - 1.0f);
 	float3 R          = EnvironmentReflect(material.normal, V);
@@ -224,8 +224,9 @@ void ShadingImageBasedLighting(sampler source, MaterialParam material, float4 sc
 	float specOcc     = min(lerp(baseSpecOcc, max(baseSpecOcc * 0.5f, dirSpecOcc), saturate(roughness * 2.5f)), gtso);
 	specular *= isSkin ? lerp(1.0f, specOcc, SKIN_AO_STRENGTH) : specOcc;
 
-#if !GI_ENABLE
-	// GI is disabled: AOComposite pass won't run, so apply Jimenez multi-bounce diffuse AO here.
+	// Jimenez multi-bounce diffuse AO applied in-material: AO is computed before
+	// shading, so direct sun, IBL and the GI composite all consume it consistently
+	// and no post-GI multiply pass is needed.
 	bool   isEmissiveOrGlass2 = (material.lightModel == SHADINGMODELID_GLASS || material.lightModel == SHADINGMODELID_EMISSIVE);
 	if (!isEmissiveOrGlass2)
 	{
@@ -235,13 +236,11 @@ void ShadingImageBasedLighting(sampler source, MaterialParam material, float4 sc
 		float3 coloredAO = max(effectiveAO, ((effectiveAO * aBounce + bBounce) * effectiveAO + cBounce) * effectiveAO);
 		diffuse *= coloredAO;
 	}
-#endif
-	// When GI is enabled, diffuse AO is deferred to PostProcessAOComposite (runs after SSGI).
 #else
-	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
-	float vis = isSkin ? lerp(1.0f, material.visibility, 0.5f) : material.visibility;
+	bool isSkinVis = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
+	float vis = isSkinVis ? lerp(1.0f, material.visibility, 0.5f) : material.visibility;
 	diffuse *= vis;
-	specular *= ComputeSpecularOcclusion(abs(dot(material.normal, V)) + 1e-5, vis, material.smoothness);
+	specular *= ComputeSpecularOcclusion(abs(dot(material.normal, V)) + 1e-5f, vis, material.smoothness);
 #endif
 
 	float shadow = 1;

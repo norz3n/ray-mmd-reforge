@@ -407,6 +407,21 @@ SSDOTemporalOutput SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0)
 
 	float4 historyAO = tex2Dlod(SSDOMapHistorySamp, float4(prevUV, 0, 0));
 
+	// Bent-normal history validation: the depth gate above compares the CURRENT
+	// depth at prevUV, so on depth-continuous surfaces (camera pans across a
+	// wall, limbs sliding over the body) it accepts history that belongs to a
+	// different surface point. The reprojected bent normal - which the history
+	// buffer already stores in xyz - flags exactly those cases.
+	float3 curBent = curAO.xyz * 2.0f - 1.0f;
+	float3 histBent = historyAO.xyz * 2.0f - 1.0f;
+	float bentReject = saturate((1.0f - saturate(dot(curBent, histBent))) * 4.0f);
+
+	// Motion-adaptive blend: a fixed high history weight turns any validation
+	// leak into a dark trail on the composite, so hand control to the current
+	// frame as soon as the surface moves in screen space.
+	float2 pixelMotion = (uv - prevUV) * ViewportSize;
+	float alphaCurrent = max(lerp(0.15f, 1.0f, saturate(length(pixelMotion) / 8.0f)), bentReject);
+
 	// Strict 3x3 Neighborhood Box Clamping: history is strictly bounded by current neighborhood to prevent temporal dark bleeding
 	float2 texelSize = ViewportOffset2;
 	float4 minAO = curAO;
@@ -429,7 +444,7 @@ SSDOTemporalOutput SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0)
 
 	historyAO = clamp(historyAO, minAO, maxAO);
 
-	float4 denoised = lerp(curAO, historyAO, 0.85f);
+	float4 denoised = lerp(curAO, historyAO, 1.0f - alphaCurrent);
 
 	// Re-normalize bent normal after temporal blending to prevent vector length drift
 	float3 bn = denoised.xyz * 2.0f - 1.0f;

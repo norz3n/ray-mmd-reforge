@@ -101,7 +101,10 @@ void TAAPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1, uniform s
 	// Depth-validated history: reject stale history when the statically reprojected point does not
 	// match what was actually visible at prevUV last frame (moving models, disocclusions)
 	bool isValidPrev = all(prevUV >= 0.0) && all(prevUV <= 1.0);
-	float expectedPrevZ = -prevClipPos.w;
+	// TAADepthMap stores positive viewZ (same convention as SSGITemporal/GTAO);
+	// negating prevClipPos.w here made depthValid always false, silently
+	// disabling the TAA history entirely.
+	float expectedPrevZ = prevClipPos.w;
 	float storedPrevZ = tex2Dlod(TAADepthMapSamp, float4(prevUV, 0, 0)).r;
 	bool depthValid = isValidPrev && (abs(storedPrevZ - expectedPrevZ) / max(expectedPrevZ, 1e-3) < 0.03);
 
@@ -165,7 +168,11 @@ void TAAPS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1, uniform s
 	// Karis luma weighting for HDR anti-firefly accumulation
 	float wCurrent = 1.0f / (1.0f + max(currYCoCg.x, 0.0f));
 	float wHistory = 1.0f / (1.0f + max(historyYCoCg.x, 0.0f));
-	float blendFactor = depthValid ? 0.90f : 0.0f;
+	// Depth validation alone still accepts history of surfaces sliding at a
+	// similar depth (limbs over the body), so fade the history out with screen
+	// motion the same way the GI/AO temporal passes do.
+	float motionResponse = saturate(length((uv - prevUV) * ViewportSize) / 8.0f);
+	float blendFactor = depthValid ? lerp(0.90f, 0.25f, motionResponse) : 0.0f;
 
 	float weightCurr = wCurrent * (1.0f - blendFactor);
 	float weightHist = wHistory * blendFactor;

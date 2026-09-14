@@ -462,10 +462,6 @@ static float mCausticsDispScale  = lerp(lerp(1.0f, 3.0f, mCstDispersionP), 0.0f,
 #	include "shader/PostProcessSSGI.fxsub"
 #endif
 
-#if GI_ENABLE && SSDO_QUALITY && (IBL_QUALITY || SUN_LIGHT_ENABLE)
-#	include "shader/PostProcessAOComposite.fxsub"
-#endif
-
 #ifndef BOKEH_MODE
 #	define BOKEH_MODE 0
 #endif
@@ -596,6 +592,23 @@ technique DeferredLighting<
 	"RenderColorTarget=OutlineTempMap; Pass=EdgeNeighborhoodBlending;"
 #endif
 
+#if GI_ENABLE
+	// AO runs BEFORE shading/GI: ShadingMaterial/IBL consume SSDOMap directly and
+	// the final composite no longer needs a post-GI AO multiply pass.
+#if SSDO_QUALITY && (IBL_QUALITY || SUN_LIGHT_ENABLE)
+	"RenderColorTarget=SSDOMap; Pass=SSDO;"
+#if SSDO_BLUR_RADIUS
+	"RenderColorTarget=SSDOMapTemp; Pass=SSDOBlurX;"
+	"RenderColorTarget=SSDOMap;     Pass=SSDOBlurY;"
+#endif
+#if AO_TEMPORAL_DENOISE
+	"RenderColorTarget0=SSDOMapTemp; RenderColorTarget1=SSDOMapHistory; Pass=SSDOTemporalDenoise;"
+	"RenderColorTarget1=;"
+	"RenderColorTarget=SSDOMap; Pass=SSDOCopyTemporal;"
+#endif
+#endif
+#endif
+
 #if SSSS_QUALITY && SSSS_TEXSPACE
 	// Texture-space SSS field: convolve the UV-wrapped skin irradiance once
 	// before the deferred composite consumes it (WRAP addressing, coverage-
@@ -640,21 +653,6 @@ technique DeferredLighting<
 	"RenderColorTarget0=SSGIMap; RenderColorTarget1=SSGIMapHistory; Pass=SSGITemporalDenoise;"
 	"RenderColorTarget1=;"
 	"RenderColorTarget=ShadingMap;  Pass=SSGIFinalCombine;"
-
-	// AO runs AFTER GI so that darkening applies to the full composite (direct + IBL + GI).
-#if SSDO_QUALITY && (IBL_QUALITY || SUN_LIGHT_ENABLE)
-	"RenderColorTarget=SSDOMap; Pass=SSDO;"
-#if SSDO_BLUR_RADIUS
-	"RenderColorTarget=SSDOMapTemp; Pass=SSDOBlurX;"
-	"RenderColorTarget=SSDOMap;     Pass=SSDOBlurY;"
-#endif
-#if AO_TEMPORAL_DENOISE
-	"RenderColorTarget0=SSDOMapTemp; RenderColorTarget1=SSDOMapHistory; Pass=SSDOTemporalDenoise;"
-	"RenderColorTarget1=;"
-	"RenderColorTarget=SSDOMap; Pass=SSDOCopyTemporal;"
-#endif
-	"RenderColorTarget=ShadingMap; Pass=AOComposite;"
-#endif
 #endif
 
 #if SSR_QUALITY
@@ -1106,7 +1104,7 @@ technique DeferredLighting<
 		PixelShader  = compile ps_3_0 SSGIFinalCombinePS();
 	}
 #if SSDO_QUALITY && (IBL_QUALITY || SUN_LIGHT_ENABLE)
-	// AO computation - runs after GI so AOComposite can darken the full composite
+	// AO pass declarations (consumed before shading/GI in the technique script)
 	pass SSDO<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
@@ -1139,12 +1137,6 @@ technique DeferredLighting<
 		PixelShader  = compile ps_3_0 SSDOCopyTemporalPS();
 	}
 #endif
-	pass AOComposite<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 AOCompositePS();
-	}
 #endif
 #endif
 #if BOKEH_MODE == 1

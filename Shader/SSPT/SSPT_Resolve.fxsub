@@ -40,8 +40,8 @@ float4 SSPTFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 
 	bool isSkin = (mat.lightModel == SHADINGMODELID_SKIN || mat.lightModel == SHADINGMODELID_SUBSURFACE);
 
-	// AO is applied in a dedicated post-SSGI pass (PostProcessAOComposite.fxsub)
-	// so that it darkens the full composite (direct + IBL + GI) uniformly.
+	// AO is computed before shading and applied in-material (ShadingMaterials),
+	// so it already darkens direct/IBL light before the GI composite adds bounce.
 	float occlusion = 1.0f;
 
 	float3 camDir = normalize(viewDir);

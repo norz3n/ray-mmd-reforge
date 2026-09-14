@@ -64,7 +64,7 @@ float4 SSPTOutlierRejectPS(
 			float sampleLuma = dot(sampleColor, float3(0.299f, 0.587f, 0.114f));
 
 			// Karis luminance weighting: suppresses extreme fireflies without distorting linear field
-			float lumaWeight = 1.0f / (1.0f + 0.20f * sampleLuma);
+			float lumaWeight = 1.0f / (1.0f + 0.35f * sampleLuma);
 			float weight = (wx * wy) * geomWeight * normalWeight * lumaWeight;
 
 			totalC += sampleColor * weight;
@@ -129,7 +129,7 @@ float4 SSPTBlurPS(
 			float geomWeightA = max(planeWeightA, depthWeightA * 0.35f);
 
 			float3 nA = GetSSPTNormal(uvA);
-			float normalWeightA = saturate(0.25f + 0.75f * BilateralNormalWeight(nA, nCenter));
+			float normalWeightA = saturate(0.20f + 0.80f * BilateralNormalWeight(nA, nCenter));
 			float wA = spatialWeight * geomWeightA * normalWeightA;
 
 			totalC += clamp(tex2Dlod(source, float4(uvA, 0.0f, 0.0f)).rgb, 0.0f, 100.0f) * wA;
@@ -145,7 +145,7 @@ float4 SSPTBlurPS(
 			float geomWeightB = max(planeWeightB, depthWeightB * 0.35f);
 
 			float3 nB = GetSSPTNormal(uvB);
-			float normalWeightB = saturate(0.25f + 0.75f * BilateralNormalWeight(nB, nCenter));
+			float normalWeightB = saturate(0.20f + 0.80f * BilateralNormalWeight(nB, nCenter));
 			float wB = spatialWeight * geomWeightB * normalWeightB;
 
 			totalC += clamp(tex2Dlod(source, float4(uvB, 0.0f, 0.0f)).rgb, 0.0f, 100.0f) * wB;
