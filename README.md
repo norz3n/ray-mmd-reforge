@@ -24,7 +24,7 @@ Requirement :
 * Direct3D 9 With Shader Model 3.0 (ps_3_0)
 * **Powerful GPU recommended** due to advanced shading techniques.
 
-Reforge Exclusive Features (through v1.20.18) :
+Reforge Exclusive Features (through v1.20.20) :
 ------------
 
 **Direct Screen-Space Core**
@@ -48,6 +48,8 @@ Reforge Exclusive Features (through v1.20.18) :
 
 **Reflections & Occlusion**
 * **McGuire 2014 2D DDA Screen-Space Reflections**: full-featured screen-space ray tracing engine with hybrid bisection & secant root-finding, subpixel binary refinement, and LOD-0 mirror gloss resolve without jitter or contact gaps.
+* **Per-Material Reflection Mask System (3 dedicated MME tabs)**: `SSRMap` (receiver — how much a material reflects), `SSRReflectMap` (source — how strongly a material appears in other materials' reflections, `Shadow/SSR reflect visibility 0.0–1.0.fx`), and `SSRSelfMap` (self-suppression — flagged materials never bounce SSR between each other, `Shadow/SSR self visibility 0.0–1.0.fx`). All masks are preset-driven constants with nothing clipped, work on additive/semi-transparent materials, and never conflict across tabs.
+* **Material-Driven SSR Roughness**: SSR blur now follows each material's own smoothness (smoothness maps / MMD shininess) via a perceptual `pow(roughness, 1.5)` pyramid-LOD mapping, consistent with the IBL specular response; global gloss bias tunable via `mSSRSmoothnessDefault` in `ray_advanced.conf`.
 * **Stabilized Thin & Curved Glass Refraction**: view-space normal-tilt screen-space offset eliminating planar background object duplication on flat windows, physical thin-glass default (`customA = 0.5`), balanced chromatic dispersion, deflection clamping, and Newton's method 3D root-finding (Mayer et al. 2026).
 * **Top-Down Sky Visibility & Heightfield Macro AO**: Snowdrop Engine (GDC 2016) directional horizon search and cone-tracing macro ambient occlusion preventing outdoor skylight and ambient IBL from leaking into covered spaces, under canopies, bridges, roofs, and doorways. Controlled via dedicated `SkyVisibilityController.pmx`.
 * **Ground-Truth Ambient Occlusion (GTAO / GTSO)**: reference XeGTAO cosine horizon integration, Jimenez multi-bounce approximation, temporal history stabilization, and directional bent normals.
