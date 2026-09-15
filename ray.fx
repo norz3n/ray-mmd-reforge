@@ -650,8 +650,6 @@ technique DeferredLighting<
 	"RenderColorTarget=SSGIMapTemp; Pass=SSGIBlurY;"
 	"RenderColorTarget=SSGIMap;     Pass=SSGIBlurX2;"
 	"RenderColorTarget=SSGIMapTemp; Pass=SSGIBlurY2;"
-	"RenderColorTarget0=SSGIMap; RenderColorTarget1=SSGIMapHistory; Pass=SSGITemporalDenoise;"
-	"RenderColorTarget1=;"
 	"RenderColorTarget=ShadingMap;  Pass=SSGIFinalCombine;"
 #endif
 

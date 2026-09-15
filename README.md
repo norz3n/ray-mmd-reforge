@@ -24,7 +24,7 @@ Requirement :
 * Direct3D 9 With Shader Model 3.0 (ps_3_0)
 * **Powerful GPU recommended** due to advanced shading techniques.
 
-Reforge Exclusive Features (through v1.20.20) :
+Reforge Exclusive Features (through v1.20.21) :
 ------------
 
 **Direct Screen-Space Core**
@@ -33,12 +33,11 @@ Reforge Exclusive Features (through v1.20.20) :
 
 **Global Illumination (SSPT / RTGI & SSGI 3.0)**
 * **Screen-Space Path Tracing (SSPT / RTGI 3.0 - `GI_ENABLE 3`, Default)**: next-generation path-traced room radiance engine inspired by Marty McFly's qUINT RTGI. Implements low-discrepancy Monte Carlo cosine-weighted hemisphere path tracing with golden angle rotation (`SSPT_GOLDEN_ANGLE = 2.39996323`), 1D Bayer dither stratification, and projected-axis orthonormal tangent frame (`BuildTangentMatrix`).
-* **Motion-Adaptive Temporal Denoising & Normal Rejection**: dedicated post-filter temporal accumulation passes (`SSGITemporalDenoise`) with motion-adaptive responsiveness (dynamic alpha scaling from 0.05 to 0.35 based on screen-space camera velocity), surface normal rejection (`dot(curNormal, prevNormal)`), and dynamic variance clipping, eliminating lighting ghost trails and static noise smearing during camera movement.
-* **Continuous Elapsed-Time Dithering**: decoupled spatiotemporal ray dithering from playback animation time to continuous system elapsed time, ensuring temporal ray dithering never freezes during paused viewport camera interactions.
+* **Static Frozen Ray Dithering & À-Trous Spatial Denoising**: per-pixel dither pattern is frozen across frames (no temporal flicker), so all stochastic noise is fully absorbed by the bilateral blur chain — GI output is clean without any temporal accumulation, history buffers, or ghost-trail risk.
 * **Progressive Quadratic Ray Stepping & Depth Thickness Gating**: dense near-field precision with broad room reach (`lambda = s * sqrt(s)`), analytical depth thickness gating (`delta = (pSample - pRay) * invThickness`) preventing light leaking through walls, fingers, and hair.
 * **Secondary Bounce Feedback & Viewport-Boundary Radiance**: multi-bounce reflection feedback loop (`SSPT_BOUNCES 1`) with emissive transfer and escaped-ray sky radiance sampling preventing dark camera-edge halos.
 * **Deferred Ambient Occlusion Post-GI Composite**: deferred SSDO execution and introduced a dedicated post-GI pass (`Shader/PostProcessAOComposite.fxsub`) running after `SSGIFinalCombine`. Uniformly applies Jimenez multi-bounce AO across total composited radiance (direct + IBL + GI), preventing strong indirect bounces from bleaching contact shadows and crevices while preserving clean glass and emissive passthrough.
-* **Direct Solar Shadow Retention & Sky Radiance Calibration**: direct shadow gating (`SSPT_SHADOW_RETENTION 0.40`) in SSPT and SSGI resolves scaling indirect bounce against `ShadowMapSamp` via a quadratic penumbra response curve, keeping cast shadows deep and distinct without losing rich color bleeding. Replaced hardcoded unoccluded ray sky radiance with tunable `SSPT_SKY_LIGHT_AMOUNT 0.05` in `SSPT_Trace.fxsub`.
+* **Direct Solar Shadow Retention & Sky Radiance Calibration**: direct shadow gating (`SSPT_SHADOW_RETENTION 0.60`) in SSPT and SSGI resolves scaling indirect bounce against `ShadowMapSamp` via a quadratic penumbra response curve, keeping cast shadows deep and distinct without losing rich color bleeding. Replaced hardcoded unoccluded ray sky radiance with tunable `SSPT_SKY_LIGHT_AMOUNT 0.05` in `SSPT_Trace.fxsub`.
 * **Albedo-Driven Dynamic Skin Multi-Bounce & Linearized Cavity AO**: dynamic albedo interreflection curve (`1.0 + (mat.albedo * 2.2) / max(...)`) and softened linear cavity AO in SSPT/SSGI resolves, eliminating skin darkening and crushing in deep shadows.
 * **Dielectric Glass Resolve Bypass & Raymarch Transmission**: early-exit zero diffuse GI combine on `SHADINGMODELID_GLASS` preventing milky/matte fogging, and raymarch hit skipping (`continue`) allowing rays to transmit through glass without false bounce or artificial shadows.
 * **SSGI 3.0 (`GI_ENABLE 1 / 2`)**: Duff (2017) branchless orthonormal basis, stratified Halton (2, 3) sampling, per-pixel IGN rotation, analytical screen-edge clipping (`ClipRayToScreenEdge`), and early thickness evaluation.
