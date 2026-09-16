@@ -289,11 +289,21 @@ bool SSR_HiZTrace(
 		}
 		float tCellExit = t + min(tExitAxes.x, tExitAxes.y);
 
-		// Adaptive thickness budget scales with cell depth span to prevent grazing false skips
+		// Hi-Z cells are planar approximations: the finer the cell, the closer
+		// the min/max planes sit together, the coarser, the wider they spread.
+		// A fixed per-pixel mSSRThickness cannot cover that spread, so the slab
+		// opens by however much view depth the ray crosses inside the cell.
+		// kSlabSpreadFloor is the minimum slab opening applied even to
+		// near-planar cells; without it, rays skimming a floor or wall at a
+		// shallow angle pass straight through cells they should intersect.
+		// Tuned against MMD scene scales (view-space metres).
+		static const float kSlabSpreadFloor = 0.4f;
+
 		float rayZExit = p0.z + tCellExit * dP.z;
 		float linearZExit = P32 / (rayZExit - P22);
-		float cellDepthSpan = abs(linearZExit - linearZ);
-		float thickness = max(thicknessBase, 0.4f + cellDepthSpan);
+		float cellDepthRange = abs(linearZExit - linearZ);
+		float cellSlab = kSlabSpreadFloor + cellDepthRange;
+		float thickness = max(thicknessBase, cellSlab);
 
 		float tNext = t;
 

@@ -12,6 +12,44 @@
 
 #include "shader/SSR/SSR_Common.fxsub"
 
+/**
+ * Confidence of a resolved SSR hit, in [0, 1]. Composed of four independent
+ * fade factors:
+ *   - Travel fade: reflections that consume the whole ray budget carry no
+ *     information about what was actually hit, so they ramp down to zero over
+ *     the final stretch of the budget (mSSRFadeStart defines the ramp start).
+ *   - Angle fade: rays leaving nearly parallel to the surface stretch across
+ *     many screen cells and accumulate the most Hi-Z error.
+ *   - Depth fade: beyond half of mSSRRangeMax the scene depth buffer becomes
+ *     too coarse for reliable parallax, so far background rays dissolve.
+ *   - Facing test: a hit on a surface turned away from the incoming ray is a
+ *     silhouette artifact, not a real reflector.
+ * A low-confidence hit is not discarded; the resolve pass blends it into the
+ * environment/IBL specular, so fading smoothly avoids visible seams.
+ */
+float SSR_HitConfidence(
+	in float3 rayOriginVS,
+	in float3 hitPosVS,
+	in float traceDistance,
+	in float atten,
+	in float2 hitUV,
+	in float3 reflectRayVS,
+	in MaterialParam surfaceMat)
+{
+	float travelDist = length(hitPosVS - rayOriginVS);
+	float travelFade = 1.0f - smoothstep(traceDistance * mSSRFadeStart, traceDistance, travelDist);
+
+	float angleFade = smoothstep(0.0f, 0.1f, atten);
+
+	float depthFade = 1.0f - smoothstep(mSSRRangeMax * 0.5f, mSSRRangeMax, surfaceMat.linearDepth);
+
+	// Front-facing normal test on the hit surface: removes backface/silhouette streaks
+	float3 hitNormal = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(hitUV, 0.0f, 0.0f)));
+	float facingFade = smoothstep(0.02f, 0.22f, dot(hitNormal, -reflectRayVS));
+
+	return travelFade * angleFade * depthFade * facingFade;
+}
+
 float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) : COLOR
 {
 	float receiverVis = tex2Dlod(SSRMapSamp, float4(coord.xy, 0.0f, 0.0f)).a;
@@ -65,23 +103,8 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	if (!hit)
 		clip(-1);
 
-	// Reference PostProcessSSR::SSRCalculateWeight — distance fade over the last
-	// quarter of the ray budget, grazing-angle fade and far-depth fade. Smooth
-	// weights keep failed/low-confidence rays from punching holes; they just
-	// dissolve into the env specular. No screen-edge vignette: reflections run
-	// all the way to the frame boundary.
-	float travelDist = length(hitPosVS - rayOriginVS);
-	float distWeight = 1.0f - smoothstep(traceDistance * mSSRFadeStart, traceDistance, travelDist);
-
-	float angleWeight = smoothstep(0.0f, 0.1f, atten);
-
-	float depthWeight = 1.0f - smoothstep(mSSRRangeMax * 0.5f, mSSRRangeMax, surfaceMat.linearDepth);
-
-	// Front-facing normal test on the hit surface: removes backface/silhouette streaks
-	float3 hitNormal = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(hitUV, 0.0f, 0.0f)));
-	float hitFacing = smoothstep(0.02f, 0.22f, dot(hitNormal, -reflectRayVS));
-
-	float confidence = distWeight * angleWeight * depthWeight * hitFacing;
+	float confidence = SSR_HitConfidence(
+		rayOriginVS, hitPosVS, traceDistance, atten, hitUV, reflectRayVS, surfaceMat);
 
 	// Self-reflection suppression (SSRSelfMap): flagged materials never bounce
 	// SSR between each other (skin/hair self-smudging on face close-ups), while
