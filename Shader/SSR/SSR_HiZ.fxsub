@@ -173,8 +173,9 @@ float2 SSR_HiZFetchCell(int level, float2 cell)
 }
 
 /**
- * Converts an NDC depth to linear view-space depth. With the row-vector
- * projection convention used throughout the framework, z_ndc = P22 + P32 / z_view.
+ * Converts an NDC depth to linear view-space depth. Inverts the framework's
+ * row-vector perspective projection, where the NDC depth is an affine
+ * function of 1 / view depth (the [2][2] and [3][2] matrix elements).
  */
 inline float SSR_HiZViewDepth(float zNdc)
 {
@@ -187,6 +188,24 @@ inline float SSR_HiZViewDepth(float zNdc)
 inline float SSR_HiZNdcDepth(float zView)
 {
 	return matProject[2][2] + matProject[3][2] / zView;
+}
+
+/**
+ * Reconstructs the view-space position behind a traced screen-space point
+ * (UV in [0,1] with the framework's y flip, plus NDC depth).
+ *
+ * Derivation: screen depth is NDC depth, so the view-space depth comes from
+ * SSR_HiZViewDepth. In this projection convention the clip-space w equals the
+ * view-space depth, so scaling the NDC by it produces the clip-space position
+ * directly; the inverse projection then maps it back to view space. Doing it
+ * in this order avoids re-deriving w from the matrix per component.
+ */
+inline float3 SSR_HiZUnprojectScreen(float3 screenPoint)
+{
+	float3 ndc = (screenPoint - float3(0.5f, 0.5f, 0.0f)) * float3(2.0f, -2.0f, 1.0f);
+	float zView = SSR_HiZViewDepth(ndc.z);
+	float4 clipPos = float4(ndc.xyz * zView, zView);
+	return mul(clipPos, matProjectInverse).xyz;
 }
 
 /**
@@ -247,9 +266,6 @@ bool SSR_HiZTrace(
 	float2 boundaryOffset = stepDir * (0.005f * kSSRHiZInvScreen);
 	float2 boundaryStep = saturate(stepDir);
 
-	float P22 = matProject[2][2];
-	float P32 = matProject[3][2];
-
 	float t = 0.0f;
 	int level = 0;
 
@@ -272,8 +288,8 @@ bool SSR_HiZTrace(
 			: SSR_HiZFetchCell(level, cellId);
 
 		// Convert ray and surface depths to view / NDC spaces
-		float linearZ = P32 / (ray.z - P22);
-		float minZ = (zMinMax.x > 0.01f) ? (P22 + P32 / zMinMax.x) : 0.0f;
+		float linearZ = SSR_HiZViewDepth(ray.z);
+		float minZ = (zMinMax.x > 0.01f) ? SSR_HiZNdcDepth(zMinMax.x) : 0.0f;
 
 		// Compute parametric exit point from current 2D cell boundary
 		float2 tExitAxes = 1e9f;
@@ -300,7 +316,7 @@ bool SSR_HiZTrace(
 		static const float kSlabSpreadFloor = 0.4f;
 
 		float rayZExit = p0.z + tCellExit * dP.z;
-		float linearZExit = P32 / (rayZExit - P22);
+		float linearZExit = SSR_HiZViewDepth(rayZExit);
 		float cellDepthRange = abs(linearZExit - linearZ);
 		float cellSlab = kSlabSpreadFloor + cellDepthRange;
 		float thickness = max(thicknessBase, cellSlab);
@@ -325,7 +341,7 @@ bool SSR_HiZTrace(
 			else if (level == 0)
 			{
 				float rayZProbe = p0.z + tNext * dP.z;
-				float linearZProbe = P32 / (rayZProbe - P22);
+				float linearZProbe = SSR_HiZViewDepth(rayZProbe);
 				if (zMinMax.x <= 0.01f || abs(linearZProbe - zMinMax.x) >= thicknessBase)
 				{
 					tNext = tCellExit;
@@ -344,7 +360,7 @@ bool SSR_HiZTrace(
 			else if (level == 0)
 			{
 				float rayZProbe = p0.z + tNext * dP.z;
-				float linearZProbe = P32 / (rayZProbe - P22);
+				float linearZProbe = SSR_HiZViewDepth(rayZProbe);
 				if (zMinMax.x <= 0.01f || abs(linearZProbe - zMinMax.x) >= thicknessBase)
 				{
 					tNext = tCellExit;
@@ -360,11 +376,7 @@ bool SSR_HiZTrace(
 
 	float3 hitPoint = p0 + t * dP;
 	hitUV = clamp(hitPoint.xy, 0.0f, 1.0f);
-
-	float3 hitNDC = (hitPoint - float3(0.5f, 0.5f, 0.0f)) * float3(2.0f, -2.0f, 1.0f);
-	float4 hitClip = float4(0.0f, 0.0f, 0.0f, P32 / (hitNDC.z - P22));
-	hitClip.xyz = hitNDC.xyz * hitClip.w;
-	hitPosVS = mul(hitClip, matProjectInverse).xyz;
+	hitPosVS = SSR_HiZUnprojectScreen(hitPoint);
 
 	return level < 0;
 }
