@@ -2,239 +2,15 @@
  * Ray-MMD ReForge: Screen-Space Reflections (SSR) Ray Tracing Pass
  *
  * Module: SSR_Trace.fxsub
- * Screen-Space Ray Tracing based on Morgan McGuire & Michael Mara (2014):
- * "Efficient GPU Screen-Space Ray Tracing", Journal of Computer Graphics Techniques (JCGT).
- *
- * Implements exact 2D DDA line rasterization with perspective-correct homogeneous
- * interpolation (Q/k), 3D camera-space near-plane clipping, screen-space 2D clipping,
- * conservative pixel-interval depth testing, and sub-pixel binary refinement.
+ * Screen-space ray tracing accelerated by the hierarchical depth pyramid in
+ * SSR_HiZ.fxsub: reflected rays walk a min/max depth atlas instead of stepping
+ * the full-resolution depth buffer, skipping whole cell blocks per iteration.
  */
 
 #ifndef RAY_MMD_SSR_TRACE_FXSUB
 #define RAY_MMD_SSR_TRACE_FXSUB
 
 #include "shader/SSR/SSR_Common.fxsub"
-
-/**
- * Computes smooth windowing factor to attenuate reflections near viewport boundaries.
- */
-inline float SSR_ComputeScreenWindow(float2 uv, float edgeMargin)
-{
-	float2 edgeDist = min(uv, 1.0f - uv);
-	float2 windowFactor = smoothstep(0.0f, edgeMargin, edgeDist);
-	return windowFactor.x * windowFactor.y;
-}
-
-/**
- * McGuire & Mara (2014) screen-space ray tracing implementation for HLSL SM3.
- * Directly corresponds to traceScreenSpaceRay1 in McGuire2014RayTrace-code/raytrace.glsl.
- *
- * @param csOrigin             Camera-space ray origin (Z > 0 in DirectX).
- * @param csDirection          Unit-length camera-space ray direction.
- * @param maxRayTraceDistance  Maximum ray travel distance in camera units.
- * @param nearPlaneZ           Near plane distance in camera space (Z > 0).
- * @param jitterFraction       Stochastic sub-step offset in [0, 1].
- * @param maxSteps             Maximum iteration count for the raymarcher.
- * @param hitPixel             [out] Screen-space pixel coordinates of the hit.
- * @param hitUV                [out] Normalized texture coordinates of hit point.
- * @param csHitPoint           [out] Reconstructed camera-space hit position.
- * @return True if a valid surface intersection was confirmed.
- */
-bool SSR_TraceScreenSpaceRayMcGuire(
-	float3 csOrigin,
-	float3 csDirection,
-	float maxRayTraceDistance,
-	float nearPlaneZ,
-	float jitterFraction,
-	float maxSteps,
-	out float2 hitPixel,
-	out float2 hitUV,
-	out float3 csHitPoint)
-{
-	// Initialize to off-screen
-	hitPixel = float2(-1.0f, -1.0f);
-	hitUV = float2(-1.0f, -1.0f);
-	csHitPoint = 0.0f;
-
-	// 1. Clip ray to camera near plane in 3D (shorten ray if it crosses near plane)
-	float rayLength = ((csOrigin.z + csDirection.z * maxRayTraceDistance) < nearPlaneZ && csDirection.z < 0.0f) ?
-		(nearPlaneZ - csOrigin.z) / csDirection.z :
-		maxRayTraceDistance;
-
-	if (rayLength <= 0.0f)
-		return false;
-
-	float3 csEndPoint = csDirection * rayLength + csOrigin;
-
-	// 2. Project endpoints into screen space
-	float4 H0 = mul(float4(csOrigin, 1.0f), matProject);
-	float4 H1 = mul(float4(csEndPoint, 1.0f), matProject);
-
-	float k0 = 1.0f / max(H0.w, 1e-5f);
-	float k1 = 1.0f / max(H1.w, 1e-5f);
-
-	// Switch points to values that interpolate linearly in 2D
-	float3 Q0 = csOrigin * k0;
-	float3 Q1 = csEndPoint * k1;
-
-	// Screen-space pixel endpoints
-	float2 P0 = ((H0.xy * k0) * float2(0.5f, -0.5f) + 0.5f) * ViewportSize;
-	float2 P1 = ((H1.xy * k1) * float2(0.5f, -0.5f) + 0.5f) * ViewportSize;
-
-	// Optional clipping to viewport boundaries [0, ViewportSize]
-	float2 delta = P1 - P0;
-	float alpha = 1.0f;
-	if (P1.x < 0.0f)
-		alpha = min(alpha, (0.0f - P0.x) / delta.x);
-	else if (P1.x > ViewportSize.x)
-		alpha = min(alpha, (ViewportSize.x - P0.x) / delta.x);
-
-	if (P1.y < 0.0f)
-		alpha = min(alpha, (0.0f - P0.y) / delta.y);
-	else if (P1.y > ViewportSize.y)
-		alpha = min(alpha, (ViewportSize.y - P0.y) / delta.y);
-
-	alpha = saturate(alpha);
-	P1 = P0 + delta * alpha;
-	Q1 = Q0 + (Q1 - Q0) * alpha;
-	k1 = k0 + (k1 - k0) * alpha;
-
-	// Degenerate line handling: ensure ray covers at least a fraction of a pixel
-	delta = P1 - P0;
-	if (dot(delta, delta) < 0.0001f)
-	{
-		P1 += float2(0.01f, 0.01f);
-		delta = P1 - P0;
-	}
-
-	// 3. Permute so that primary iteration is in x to reduce large branches
-	bool permute = false;
-	if (abs(delta.x) < abs(delta.y))
-	{
-		permute = true;
-		delta = delta.yx;
-		P0 = P0.yx;
-		P1 = P1.yx;
-	}
-
-	float stepDirection = sign(delta.x);
-	float invdx = stepDirection / delta.x;
-	float2 dP = float2(stepDirection, invdx * delta.y);
-
-	// Track derivatives of Q and k
-	float3 dQ = (Q1 - Q0) * invdx;
-	float  dk = (k1 - k0) * invdx;
-
-	// Exact stride: if ray distance fits in maxSteps, step by 1.0 pixel (100% pixel-perfect).
-	// Only expand stride if ray spans more pixels than maxSteps.
-	float totalPixelDistance = abs(delta.x);
-	float actualStride = (totalPixelDistance > (maxSteps - 1.0f)) ? (totalPixelDistance / max(maxSteps - 1.0f, 1.0f)) : 1.0f;
-
-	// Scale derivatives by actual pixel stride
-	dP *= actualStride;
-	dQ *= actualStride;
-	dk *= actualStride;
-
-	// Offset starting values by jitter fraction (only needed when stride > 1.0)
-	float jitterScale = (actualStride > 1.0f) ? (1.0f / actualStride) : 0.0f;
-	float2 jitterOffset = dP * (jitterFraction * jitterScale);
-	float3 jitterQ = dQ * (jitterFraction * jitterScale);
-	float  jitterK = dk * (jitterFraction * jitterScale);
-
-	P0 += jitterOffset;
-	Q0 += jitterQ;
-	k0 += jitterK;
-
-	// Slide P from P0 to P1, Q from Q0 to Q1, and k from k0 to k1
-	float3 Q = Q0;
-	float  k = k0;
-
-	float prevZMaxEstimate = csOrigin.z;
-	float stepCount = 0.0f;
-	float rayZMax = prevZMaxEstimate;
-	float rayZMin = prevZMaxEstimate;
-	float sceneZ = rayZMax + 1e4f;
-	float stepThickness = mSSRThickness * (0.4f + min(csOrigin.z * 0.015f, 0.8f));
-
-	float end = P1.x * stepDirection;
-
-	// 4. McGuire Marching Loop
-	[loop]
-	for (float2 P = P0;
-		 ((P.x * stepDirection) <= end) &&
-		 (stepCount < maxSteps) &&
-		 ((rayZMax < sceneZ) || (rayZMin > sceneZ + stepThickness)) &&
-		 (sceneZ > 0.0f);
-		 P += dP, Q.z += dQ.z, k += dk, stepCount += 1.0f)
-	{
-		hitPixel = permute ? P.yx : P;
-		float2 currentUV = hitPixel * ViewportOffset2;
-
-		if (currentUV.x < 0.0f || currentUV.x > 1.0f || currentUV.y < 0.0f || currentUV.y > 1.0f)
-			break;
-
-		// Depth range that ray covers within this loop iteration
-		rayZMin = prevZMaxEstimate;
-
-		// Compute value at 1/2 pixel into the future
-		rayZMax = (dQ.z * 0.5f + Q.z) / (dk * 0.5f + k);
-		prevZMaxEstimate = rayZMax;
-
-		if (rayZMin > rayZMax)
-		{
-			float temp = rayZMin;
-			rayZMin = rayZMax;
-			rayZMax = temp;
-		}
-
-		// Camera-space Z of the background
-		sceneZ = tex2Dlod(Gbuffer8Map, float4(currentUV, 0.0f, 0.0f)).r;
-		stepThickness = mSSRThickness * (0.4f + min(sceneZ * 0.015f, 0.8f));
-	}
-
-	// 5. Binary refinement for stride > 1
-	bool isHit = (rayZMax >= sceneZ) && (rayZMin <= sceneZ + stepThickness) && (sceneZ >= 0.01f && sceneZ < 90000.0f);
-
-	if (isHit && actualStride > 1.0f)
-	{
-		float2 pMin = hitPixel - (permute ? dP.yx : dP);
-		float2 pMax = hitPixel;
-
-		[unroll]
-		for (int b = 0; b < SSR_BINARY_STEPS; ++b)
-		{
-			float2 pMid = (pMin + pMax) * 0.5f;
-			float2 uvMid = pMid * ViewportOffset2;
-			float sampleZ = tex2Dlod(Gbuffer8Map, float4(uvMid, 0.0f, 0.0f)).r;
-
-			float sMid = (permute ? pMid.y - P0.x : pMid.x - P0.x) / dP.x;
-			float rayMidZ = (Q0.z + dQ.z * sMid) / (k0 + dk * sMid);
-
-			if (sampleZ >= 0.01f && sampleZ < 90000.0f)
-			{
-				if (rayMidZ >= sampleZ)
-					pMax = pMid;
-				else
-					pMin = pMid;
-			}
-			else
-			{
-				pMin = pMid;
-			}
-		}
-
-		hitPixel = pMax;
-	}
-
-	// Reconstruct exact camera-space hit position from hitPixel
-	float finalParam = (permute ? hitPixel.y - P0.x : hitPixel.x - P0.x) / dP.x;
-	Q = Q0 + dQ * finalParam;
-	k = k0 + dk * finalParam;
-	csHitPoint = Q * (1.0f / k);
-	hitUV = clamp(hitPixel * ViewportOffset2, 0.0f, 1.0f);
-
-	return isHit;
-}
 
 float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) : COLOR
 {
@@ -267,41 +43,45 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	float NdotV = saturate(dot(viewVector, surfaceMat.normal));
 	float traceDistance = mSSRRangeScale * (max(100.0f, mSSRRangeMax - surfaceMat.linearDepth) + surfaceMat.linearDepth);
 
-	float normalBias = mSSROffset * 0.15f * (1.0f - NdotV) + 0.02f;
-	float3 rayOriginVS = positionVS + surfaceMat.normal * normalBias;
+	// Grazing rays (reflection nearly parallel to the surface) accumulate the
+	// most Hi-Z error; fade them out smoothly instead of returning garbage.
+	float atten = dot(reflectRayVS, -viewVector);
+	clip(atten - 1e-5f);
 
-	float jitter = InterleavedGradientNoise(coord.xy * ViewportSize);
+	float normalBias = 0.05f + mSSROffset * 0.15f * (1.0f - NdotR);
+	float directionBias = 0.05f + mSSROffset * 0.1f;
+	float3 rayOriginVS = positionVS + surfaceMat.normal * normalBias + reflectRayVS * directionBias;
 
-	float2 hitPixel = 0.0f;
 	float2 hitUV = 0.0f;
-	float3 csHitPoint = 0.0f;
-	bool hit = SSR_TraceScreenSpaceRayMcGuire(
+	float3 hitPosVS = 0.0f;
+	bool hit = SSR_HiZTrace(
 		rayOriginVS,
 		reflectRayVS,
 		traceDistance,
-		0.1f,
-		jitter,
-		SSR_MAX_RAY_STEPS,
-		hitPixel,
+		mSSRThickness,
 		hitUV,
-		csHitPoint);
+		hitPosVS);
 
 	if (!hit)
 		clip(-1);
 
-	// Screen-edge vignetting (clean 3% margin: preserves wide reflections near frame boundaries)
-	float sourceWindow = SSR_ComputeScreenWindow(coord.xy, 0.03f);
-	float hitTargetWindow = SSR_ComputeScreenWindow(hitUV, 0.03f);
-	float edgeVignette = sourceWindow * hitTargetWindow;
+	// Reference PostProcessSSR::SSRCalculateWeight — distance fade over the last
+	// quarter of the ray budget, grazing-angle fade and far-depth fade. Smooth
+	// weights keep failed/low-confidence rays from punching holes; they just
+	// dissolve into the env specular. No screen-edge vignette: reflections run
+	// all the way to the frame boundary.
+	float travelDist = length(hitPosVS - rayOriginVS);
+	float distWeight = 1.0f - smoothstep(traceDistance * mSSRFadeStart, traceDistance, travelDist);
 
-	float rayTravelDist = length(csHitPoint - rayOriginVS);
-	float distanceFalloff = saturate(1.0f - pow(saturate(rayTravelDist / traceDistance), 4.0f));
+	float angleWeight = smoothstep(0.0f, 0.1f, atten);
 
-	// Strict front-facing normal test: removes backface/silhouette streaks without leaving holes
+	float depthWeight = 1.0f - smoothstep(mSSRRangeMax * 0.5f, mSSRRangeMax, surfaceMat.linearDepth);
+
+	// Front-facing normal test on the hit surface: removes backface/silhouette streaks
 	float3 hitNormal = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(hitUV, 0.0f, 0.0f)));
 	float hitFacing = smoothstep(0.02f, 0.22f, dot(hitNormal, -reflectRayVS));
 
-	float confidence = edgeVignette * distanceFalloff * hitFacing;
+	float confidence = distWeight * angleWeight * depthWeight * hitFacing;
 
 	// Self-reflection suppression (SSRSelfMap): flagged materials never bounce
 	// SSR between each other (skin/hair self-smudging on face close-ups), while
@@ -316,7 +96,22 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	// confidence so fully hidden materials fall back to the env/IBL specular cleanly.
 	float reflectVis = tex2Dlod(SSRReflectMapSamp, float4(hitUV, 0.0f, 0.0f)).a;
 
-	float4 hitRadiance = tex2Dlod(ShadingMapSamp, float4(hitUV, 0.0f, 0.0f));
+	// Point sampling at the hit: linear filtering bleeds the neighbouring
+	// background (floor/wall gray) across the reflected silhouette and smears
+	// it into a flat gray patch after the roughness pyramid.
+	float4 hitRadiance = tex2Dlod(ShadingMapPointSamp, float4(hitUV, 0.0f, 0.0f));
+
+	// FP16 radiance buffer: reject NaN/Inf/out-of-range garbage from long or
+	// numerically degenerate rays instead of rendering it as gray/white blobs.
+	bool3 isNaN = isnan(hitRadiance.rgb);
+	bool3 isInRange = (hitRadiance.rgb >= 0.0f) && (hitRadiance.rgb <= 65504.0f);
+	bool3 isValid = !isNaN && isInRange;
+
+	hitRadiance.rgb = float3(
+		isValid.r ? hitRadiance.r : 0.0f,
+		isValid.g ? hitRadiance.g : 0.0f,
+		isValid.b ? hitRadiance.b : 0.0f);
+
 	return float4(hitRadiance.rgb, 1.0f) * (confidence * reflectVis);
 }
 

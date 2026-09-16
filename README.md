@@ -24,11 +24,11 @@ Requirement :
 * Direct3D 9 With Shader Model 3.0 (ps_3_0)
 * **Powerful GPU recommended** due to advanced shading techniques.
 
-Reforge Exclusive Features (through v1.20.21) :
+Reforge Exclusive Features (through v1.20.22) :
 ------------
 
 **Direct Screen-Space Core**
-* **Direct 1:1 Screen-Space Architecture**: eliminated the heavy 11-pass hierarchical depth pyramid (Hi-Z), freeing 11 RenderTarget textures in VRAM and removing per-frame downsampling passes in favor of direct G-buffer raymarching, McGuire 2014 2D DDA, and Newton root-finding.
+* **Direct 1:1 Screen-Space Architecture**: eliminated the heavy 11-pass hierarchical depth pyramid (Hi-Z) from the deferred core, freeing 11 RenderTarget textures in VRAM and removing per-frame downsampling passes in favor of direct G-buffer raymarching, 2D DDA, and Newton root-finding. Hi-Z acceleration is retained only where it pays for itself: the SSR tracer (`SSR_HiZ.fxsub`).
 * **Octahedral Normal Encoding**: compact and high-precision octahedral representation for unit normal vectors in G-buffer and math pipelines.
 
 **Global Illumination (SSPT / RTGI & SSGI 3.0)**
@@ -46,7 +46,7 @@ Reforge Exclusive Features (through v1.20.21) :
 * **Rough Specular GI (`SSGI_SPECULAR_GI 1`)**: Fresnel-weighted indirect specular reflections on rough surfaces, with calibrated subtle sheen on skin (`0.25f`).
 
 **Reflections & Occlusion**
-* **McGuire 2014 2D DDA Screen-Space Reflections**: full-featured screen-space ray tracing engine with hybrid bisection & secant root-finding, subpixel binary refinement, and LOD-0 mirror gloss resolve without jitter or contact gaps.
+* **Hierarchical-Z Screen-Space Reflections**: SSR ray tracing rebuilt on a min/max depth pyramid (`Shader/SSR/SSR_HiZ.fxsub`) — per-level mips packed into a single atlas texture, coarse-to-fine 2D DDA cell traversal with analytical depth jumps, adaptive thickness budgeting (`max(thickness, 0.4 + cellDepthSpan)`), and smooth confidence weights (grazing-angle, distance, depth fade) instead of hard clip rejection. Reflections run to the frame boundary without edge vignetting; radiance is point-sampled at the hit with NaN/Inf rejection. For true mirror-floor reflections of off-screen and semi-transparent content, external planar-reflection effects such as WorkingFloorX are recommended on top (disable ray SSR per-material via `SSR visibility 0.0.fx`).
 * **Per-Material Reflection Mask System (3 dedicated MME tabs)**: `SSRMap` (receiver — how much a material reflects), `SSRReflectMap` (source — how strongly a material appears in other materials' reflections, `Shadow/SSR reflect visibility 0.0–1.0.fx`), and `SSRSelfMap` (self-suppression — flagged materials never bounce SSR between each other, `Shadow/SSR self visibility 0.0–1.0.fx`). All masks are preset-driven constants with nothing clipped, work on additive/semi-transparent materials, and never conflict across tabs.
 * **Material-Driven SSR Roughness**: SSR blur now follows each material's own smoothness (smoothness maps / MMD shininess) via a perceptual `pow(roughness, 1.5)` pyramid-LOD mapping, consistent with the IBL specular response; global gloss bias tunable via `mSSRSmoothnessDefault` in `ray_advanced.conf`.
 * **Stabilized Thin & Curved Glass Refraction**: view-space normal-tilt screen-space offset eliminating planar background object duplication on flat windows, physical thin-glass default (`customA = 0.5`), balanced chromatic dispersion, deflection clamping, and Newton's method 3D root-finding (Mayer et al. 2026).
@@ -189,7 +189,7 @@ Contact:
 Credits :
 --------
 * Screen-Space Path Tracing (SSPT / RTGI) based on Marty McFly's (Pascal Gilcher) qUINT RTGI.
-* PBR Screen-Space Reflections based on Morgan McGuire & Michael Mara (2014) 2D DDA ray traversal.
+* PBR Screen-Space Reflections with Hierarchical-Z tracing; 2D DDA cell traversal per Morgan McGuire & Michael Mara (2017), min/max depth pyramid acceleration.
 * Ultrafast Screen-Space Refractions via Newton's Method based on Chase Mayer, Ulf Assarsson & Erik Sintorn (JCGT 2026).
 * Energy-Preserving Oren-Nayar (EON) diffuse BRDF based on Jamie Portsmouth, Peter Kutz & Stephen Hill (JCGT 2025).
 * Practical Real-Time Hex-Tiling based on Morten S. Mikkelsen (JCGT 2022).

@@ -1,0 +1,362 @@
+/**
+ * Ray-MMD ReForge: Screen-Space Reflections (SSR) Hierarchical-Z Acceleration
+ *
+ * Module: SSR_HiZ.fxsub
+ * Clean Room hierarchical depth pyramid for screen-space ray tracing.
+ *
+ * Builds a min/max mip chain over the G-buffer linear view depth (Gbuffer8.x)
+ * and packs every level into a single full-resolution atlas texture:
+ * mip 1 occupies the top half of the atlas, mip 2 the next quarter, and so on.
+ * Reflected rays are then walked through the pyramid with a coarse-to-fine
+ * DDA traversal: a ray segment that provably passes in front of or behind
+ * every surface in a cell skips it and climbs one level; an ambiguous cell
+ * is inspected one level finer; a level-0 cell is a single texel whose depth
+ * slab resolves the hit analytically.
+ *
+ * Direct3D 9 forbids reading a texture bound as the current render target,
+ * so each mip is built into its own viewport-ratio target and a final
+ * combine pass copies all of them into the atlas the tracer samples.
+ */
+
+#ifndef RAY_MMD_SSR_HIZ_FXSUB
+#define RAY_MMD_SSR_HIZ_FXSUB
+
+// Eight levels reach 1/256-screen cells; deeper levels would spend a pass on a
+// viewport too small to ever steer the traversal within the iteration budgets.
+#define SSR_HZB_MAX_LEVEL 8
+
+#if SSR_QUALITY == 1
+#	define SSR_HZB_ITERATIONS 64
+#elif SSR_QUALITY == 2
+#	define SSR_HZB_ITERATIONS 96
+#elif SSR_QUALITY == 3
+#	define SSR_HZB_ITERATIONS 128
+#else
+#	define SSR_HZB_ITERATIONS 192
+#endif
+
+// Screen dimensions captured at global scope. Every Hi-Z pass renders into a
+// shrunken viewport, so all cell-size math must come from this static copy
+// (semantic uniforms are rebound to the active pass viewport, statics are not).
+static const float2 kSSRHiZScreenSize = ViewportSize;
+static const float2 kSSRHiZInvScreen  = 1.0f / kSSRHiZScreenSize;
+
+// Cell grid of each mip: level L stores min/max depth over 2^L-texel blocks.
+// Clamped to one cell so tiny preview windows never index an empty grid.
+static const float2 kSSRHiZLevelSize[SSR_HZB_MAX_LEVEL] = {
+	float2(max(floor(kSSRHiZScreenSize.x /   2.0f), 1.0f), max(floor(kSSRHiZScreenSize.y /   2.0f), 1.0f)),
+	float2(max(floor(kSSRHiZScreenSize.x /   4.0f), 1.0f), max(floor(kSSRHiZScreenSize.y /   4.0f), 1.0f)),
+	float2(max(floor(kSSRHiZScreenSize.x /   8.0f), 1.0f), max(floor(kSSRHiZScreenSize.y /   8.0f), 1.0f)),
+	float2(max(floor(kSSRHiZScreenSize.x /  16.0f), 1.0f), max(floor(kSSRHiZScreenSize.y /  16.0f), 1.0f)),
+	float2(max(floor(kSSRHiZScreenSize.x /  32.0f), 1.0f), max(floor(kSSRHiZScreenSize.y /  32.0f), 1.0f)),
+	float2(max(floor(kSSRHiZScreenSize.x /  64.0f), 1.0f), max(floor(kSSRHiZScreenSize.y /  64.0f), 1.0f)),
+	float2(max(floor(kSSRHiZScreenSize.x / 128.0f), 1.0f), max(floor(kSSRHiZScreenSize.y / 128.0f), 1.0f)),
+	float2(max(floor(kSSRHiZScreenSize.x / 256.0f), 1.0f), max(floor(kSSRHiZScreenSize.y / 256.0f), 1.0f)),
+};
+
+// Top row of each mip band inside the atlas (y carries the offset, x stays 0
+// so the value can be added to a cell coordinate as-is).
+static const float2 kSSRHiZBandTop1 = float2(0.0f, 0.0f);
+static const float2 kSSRHiZBandTop2 = float2(0.0f, kSSRHiZBandTop1.y + kSSRHiZLevelSize[0].y);
+static const float2 kSSRHiZBandTop3 = float2(0.0f, kSSRHiZBandTop2.y + kSSRHiZLevelSize[1].y);
+static const float2 kSSRHiZBandTop4 = float2(0.0f, kSSRHiZBandTop3.y + kSSRHiZLevelSize[2].y);
+static const float2 kSSRHiZBandTop5 = float2(0.0f, kSSRHiZBandTop4.y + kSSRHiZLevelSize[3].y);
+static const float2 kSSRHiZBandTop6 = float2(0.0f, kSSRHiZBandTop5.y + kSSRHiZLevelSize[4].y);
+static const float2 kSSRHiZBandTop7 = float2(0.0f, kSSRHiZBandTop6.y + kSSRHiZLevelSize[5].y);
+static const float2 kSSRHiZBandTop8 = float2(0.0f, kSSRHiZBandTop7.y + kSSRHiZLevelSize[6].y);
+
+static const float2 kSSRHiZRowOffset[SSR_HZB_MAX_LEVEL] = {
+	kSSRHiZBandTop1, kSSRHiZBandTop2, kSSRHiZBandTop3, kSSRHiZBandTop4,
+	kSSRHiZBandTop5, kSSRHiZBandTop6, kSSRHiZBandTop7, kSSRHiZBandTop8,
+};
+
+texture SSRHiZMap1 : RENDERCOLORTARGET<float2 ViewportRatio = {0.5, 0.5}; string Format = "A16B16G16R16F";>;
+texture SSRHiZMap2 : RENDERCOLORTARGET<float2 ViewportRatio = {0.25, 0.25}; string Format = "A16B16G16R16F";>;
+texture SSRHiZMap3 : RENDERCOLORTARGET<float2 ViewportRatio = {0.125, 0.125}; string Format = "A16B16G16R16F";>;
+texture SSRHiZMap4 : RENDERCOLORTARGET<float2 ViewportRatio = {0.0625, 0.0625}; string Format = "A16B16G16R16F";>;
+texture SSRHiZMap5 : RENDERCOLORTARGET<float2 ViewportRatio = {0.03125, 0.03125}; string Format = "A16B16G16R16F";>;
+texture SSRHiZMap6 : RENDERCOLORTARGET<float2 ViewportRatio = {0.015625, 0.015625}; string Format = "A16B16G16R16F";>;
+texture SSRHiZMap7 : RENDERCOLORTARGET<float2 ViewportRatio = {0.0078125, 0.0078125}; string Format = "A16B16G16R16F";>;
+texture SSRHiZMap8 : RENDERCOLORTARGET<float2 ViewportRatio = {0.00390625, 0.00390625}; string Format = "A16B16G16R16F";>;
+texture SSRHiZAtlas : RENDERCOLORTARGET<float2 ViewportRatio = {1.0, 1.0}; string Format = "A16B16G16R16F";>;
+
+sampler SSRHiZMap1Samp = sampler_state { texture = <SSRHiZMap1>; MinFilter = POINT; MagFilter = POINT; MipFilter = NONE; AddressU = CLAMP; AddressV = CLAMP; };
+sampler SSRHiZMap2Samp = sampler_state { texture = <SSRHiZMap2>; MinFilter = POINT; MagFilter = POINT; MipFilter = NONE; AddressU = CLAMP; AddressV = CLAMP; };
+sampler SSRHiZMap3Samp = sampler_state { texture = <SSRHiZMap3>; MinFilter = POINT; MagFilter = POINT; MipFilter = NONE; AddressU = CLAMP; AddressV = CLAMP; };
+sampler SSRHiZMap4Samp = sampler_state { texture = <SSRHiZMap4>; MinFilter = POINT; MagFilter = POINT; MipFilter = NONE; AddressU = CLAMP; AddressV = CLAMP; };
+sampler SSRHiZMap5Samp = sampler_state { texture = <SSRHiZMap5>; MinFilter = POINT; MagFilter = POINT; MipFilter = NONE; AddressU = CLAMP; AddressV = CLAMP; };
+sampler SSRHiZMap6Samp = sampler_state { texture = <SSRHiZMap6>; MinFilter = POINT; MagFilter = POINT; MipFilter = NONE; AddressU = CLAMP; AddressV = CLAMP; };
+sampler SSRHiZMap7Samp = sampler_state { texture = <SSRHiZMap7>; MinFilter = POINT; MagFilter = POINT; MipFilter = NONE; AddressU = CLAMP; AddressV = CLAMP; };
+sampler SSRHiZMap8Samp = sampler_state { texture = <SSRHiZMap8>; MinFilter = POINT; MagFilter = POINT; MipFilter = NONE; AddressU = CLAMP; AddressV = CLAMP; };
+sampler SSRHiZAtlasSamp = sampler_state { texture = <SSRHiZAtlas>; MinFilter = POINT; MagFilter = POINT; MipFilter = NONE; AddressU = CLAMP; AddressV = CLAMP; };
+
+/**
+ * Level 1 build: min/max reduction of the 2x2 full-res depth block per cell.
+ */
+float4 SSR_HiZBuild1PS(in float2 coord : TEXCOORD0) : COLOR
+{
+	float2 cell = floor(coord * kSSRHiZLevelSize[0]);
+
+	float d0 = tex2Dlod(Gbuffer8Map, float4((cell * 2.0f + float2(0.5f, 0.5f)) * kSSRHiZInvScreen, 0.0f, 0.0f)).x;
+	float d1 = tex2Dlod(Gbuffer8Map, float4((cell * 2.0f + float2(0.5f, 1.5f)) * kSSRHiZInvScreen, 0.0f, 0.0f)).x;
+	float d2 = tex2Dlod(Gbuffer8Map, float4((cell * 2.0f + float2(1.5f, 0.5f)) * kSSRHiZInvScreen, 0.0f, 0.0f)).x;
+	float d3 = tex2Dlod(Gbuffer8Map, float4((cell * 2.0f + float2(1.5f, 1.5f)) * kSSRHiZInvScreen, 0.0f, 0.0f)).x;
+
+	return float4(min(min(d0, d1), min(d2, d3)), max(max(d0, d1), max(d2, d3)), 0.0f, 1.0f);
+}
+
+/**
+ * Level 2..8 build: min/max reduction of the previous level's 2x2 cell block.
+ * Sizes arrive as compile-time uniforms so each pass is specialized for its mip.
+ */
+float4 SSR_HiZBuildNPS(in float2 coord : TEXCOORD0, uniform sampler source, uniform float2 prevSize, uniform float2 selfSize) : COLOR
+{
+	float2 cell = floor(coord * selfSize);
+
+	float2 d0 = tex2Dlod(source, float4((cell * 2.0f + float2(0.5f, 0.5f)) / prevSize, 0.0f, 0.0f)).xy;
+	float2 d1 = tex2Dlod(source, float4((cell * 2.0f + float2(0.5f, 1.5f)) / prevSize, 0.0f, 0.0f)).xy;
+	float2 d2 = tex2Dlod(source, float4((cell * 2.0f + float2(1.5f, 0.5f)) / prevSize, 0.0f, 0.0f)).xy;
+	float2 d3 = tex2Dlod(source, float4((cell * 2.0f + float2(1.5f, 1.5f)) / prevSize, 0.0f, 0.0f)).xy;
+
+	return float4(min(min(d0.x, d1.x), min(d2.x, d3.x)), max(max(d0.y, d1.y), max(d2.y, d3.y)), 0.0f, 1.0f);
+}
+
+#define SSR_HIZ_COMBINE_BAND(index, samplerName) \
+	else if (row < kSSRHiZRowOffset[index].y + kSSRHiZLevelSize[index].y) { \
+		if (atlasCell.x < kSSRHiZLevelSize[index].x) { \
+			float2 cell = atlasCell - kSSRHiZRowOffset[index]; \
+			lohi = tex2Dlod(samplerName, float4((cell + 0.5f) / kSSRHiZLevelSize[index], 0.0f, 0.0f)).xy; \
+		} \
+		else { clip(-1.0f); } \
+	}
+
+/**
+ * Packs mips 1..8 into vertically stacked atlas bands. Atlas texels outside
+ * every band are discarded; the tracer never samples them.
+ */
+float4 SSR_HiZCombinePS(in float2 coord : TEXCOORD0) : COLOR
+{
+	float2 atlasCell = floor(coord * kSSRHiZScreenSize);
+	float row = atlasCell.y;
+	float2 lohi = 0.0f;
+
+	if (row < kSSRHiZLevelSize[0].y) {
+		if (atlasCell.x < kSSRHiZLevelSize[0].x) {
+			lohi = tex2Dlod(SSRHiZMap1Samp, float4((atlasCell + 0.5f) / kSSRHiZLevelSize[0], 0.0f, 0.0f)).xy;
+		}
+		else { clip(-1.0f); }
+	}
+	SSR_HIZ_COMBINE_BAND(1, SSRHiZMap2Samp)
+	SSR_HIZ_COMBINE_BAND(2, SSRHiZMap3Samp)
+	SSR_HIZ_COMBINE_BAND(3, SSRHiZMap4Samp)
+	SSR_HIZ_COMBINE_BAND(4, SSRHiZMap5Samp)
+	SSR_HIZ_COMBINE_BAND(5, SSRHiZMap6Samp)
+	SSR_HIZ_COMBINE_BAND(6, SSRHiZMap7Samp)
+	SSR_HIZ_COMBINE_BAND(7, SSRHiZMap8Samp)
+	else { clip(-1.0f); }
+
+	return float4(lohi, 0.0f, 1.0f);
+}
+
+#undef SSR_HIZ_COMBINE_BAND
+
+/**
+ * Fetches a cell's [min, max] linear view depth from the atlas.
+ *
+ * @param level Mip index 1..SSR_HZB_MAX_LEVEL.
+ * @param cell  Cell index within that level's grid.
+ */
+float2 SSR_HiZFetchCell(int level, float2 cell)
+{
+	float2 uv = (cell + 0.5f + kSSRHiZRowOffset[level - 1]) * kSSRHiZInvScreen;
+	return tex2Dlod(SSRHiZAtlasSamp, float4(uv, 0.0f, 0.0f)).xy;
+}
+
+/**
+ * Converts an NDC depth to linear view-space depth. With the row-vector
+ * projection convention used throughout the framework, z_ndc = P22 + P32 / z_view.
+ */
+inline float SSR_HiZViewDepth(float zNdc)
+{
+	return matProject[3][2] / (zNdc - matProject[2][2]);
+}
+
+/**
+ * Inverse of SSR_HiZViewDepth: linear view depth to NDC depth.
+ */
+inline float SSR_HiZNdcDepth(float zView)
+{
+	return matProject[2][2] + matProject[3][2] / zView;
+}
+
+/**
+ * Traverses the hierarchical depth pyramid using screen-space DDA.
+ * Implements coarse-to-fine cell boundary skipping and analytical depth jumps.
+ *
+ * @param originVS      View-space ray origin (already biased).
+ * @param dirVS         Unit view-space ray direction.
+ * @param maxDistance   Maximum ray travel distance in view space.
+ * @param thicknessBase Surface thickness tolerance (mSSRThickness).
+ * @param hitUV         [out] Screen-space UV of the hit point.
+ * @param hitPosVS      [out] Reconstructed view-space hit position.
+ * @return True if an intersecting surface was found within the thickness slab.
+ */
+bool SSR_HiZTrace(
+	in float3 originVS,
+	in float3 dirVS,
+	in float maxDistance,
+	in float thicknessBase,
+	out float2 hitUV,
+	out float3 hitPosVS)
+{
+	hitUV = float2(-1.0f, -1.0f);
+	hitPosVS = 0.0f;
+
+	// Clip ray against near camera plane to ensure valid projection
+	static const float kNearPlaneZ = 0.05f;
+	if (originVS.z < kNearPlaneZ)
+		return false;
+
+	if (dirVS.z < 0.0f)
+		maxDistance = min(maxDistance, (kNearPlaneZ - originVS.z) / dirVS.z);
+
+	if (maxDistance <= 0.0f)
+		return false;
+
+	float3 endVS = originVS + dirVS * (maxDistance * 2.0f);
+
+	// Project ray segment into screen UV + NDC depth space
+	float4 clipStart = mul(float4(originVS, 1.0f), matProject);
+	float4 clipEnd   = mul(float4(endVS, 1.0f), matProject);
+
+	if (clipStart.w <= 0.0f || clipEnd.w <= 0.0f)
+		return false;
+
+	float3 ndcStart = clipStart.xyz / clipStart.w;
+	float3 ndcEnd   = clipEnd.xyz / clipEnd.w;
+
+	float3 p0 = float3(ndcStart.xy * float2(0.5f, -0.5f) + 0.5f, ndcStart.z);
+	float3 p1 = float3(ndcEnd.xy   * float2(0.5f, -0.5f) + 0.5f, ndcEnd.z);
+	float3 dP = p1 - p0;
+
+	// Avoid division by zero along degenerate axes
+	float3 safeDelta = dP + (dP >= 0.0f ? 1e-6f : -1e-6f);
+	float3 invDelta = rcp(safeDelta);
+
+	float2 stepDir = sign(dP.xy);
+	float2 boundaryOffset = stepDir * (0.005f * kSSRHiZInvScreen);
+	float2 boundaryStep = saturate(stepDir);
+
+	float P22 = matProject[2][2];
+	float P32 = matProject[3][2];
+
+	float t = 0.0f;
+	int level = 0;
+
+	[loop]
+	for (int iter = 0; iter < SSR_HZB_ITERATIONS && level >= 0 && t < 1.0f; ++iter)
+	{
+		float3 ray = p0 + t * dP;
+
+		// Early exit if the ray travels outside screen bounds
+		if (any(floor(ray.xy) != 0.0f))
+			break;
+
+		float2 levelRes = kSSRHiZScreenSize / exp2(level);
+		float2 invLevelRes = exp2(level) * kSSRHiZInvScreen;
+		int2 cellId = floor(ray.xy * levelRes);
+
+		// Sample depth slab [minZ, maxZ] for this cell
+		float2 zMinMax = (level == 0)
+			? tex2Dlod(Gbuffer8Map, float4(ray.xy, 0.0f, 0.0f)).xx
+			: SSR_HiZFetchCell(level, cellId);
+
+		// Convert ray and surface depths to view / NDC spaces
+		float linearZ = P32 / (ray.z - P22);
+		float minZ = (zMinMax.x > 0.01f) ? (P22 + P32 / zMinMax.x) : 0.0f;
+
+		// Compute parametric exit point from current 2D cell boundary
+		float2 tExitAxes = 1e9f;
+		if (abs(dP.x) > 1e-6f)
+		{
+			float cellEdgeX = (float(cellId.x) + boundaryStep.x) * invLevelRes.x + boundaryOffset.x;
+			tExitAxes.x = (cellEdgeX - ray.x) * invDelta.x;
+		}
+		if (abs(dP.y) > 1e-6f)
+		{
+			float cellEdgeY = (float(cellId.y) + boundaryStep.y) * invLevelRes.y + boundaryOffset.y;
+			tExitAxes.y = (cellEdgeY - ray.y) * invDelta.y;
+		}
+		float tCellExit = t + min(tExitAxes.x, tExitAxes.y);
+
+		// Adaptive thickness budget scales with cell depth span to prevent grazing false skips
+		float rayZExit = p0.z + tCellExit * dP.z;
+		float linearZExit = P32 / (rayZExit - P22);
+		float cellDepthSpan = abs(linearZExit - linearZ);
+		float thickness = max(thicknessBase, 0.4f + cellDepthSpan);
+
+		float tNext = t;
+
+		if (dP.z > 0.0f)
+		{
+			// Ray moves deeper into the scene: jump ahead to nearest surface plane in cell
+			float deltaZ = minZ - ray.z;
+			tNext = deltaZ > 0.0f ? (tNext + deltaZ * invDelta.z) : tNext;
+
+			float3 probePos = p0 + tNext * dP;
+			int2 probeCell = floor(probePos.xy * levelRes);
+
+			// Cell missed if ray exits before reaching surface depth or overshoots back plane
+			if (probeCell.x != cellId.x || probeCell.y != cellId.y || (linearZ - zMinMax.y >= thickness))
+			{
+				tNext = tCellExit;
+				level += 2;
+			}
+			else if (level == 0)
+			{
+				float rayZProbe = p0.z + tNext * dP.z;
+				float linearZProbe = P32 / (rayZProbe - P22);
+				if (zMinMax.x <= 0.01f || abs(linearZProbe - zMinMax.x) >= thicknessBase)
+				{
+					tNext = tCellExit;
+					level = 1;
+				}
+			}
+		}
+		else
+		{
+			// Ray moves toward camera: if ray is already in front of geometry, cell is empty
+			if (ray.z < minZ)
+			{
+				tNext = tCellExit;
+				level += 2;
+			}
+			else if (level == 0)
+			{
+				float rayZProbe = p0.z + tNext * dP.z;
+				float linearZProbe = P32 / (rayZProbe - P22);
+				if (zMinMax.x <= 0.01f || abs(linearZProbe - zMinMax.x) >= thicknessBase)
+				{
+					tNext = tCellExit;
+					level = 1;
+				}
+			}
+		}
+
+		t = tNext;
+		--level;
+		level = min(level, SSR_HZB_MAX_LEVEL);
+	}
+
+	float3 hitPoint = p0 + t * dP;
+	hitUV = clamp(hitPoint.xy, 0.0f, 1.0f);
+
+	float3 hitNDC = (hitPoint - float3(0.5f, 0.5f, 0.0f)) * float3(2.0f, -2.0f, 1.0f);
+	float4 hitClip = float4(0.0f, 0.0f, 0.0f, P32 / (hitNDC.z - P22));
+	hitClip.xyz = hitNDC.xyz * hitClip.w;
+	hitPosVS = mul(hitClip, matProjectInverse).xyz;
+
+	return level < 0;
+}
+
+#endif // RAY_MMD_SSR_HIZ_FXSUB
