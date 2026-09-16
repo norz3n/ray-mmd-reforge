@@ -261,9 +261,13 @@ bool SSR_HiZTrace(
 	float3 p1 = float3(ndcEnd.xy   * float2(0.5f, -0.5f) + 0.5f, ndcEnd.z);
 	float3 dP = p1 - p0;
 
-	// Avoid division by zero along degenerate axes
-	float3 safeDelta = dP + (dP >= 0.0f ? 1e-6f : -1e-6f);
-	float3 invDelta = rcp(safeDelta);
+	// Guard the reciprocal: an axis-parallel ray segment (dP component of
+	// exactly zero) would produce inf and poison the cell-exit solve. Nudging
+	// every component away from zero by SSR_HZB_DELTA_GUARD keeps rcp finite;
+	// the pushed value is far below one pixel, so the tiny parametric error
+	// never moves the ray across a cell boundary.
+	static const float SSR_HZB_DELTA_GUARD = 3.7e-7f;
+	float3 rcpStep = rcp(dP + (dP >= 0.0f ? SSR_HZB_DELTA_GUARD : -SSR_HZB_DELTA_GUARD));
 
 	float2 stepDir = sign(dP.xy);
 	float2 boundaryOffset = stepDir * (0.005f * kSSRHiZInvScreen);
@@ -299,12 +303,12 @@ bool SSR_HiZTrace(
 		if (abs(dP.x) > 1e-6f)
 		{
 			float cellEdgeX = (float(cellId.x) + boundaryStep.x) * invLevelRes.x + boundaryOffset.x;
-			tExitAxes.x = (cellEdgeX - ray.x) * invDelta.x;
+			tExitAxes.x = (cellEdgeX - ray.x) * rcpStep.x;
 		}
 		if (abs(dP.y) > 1e-6f)
 		{
 			float cellEdgeY = (float(cellId.y) + boundaryStep.y) * invLevelRes.y + boundaryOffset.y;
-			tExitAxes.y = (cellEdgeY - ray.y) * invDelta.y;
+			tExitAxes.y = (cellEdgeY - ray.y) * rcpStep.y;
 		}
 		float tCellExit = t + min(tExitAxes.x, tExitAxes.y);
 
@@ -331,7 +335,7 @@ bool SSR_HiZTrace(
 		{
 			// Ray moves deeper into the scene: jump ahead to nearest surface plane in cell
 			float deltaZ = minZ - ray.z;
-			tNext = deltaZ > 0.0f ? (tNext + deltaZ * invDelta.z) : tNext;
+			tNext = deltaZ > 0.0f ? (tNext + deltaZ * rcpStep.z) : tNext;
 
 			float3 probePos = p0 + tNext * dP;
 			int2 probeCell = floor(probePos.xy * levelRes);
