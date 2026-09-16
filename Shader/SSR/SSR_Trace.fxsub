@@ -31,7 +31,7 @@ float SSR_HitConfidence(
 	in float3 rayOriginVS,
 	in float3 hitPosVS,
 	in float traceDistance,
-	in float atten,
+	in float lobeAlign,
 	in float2 hitUV,
 	in float3 reflectRayVS,
 	in MaterialParam surfaceMat)
@@ -39,7 +39,7 @@ float SSR_HitConfidence(
 	float travelDist = length(hitPosVS - rayOriginVS);
 	float travelFade = 1.0f - smoothstep(traceDistance * mSSRFadeStart, traceDistance, travelDist);
 
-	float angleFade = smoothstep(0.0f, 0.1f, atten);
+	float angleFade = smoothstep(0.0f, 0.1f, lobeAlign);
 
 	float depthFade = 1.0f - smoothstep(mSSRRangeMax * 0.5f, mSSRRangeMax, surfaceMat.linearDepth);
 
@@ -83,8 +83,10 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 
 	// Grazing rays (reflection nearly parallel to the surface) accumulate the
 	// most Hi-Z error; fade them out smoothly instead of returning garbage.
-	float atten = dot(reflectRayVS, -viewVector);
-	clip(atten - 1e-5f);
+	// Rays with no forward component at all are discarded outright.
+	static const float kMinLobeAlign = 1e-4f;
+	float lobeAlign = dot(reflectRayVS, -viewVector);
+	clip(lobeAlign - kMinLobeAlign);
 
 	float normalBias = 0.05f + mSSROffset * 0.15f * (1.0f - NdotR);
 	float directionBias = 0.05f + mSSROffset * 0.1f;
@@ -104,7 +106,7 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 		clip(-1);
 
 	float confidence = SSR_HitConfidence(
-		rayOriginVS, hitPosVS, traceDistance, atten, hitUV, reflectRayVS, surfaceMat);
+		rayOriginVS, hitPosVS, traceDistance, lobeAlign, hitUV, reflectRayVS, surfaceMat);
 
 	// Self-reflection suppression (SSRSelfMap): flagged materials never bounce
 	// SSR between each other (skin/hair self-smudging on face close-ups), while
@@ -124,16 +126,15 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	// it into a flat gray patch after the roughness pyramid.
 	float4 hitRadiance = tex2Dlod(ShadingMapPointSamp, float4(hitUV, 0.0f, 0.0f));
 
-	// FP16 radiance buffer: reject NaN/Inf/out-of-range garbage from long or
+	// FP16 radiance buffer: reject NaN/Inf/negative garbage from long or
 	// numerically degenerate rays instead of rendering it as gray/white blobs.
-	bool3 isNaN = isnan(hitRadiance.rgb);
-	bool3 isInRange = (hitRadiance.rgb >= 0.0f) && (hitRadiance.rgb <= 65504.0f);
-	bool3 isValid = !isNaN && isInRange;
-
-	hitRadiance.rgb = float3(
-		isValid.r ? hitRadiance.r : 0.0f,
-		isValid.g ? hitRadiance.g : 0.0f,
-		isValid.b ? hitRadiance.b : 0.0f);
+	// The half-float ceiling matches the render target format; NaN fails every
+	// comparison, so the single validity predicate covers all three cases.
+	static const float kHalfFloatMax = 65504.0f;
+	bool radianceValid = all(!isnan(hitRadiance.rgb))
+		&& all(hitRadiance.rgb >= 0.0f)
+		&& all(hitRadiance.rgb <= kHalfFloatMax);
+	hitRadiance.rgb = radianceValid ? hitRadiance.rgb : 0.0f;
 
 	return float4(hitRadiance.rgb, 1.0f) * (confidence * reflectVis);
 }

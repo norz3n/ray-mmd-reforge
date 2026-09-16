@@ -270,7 +270,11 @@ bool SSR_HiZTrace(
 	float3 rcpStep = rcp(dP + (dP >= 0.0f ? SSR_HZB_DELTA_GUARD : -SSR_HZB_DELTA_GUARD));
 
 	float2 stepDir = sign(dP.xy);
-	float2 boundaryOffset = stepDir * (0.005f * kSSRHiZInvScreen);
+	// Nudge cell boundary crossings inward by a fraction of a texel so the
+	// parametric exit lands inside the neighbour cell rather than exactly on
+	// the shared edge, where point sampling could fetch the wrong cell.
+	static const float kBoundaryInsetTexels = 0.002f;
+	float2 boundaryOffset = stepDir * (kBoundaryInsetTexels * kSSRHiZInvScreen);
 	float2 boundaryStep = saturate(stepDir);
 
 	float t = 0.0f;
@@ -281,8 +285,8 @@ bool SSR_HiZTrace(
 	{
 		float3 ray = p0 + t * dP;
 
-		// Early exit if the ray travels outside screen bounds
-		if (any(floor(ray.xy) != 0.0f))
+		// Early exit once the ray leaves the [0,1] screen rectangle
+		if (any(ray.xy < 0.0f) || any(ray.xy >= 1.0f))
 			break;
 
 		float2 levelRes = kSSRHiZScreenSize / exp2(level);
