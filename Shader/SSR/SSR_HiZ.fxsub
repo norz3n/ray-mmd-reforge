@@ -25,6 +25,9 @@
 // viewport too small to ever steer the traversal within the iteration budgets.
 #define SSR_HZB_MAX_LEVEL 8
 
+// NDC depth at or below this is treated as sky/unwritten in the depth buffer
+#define SSR_HZB_EMPTY_DEPTH 0.01f
+
 #if SSR_QUALITY == 1
 #	define SSR_HZB_ITERATIONS 64
 #elif SSR_QUALITY == 2
@@ -289,7 +292,7 @@ bool SSR_HiZTrace(
 
 		// Convert ray and surface depths to view / NDC spaces
 		float linearZ = SSR_HiZViewDepth(ray.z);
-		float minZ = (zMinMax.x > 0.01f) ? SSR_HiZNdcDepth(zMinMax.x) : 0.0f;
+		float minZ = (zMinMax.x > SSR_HZB_EMPTY_DEPTH) ? SSR_HiZNdcDepth(zMinMax.x) : 0.0f;
 
 		// Compute parametric exit point from current 2D cell boundary
 		float2 tExitAxes = 1e9f;
@@ -322,6 +325,7 @@ bool SSR_HiZTrace(
 		float thickness = max(thicknessBase, cellSlab);
 
 		float tNext = t;
+		bool cellMissed = false;
 
 		if (dP.z > 0.0f)
 		{
@@ -333,39 +337,34 @@ bool SSR_HiZTrace(
 			int2 probeCell = floor(probePos.xy * levelRes);
 
 			// Cell missed if ray exits before reaching surface depth or overshoots back plane
-			if (probeCell.x != cellId.x || probeCell.y != cellId.y || (linearZ - zMinMax.y >= thickness))
-			{
-				tNext = tCellExit;
-				level += 2;
-			}
-			else if (level == 0)
-			{
-				float rayZProbe = p0.z + tNext * dP.z;
-				float linearZProbe = SSR_HiZViewDepth(rayZProbe);
-				if (zMinMax.x <= 0.01f || abs(linearZProbe - zMinMax.x) >= thicknessBase)
-				{
-					tNext = tCellExit;
-					level = 1;
-				}
-			}
+			cellMissed = probeCell.x != cellId.x || probeCell.y != cellId.y
+				|| (linearZ - zMinMax.y >= thickness);
 		}
 		else
 		{
 			// Ray moves toward camera: if ray is already in front of geometry, cell is empty
-			if (ray.z < minZ)
+			cellMissed = ray.z < minZ;
+		}
+
+		if (cellMissed)
+		{
+			tNext = tCellExit;
+			level += 2;
+		}
+		else if (level == 0)
+		{
+			// Finest-level acceptance test: a candidate hit only counts if the
+			// ray lands on the cell's near surface within the pixel tolerance.
+			// A candidate that merely falls inside the cell's min/max depth
+			// span would reflect whatever happens to lie between those planes,
+			// so the ray is rewound to the cell exit and pushed back up the
+			// pyramid to continue from the neighbouring cell instead.
+			float rayZProbe = p0.z + tNext * dP.z;
+			if (zMinMax.x <= SSR_HZB_EMPTY_DEPTH
+				|| abs(SSR_HiZViewDepth(rayZProbe) - zMinMax.x) >= thicknessBase)
 			{
 				tNext = tCellExit;
-				level += 2;
-			}
-			else if (level == 0)
-			{
-				float rayZProbe = p0.z + tNext * dP.z;
-				float linearZProbe = SSR_HiZViewDepth(rayZProbe);
-				if (zMinMax.x <= 0.01f || abs(linearZProbe - zMinMax.x) >= thicknessBase)
-				{
-					tNext = tCellExit;
-					level = 1;
-				}
+				level = 1;
 			}
 		}
 
