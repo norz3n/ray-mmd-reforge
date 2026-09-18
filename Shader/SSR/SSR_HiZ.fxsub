@@ -11,11 +11,19 @@
  * DDA traversal: a ray segment that provably passes in front of or behind
  * every surface in a cell skips it and climbs one level; an ambiguous cell
  * is inspected one level finer; a level-0 cell is a single texel whose depth
- * slab resolves the hit analytically.
+ * slab resolves the hit analytically. A ray whose iteration budget dies
+ * mid-traversal is recovered by a short linear march from the traversal
+ * frontier with binary refinement of the crossing.
  *
  * Direct3D 9 forbids reading a texture bound as the current render target,
  * so each mip is built into its own viewport-ratio target and a final
  * combine pass copies all of them into the atlas the tracer samples.
+ *
+ * The pyramid is exact for any viewport size, not only power-of-two-friendly
+ * ones: cell grids are floored screen sizes, and the source texels past the
+ * last full 2^L block (the tail) are folded into each level's last cell by a
+ * third build sample position per axis, while the tracer anchors cells to
+ * those same texel blocks and lets the last cell span to the screen edge.
  */
 
 #ifndef RAY_MMD_SSR_HIZ_FXSUB
@@ -31,16 +39,17 @@
 #if SSR_QUALITY == 1
 #	define SSR_HZB_ITERATIONS 64
 #elif SSR_QUALITY == 2
-#	define SSR_HZB_ITERATIONS 96
-#elif SSR_QUALITY == 3
 #	define SSR_HZB_ITERATIONS 128
-#else
+#elif SSR_QUALITY == 3
 #	define SSR_HZB_ITERATIONS 192
+#else
+#	define SSR_HZB_ITERATIONS 256
 #endif
 
-// Screen dimensions captured at global scope. Every Hi-Z pass renders into a
-// shrunken viewport, so all cell-size math must come from this static copy
-// (semantic uniforms are rebound to the active pass viewport, statics are not).
+// Screen dimensions captured at global scope. VIEWPORTPIXELSIZE reports the
+// full render viewport in every pass, regardless of the render target the
+// pass draws into (the bloom passes scale it manually for their sub-res
+// targets), so cell-size math can treat it as the full screen size everywhere.
 static const float2 kSSRHiZScreenSize = ViewportSize;
 static const float2 kSSRHiZInvScreen  = 1.0f / kSSRHiZScreenSize;
 
@@ -95,33 +104,97 @@ sampler SSRHiZAtlasSamp = sampler_state { texture = <SSRHiZAtlas>; MinFilter = P
 
 /**
  * Level 1 build: min/max reduction of the 2x2 full-res depth block per cell.
+ *
+ * Viewport sizes are rarely power-of-two multiples, so a tail of source
+ * texels past the last full 2x2 block would never enter the pyramid and rays
+ * would skip straight through the edge geometry. A third sample position per
+ * axis folds that tail into the last row/column of cells: on edge cells it
+ * clamps onto the final source texel, on interior cells it selects an
+ * already-sampled in-block position. The min/max reduction makes the
+ * duplicate harmless, and the folded slab lets the tracer treat the last
+ * cell as spanning to the screen edge.
  */
 float4 SSR_HiZBuild1PS(in float2 coord : TEXCOORD0) : COLOR
 {
 	float2 cell = floor(coord * kSSRHiZLevelSize[0]);
+	bool lastCellX = cell.x >= kSSRHiZLevelSize[0].x - 0.5f;
+	bool lastCellY = cell.y >= kSSRHiZLevelSize[0].y - 0.5f;
 
-	float d0 = tex2Dlod(Gbuffer8Map, float4((cell * 2.0f + float2(0.5f, 0.5f)) * kSSRHiZInvScreen, 0.0f, 0.0f)).x;
-	float d1 = tex2Dlod(Gbuffer8Map, float4((cell * 2.0f + float2(0.5f, 1.5f)) * kSSRHiZInvScreen, 0.0f, 0.0f)).x;
-	float d2 = tex2Dlod(Gbuffer8Map, float4((cell * 2.0f + float2(1.5f, 0.5f)) * kSSRHiZInvScreen, 0.0f, 0.0f)).x;
-	float d3 = tex2Dlod(Gbuffer8Map, float4((cell * 2.0f + float2(1.5f, 1.5f)) * kSSRHiZInvScreen, 0.0f, 0.0f)).x;
+	float2 uv00 = (cell * 2.0f + float2(0.5f, 0.5f)) * kSSRHiZInvScreen;
+	float2 uv10 = (cell * 2.0f + float2(1.5f, 0.5f)) * kSSRHiZInvScreen;
+	float2 uv01 = (cell * 2.0f + float2(0.5f, 1.5f)) * kSSRHiZInvScreen;
+	float2 uv11 = (cell * 2.0f + float2(1.5f, 1.5f)) * kSSRHiZInvScreen;
 
-	return float4(min(min(d0, d1), min(d2, d3)), max(max(d0, d1), max(d2, d3)), 0.0f, 1.0f);
+	// Tail sample: the texel just past the block, clamped onto the last
+	// source texel for edge cells and onto the block's first texel otherwise.
+	float2 tail = float2(
+		lastCellX ? min(cell.x * 2.0f + 2.5f, kSSRHiZScreenSize.x - 0.5f) : cell.x * 2.0f + 0.5f,
+		lastCellY ? min(cell.y * 2.0f + 2.5f, kSSRHiZScreenSize.y - 0.5f) : cell.y * 2.0f + 0.5f);
+	float2 uv20 = float2(tail.x, cell.y * 2.0f + 0.5f) * kSSRHiZInvScreen;
+	float2 uv21 = float2(tail.x, cell.y * 2.0f + 1.5f) * kSSRHiZInvScreen;
+	float2 uv02 = float2(cell.x * 2.0f + 0.5f, tail.y) * kSSRHiZInvScreen;
+	float2 uv12 = float2(cell.x * 2.0f + 1.5f, tail.y) * kSSRHiZInvScreen;
+	float2 uv22 = tail * kSSRHiZInvScreen;
+
+	float d00 = tex2Dlod(Gbuffer8Map, float4(uv00, 0.0f, 0.0f)).x;
+	float d10 = tex2Dlod(Gbuffer8Map, float4(uv10, 0.0f, 0.0f)).x;
+	float d20 = tex2Dlod(Gbuffer8Map, float4(uv20, 0.0f, 0.0f)).x;
+	float d01 = tex2Dlod(Gbuffer8Map, float4(uv01, 0.0f, 0.0f)).x;
+	float d11 = tex2Dlod(Gbuffer8Map, float4(uv11, 0.0f, 0.0f)).x;
+	float d21 = tex2Dlod(Gbuffer8Map, float4(uv21, 0.0f, 0.0f)).x;
+	float d02 = tex2Dlod(Gbuffer8Map, float4(uv02, 0.0f, 0.0f)).x;
+	float d12 = tex2Dlod(Gbuffer8Map, float4(uv12, 0.0f, 0.0f)).x;
+	float d22 = tex2Dlod(Gbuffer8Map, float4(uv22, 0.0f, 0.0f)).x;
+
+	float lo = min(min(min(d00, d10), min(d20, d01)), min(min(d11, d21), min(d02, min(d12, d22))));
+	float hi = max(max(max(d00, d10), max(d20, d01)), max(max(d11, d21), max(d02, max(d12, d22))));
+
+	return float4(lo, hi, 0.0f, 1.0f);
 }
 
 /**
  * Level 2..8 build: min/max reduction of the previous level's 2x2 cell block.
- * Sizes arrive as compile-time uniforms so each pass is specialized for its mip.
+ * Sizes arrive as compile-time uniforms so each pass is specialized for its
+ * mip. The tail fold mirrors SSR_HiZBuild1PS: when the previous grid is odd
+ * along an axis, its last cell (which already carries that level's tail)
+ * joins this level's last cell via the third sample position; on even sizes
+ * the extra sample duplicates an in-block fetch and changes nothing. Every
+ * sample UV is clamped into the previous grid by construction.
  */
 float4 SSR_HiZBuildNPS(in float2 coord : TEXCOORD0, uniform sampler source, uniform float2 prevSize, uniform float2 selfSize) : COLOR
 {
 	float2 cell = floor(coord * selfSize);
+	bool lastCellX = cell.x >= selfSize.x - 0.5f;
+	bool lastCellY = cell.y >= selfSize.y - 0.5f;
 
-	float2 d0 = tex2Dlod(source, float4((cell * 2.0f + float2(0.5f, 0.5f)) / prevSize, 0.0f, 0.0f)).xy;
-	float2 d1 = tex2Dlod(source, float4((cell * 2.0f + float2(0.5f, 1.5f)) / prevSize, 0.0f, 0.0f)).xy;
-	float2 d2 = tex2Dlod(source, float4((cell * 2.0f + float2(1.5f, 0.5f)) / prevSize, 0.0f, 0.0f)).xy;
-	float2 d3 = tex2Dlod(source, float4((cell * 2.0f + float2(1.5f, 1.5f)) / prevSize, 0.0f, 0.0f)).xy;
+	float2 uv00 = (cell * 2.0f + float2(0.5f, 0.5f)) / prevSize;
+	float2 uv10 = (cell * 2.0f + float2(1.5f, 0.5f)) / prevSize;
+	float2 uv01 = (cell * 2.0f + float2(0.5f, 1.5f)) / prevSize;
+	float2 uv11 = (cell * 2.0f + float2(1.5f, 1.5f)) / prevSize;
 
-	return float4(min(min(d0.x, d1.x), min(d2.x, d3.x)), max(max(d0.y, d1.y), max(d2.y, d3.y)), 0.0f, 1.0f);
+	float2 tail = float2(
+		lastCellX ? min(cell.x * 2.0f + 2.5f, prevSize.x - 0.5f) : cell.x * 2.0f + 0.5f,
+		lastCellY ? min(cell.y * 2.0f + 2.5f, prevSize.y - 0.5f) : cell.y * 2.0f + 0.5f);
+	float2 uv20 = float2(tail.x, cell.y * 2.0f + 0.5f) / prevSize;
+	float2 uv21 = float2(tail.x, cell.y * 2.0f + 1.5f) / prevSize;
+	float2 uv02 = float2(cell.x * 2.0f + 0.5f, tail.y) / prevSize;
+	float2 uv12 = float2(cell.x * 2.0f + 1.5f, tail.y) / prevSize;
+	float2 uv22 = tail / prevSize;
+
+	float2 d00 = tex2Dlod(source, float4(uv00, 0.0f, 0.0f)).xy;
+	float2 d10 = tex2Dlod(source, float4(uv10, 0.0f, 0.0f)).xy;
+	float2 d20 = tex2Dlod(source, float4(uv20, 0.0f, 0.0f)).xy;
+	float2 d01 = tex2Dlod(source, float4(uv01, 0.0f, 0.0f)).xy;
+	float2 d11 = tex2Dlod(source, float4(uv11, 0.0f, 0.0f)).xy;
+	float2 d21 = tex2Dlod(source, float4(uv21, 0.0f, 0.0f)).xy;
+	float2 d02 = tex2Dlod(source, float4(uv02, 0.0f, 0.0f)).xy;
+	float2 d12 = tex2Dlod(source, float4(uv12, 0.0f, 0.0f)).xy;
+	float2 d22 = tex2Dlod(source, float4(uv22, 0.0f, 0.0f)).xy;
+
+	float lo = min(min(min(d00.x, d10.x), min(d20.x, d01.x)), min(min(d11.x, d21.x), min(d02.x, min(d12.x, d22.x))));
+	float hi = max(max(max(d00.y, d10.y), max(d20.y, d01.y)), max(max(d11.y, d21.y), max(d02.y, max(d12.y, d22.y))));
+
+	return float4(lo, hi, 0.0f, 1.0f);
 }
 
 #define SSR_HIZ_COMBINE_BAND(index, samplerName) \
@@ -219,6 +292,9 @@ inline float3 SSR_HiZUnprojectScreen(float3 screenPoint)
  * @param dirVS         Unit view-space ray direction.
  * @param maxDistance   Maximum ray travel distance in view space.
  * @param thicknessBase Surface thickness tolerance (mSSRThickness).
+ * @param originNormalVS View-space normal of the origin surface; hits on
+ *                       surfaces facing the same way as it (coplanar self-
+ *                       reflection) are rejected.
  * @param hitUV         [out] Screen-space UV of the hit point.
  * @param hitPosVS      [out] Reconstructed view-space hit position.
  * @return True if an intersecting surface was found within the thickness slab.
@@ -228,11 +304,14 @@ bool SSR_HiZTrace(
 	in float3 dirVS,
 	in float maxDistance,
 	in float thicknessBase,
+	in float3 originNormalVS,
 	out float2 hitUV,
-	out float3 hitPosVS)
+	out float3 hitPosVS,
+	out float4 debugOut)
 {
 	hitUV = float2(-1.0f, -1.0f);
 	hitPosVS = 0.0f;
+	debugOut = float4(-1.0f, -1.0f, 0.0f, 0.0f); // x=iters, y=exit level, z=used fallback
 
 	// Clip ray against near camera plane to ensure valid projection
 	static const float kNearPlaneZ = 0.05f;
@@ -261,6 +340,19 @@ bool SSR_HiZTrace(
 	float3 p1 = float3(ndcEnd.xy   * float2(0.5f, -0.5f) + 0.5f, ndcEnd.z);
 	float3 dP = p1 - p0;
 
+	// Clip the screen-space segment at the viewport border so the parameter
+	// range [0,1] covers exactly the on-screen part of the ray (Unreal Engine's
+	// GetStepScreenFactorToClipAtScreenEdge in SSRTRayCast.ush): no traversal
+	// budget is spent beyond the screen, and the linear fallback march stays
+	// inside it too. Scaling all of dP keeps the 3D ray identical — only its
+	// parameterization changes.
+	float2 tEdge = 1e9f;
+	if (dP.x > 0.0f) tEdge.x = (1.0f - p0.x) / dP.x;
+	else if (dP.x < 0.0f) tEdge.x = (0.0f - p0.x) / dP.x;
+	if (dP.y > 0.0f) tEdge.y = (1.0f - p0.y) / dP.y;
+	else if (dP.y < 0.0f) tEdge.y = (0.0f - p0.y) / dP.y;
+	dP *= clamp(min(tEdge.x, tEdge.y), 0.0f, 1.0f);
+
 	// Guard the reciprocal: an axis-parallel ray segment (dP component of
 	// exactly zero) would produce inf and poison the cell-exit solve. Nudging
 	// every component away from zero by SSR_HZB_DELTA_GUARD keeps rcp finite;
@@ -280,8 +372,29 @@ bool SSR_HiZTrace(
 	float t = 0.0f;
 	int level = 0;
 
+	float texelT = min(
+		kSSRHiZInvScreen.x / max(abs(dP.x), 1e-7f),
+		kSSRHiZInvScreen.y / max(abs(dP.y), 1e-7f));
+
+	// Parametric ray point where view-space distance above the receiver plane
+	// clears 1.5x thicknessBase. Past this threshold, coarse-level tests take over.
+	float NdotD = dot(originNormalVS, dirVS);
+	float tSelfEscape = 0.0f;
+	if (NdotD > 1e-4f)
+	{
+		float sEscape = (thicknessBase * 1.5f) / NdotD;
+		float4 pEscClip = mul(float4(originVS + dirVS * sEscape, 1.0f), matProject);
+		if (pEscClip.w > 0.0f)
+		{
+			float2 pEscNdc = pEscClip.xy / pEscClip.w;
+			float2 pEscScreen = float2(pEscNdc.x * 0.5f + 0.5f, -pEscNdc.y * 0.5f + 0.5f);
+			tSelfEscape = saturate(dot(pEscScreen - p0.xy, dP.xy) / max(dot(dP.xy, dP.xy), 1e-7f));
+		}
+	}
+
 	[loop]
-	for (int iter = 0; iter < SSR_HZB_ITERATIONS && level >= 0 && t < 1.0f; ++iter)
+	int iter = 0;
+	for (iter = 0; iter < SSR_HZB_ITERATIONS && level >= 0 && t < 1.0f; ++iter)
 	{
 		float3 ray = p0 + t * dP;
 
@@ -289,9 +402,23 @@ bool SSR_HiZTrace(
 		if (any(ray.xy < 0.0f) || any(ray.xy >= 1.0f))
 			break;
 
-		float2 levelRes = kSSRHiZScreenSize / exp2(level);
-		float2 invLevelRes = exp2(level) * kSSRHiZInvScreen;
-		int2 cellId = floor(ray.xy * levelRes);
+		// Cell addressing. Level-L cells are anchored to source texel blocks:
+		// cell j covers texels [j*2^L, (j+1)*2^L) — the same blocks the build
+		// passes reduce — so both the index and the exit edges derive from the
+		// float screenSize / 2^L. Deriving them from the floored grid size
+		// (tiling [0,1] uniformly) would drift cell edges against the built
+		// blocks by up to 2^L-1 texels near the right/top edges: wide stripe
+		// artifacts. Viewports that are not a power-of-two multiple leave a
+		// tail of source texels past the last full block; the build folds that
+		// tail into the band's last cell, so the tracer clamps the index into
+		// the band and treats the last cell as spanning to the screen edge.
+		// Without the clamp the index runs one past the band on such viewports
+		// and reads atlas texels the combine pass never wrote (empty sky),
+		// blasting rays through real geometry.
+		float2 cellScale = kSSRHiZScreenSize / exp2(level);
+		float2 edgeScale = exp2(level) * kSSRHiZInvScreen;
+		float2 gridRes = (level == 0) ? kSSRHiZScreenSize : kSSRHiZLevelSize[level - 1];
+		int2 cellId = (int2)min(floor(ray.xy * cellScale), gridRes - 1.0f);
 
 		// Sample depth slab [minZ, maxZ] for this cell
 		float2 zMinMax = (level == 0)
@@ -306,12 +433,18 @@ bool SSR_HiZTrace(
 		float2 tExitAxes = 1e9f;
 		if (abs(dP.x) > 1e-6f)
 		{
-			float cellEdgeX = (float(cellId.x) + boundaryStep.x) * invLevelRes.x + boundaryOffset.x;
+			// A right-moving ray exits the last (tail-folding) cell at the
+			// screen edge rather than at the nominal block boundary.
+			float cellEdgeX = (float(cellId.x) + boundaryStep.x) * edgeScale.x + boundaryOffset.x;
+			if (boundaryStep.x > 0.0f && cellId.x == (int)gridRes.x - 1)
+				cellEdgeX = 1.0f;
 			tExitAxes.x = (cellEdgeX - ray.x) * rcpStep.x;
 		}
 		if (abs(dP.y) > 1e-6f)
 		{
-			float cellEdgeY = (float(cellId.y) + boundaryStep.y) * invLevelRes.y + boundaryOffset.y;
+			float cellEdgeY = (float(cellId.y) + boundaryStep.y) * edgeScale.y + boundaryOffset.y;
+			if (boundaryStep.y > 0.0f && cellId.y == (int)gridRes.y - 1)
+				cellEdgeY = 1.0f;
 			tExitAxes.y = (cellEdgeY - ray.y) * rcpStep.y;
 		}
 		float tCellExit = t + min(tExitAxes.x, tExitAxes.y);
@@ -337,21 +470,27 @@ bool SSR_HiZTrace(
 
 		if (dP.z > 0.0f)
 		{
-			// Ray moves deeper into the scene: jump ahead to nearest surface plane in cell
+			// Ray moves deeper into the scene: jump ahead to nearest surface plane in cell.
 			float deltaZ = minZ - ray.z;
-			tNext = deltaZ > 0.0f ? (tNext + deltaZ * rcpStep.z) : tNext;
+			tNext = deltaZ > 0.0f ? tNext + deltaZ * rcpStep.z : tNext;
 
 			float3 probePos = p0 + tNext * dP;
-			int2 probeCell = floor(probePos.xy * levelRes);
+			int2 probeCell = (int2)min(floor(probePos.xy * cellScale), gridRes - 1.0f);
 
-			// Cell missed if ray exits before reaching surface depth or overshoots back plane
-			cellMissed = probeCell.x != cellId.x || probeCell.y != cellId.y
-				|| (linearZ - zMinMax.y >= thickness);
+			// Cell boundary exit check:
+			if (probeCell.x != cellId.x || probeCell.y != cellId.y)
+			{
+				cellMissed = true;
+			}
+			else if (level <= 1 && abs(linearZ - zMinMax.x) >= thicknessBase)
+			{
+				cellMissed = true;
+			}
 		}
 		else
 		{
-			// Ray moves toward camera: if ray is already in front of geometry, cell is empty
-			cellMissed = ray.z < minZ;
+			// Ray toward camera: miss if cell is empty (sky) or ray is in front of all geometry.
+			cellMissed = (zMinMax.x <= SSR_HZB_EMPTY_DEPTH) || (ray.z < minZ);
 		}
 
 		if (cellMissed)
@@ -361,18 +500,33 @@ bool SSR_HiZTrace(
 		}
 		else if (level == 0)
 		{
-			// Finest-level acceptance test: a candidate hit only counts if the
-			// ray lands on the cell's near surface within the pixel tolerance.
-			// A candidate that merely falls inside the cell's min/max depth
-			// span would reflect whatever happens to lie between those planes,
-			// so the ray is rewound to the cell exit and pushed back up the
-			// pyramid to continue from the neighbouring cell instead.
-			float rayZProbe = p0.z + tNext * dP.z;
-			if (zMinMax.x <= SSR_HZB_EMPTY_DEPTH
-				|| abs(SSR_HiZViewDepth(rayZProbe) - zMinMax.x) >= thicknessBase)
+			// Finest-level acceptance test: the ray must land within thicknessBase
+			// of the cell's near surface (zMinMax.x = linear view depth of geometry).
+			// Rejects sky cells, overshoots beyond the thickness window, and
+			// backfaces facing away from the ray.
+			float probeLinearZ = SSR_HiZViewDepth(p0.z + tNext * dP.z);
+			float2 hitUV0 = p0.xy + tNext * dP.xy;
+			float3 hitNormal0 = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(hitUV0, 0.0f, 0.0f)));
+
+			if (dot(hitNormal0, originNormalVS) > 0.99f)
 			{
+				// Coplanar self-hit on receiver plane: step forward along the ray,
+				// ramping from 16 to 48 texels until tSelfEscape is reached, then climb
+				// to level 2 (becoming level 1 after --level) so coarse mips can resume.
+				float escapeProgress = (tSelfEscape > 0.0f) ? saturate(t / tSelfEscape) : 1.0f;
+				float stepTexels = lerp(16.0f, 48.0f, escapeProgress);
+				tNext = max(tCellExit, t + stepTexels * texelT);
+				level = 2;
+			}
+			else if (zMinMax.x <= SSR_HZB_EMPTY_DEPTH
+				|| abs(probeLinearZ - zMinMax.x) >= thicknessBase
+				|| dot(hitNormal0, -dirVS) <= 0.05f)
+			{
+				// Candidate rejected: step to cell exit and climb to level 2 (becoming
+				// level 1 after --level) so the ray can traverse coarse mips instead of
+				// getting trapped at level 0.
 				tNext = tCellExit;
-				level = 1;
+				level = 2;
 			}
 		}
 
@@ -382,10 +536,114 @@ bool SSR_HiZTrace(
 	}
 
 	float3 hitPoint = p0 + t * dP;
-	hitUV = clamp(hitPoint.xy, 0.0f, 1.0f);
-	hitPosVS = SSR_HiZUnprojectScreen(hitPoint);
+	debugOut = float4((float)iter, (float)level, 0.0f, 0.0f);
 
-	return level < 0;
+	if (level < 0)
+	{
+		hitUV    = clamp(hitPoint.xy, 0.0f, 1.0f);
+		hitPosVS = SSR_HiZUnprojectScreen(hitPoint);
+		return true;
+	}
+
+	// Linear fallback for rays the Hi-Z traversal abandoned: the iteration
+	// budget died mid-traversal (grazing skims hopping cell-to-cell, silhouette
+	// edges). The frontier at t sits beside the surface the traversal kept
+	// rejecting, so a short linear march from there recovers the crossing.
+	// Rays that merely left the screen or spent their full range have nothing
+	// left to trace.
+	if (t >= 1.0f || any(hitPoint.xy < 0.0f) || any(hitPoint.xy >= 1.0f))
+		return false;
+
+	// Scan span: the parameter delta covering kFallbackSpanTexels of screen
+	// travel along the ray's dominant screen axis, clamped to the remaining
+	// (screen-clipped) ray. Eight uniform samples over it cannot jump across
+	// a surface crossing because the hit window scales with the view depth
+	// the ray crosses per step (Unreal Engine's CompareTolerance in
+	// SSRTRayCast.ush): a grazing ray's depth explodes along its screen path,
+	// and a fixed window would step over crossings without ever noticing.
+	static const float kFallbackSpanTexels = 64.0f;
+	float span = kFallbackSpanTexels * min(
+		kSSRHiZInvScreen.x / max(abs(dP.x), 1e-7f),
+		kSSRHiZInvScreen.y / max(abs(dP.y), 1e-7f));
+	span = min(span, 1.0f - t);
+
+	float tFbPrev = t;
+	float tFbHit  = -1.0f;
+	float prevRayLinearZ = SSR_HiZViewDepth(p0.z + t * dP.z);
+
+	[unroll]
+	for (int fb = 1; fb <= 8; ++fb)
+	{
+		float tFb    = t + span * (float(fb) / 8.0f);
+		float3 rayFb = p0 + tFb * dP;
+
+		if (any(rayFb.xy < 0.0f) || any(rayFb.xy >= 1.0f))
+			break;
+
+		float sceneLinearZ = tex2Dlod(Gbuffer8Map, float4(rayFb.xy, 0.0f, 0.0f)).x;
+		float rayLinearZ   = SSR_HiZViewDepth(rayFb.z);
+		float spanZ = rayLinearZ - prevRayLinearZ;
+		prevRayLinearZ = rayLinearZ;
+
+		if (sceneLinearZ > SSR_HZB_EMPTY_DEPTH
+			&& rayLinearZ >= sceneLinearZ
+			&& (rayLinearZ - sceneLinearZ) < max(thicknessBase * 4.0f, spanZ))
+		{
+			float3 fbNormal = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(rayFb.xy, 0.0f, 0.0f)));
+			if (dot(fbNormal, -dirVS) > 0.05f && dot(fbNormal, originNormalVS) <= 0.99f)
+			{
+				tFbHit = tFb;
+				break;
+			}
+		}
+
+		tFbPrev = tFb;
+	}
+
+	if (tFbHit >= 0.0f)
+	{
+		// Binary refinement between the last sample in front of the surface
+		// and the first one behind pinpoints the crossing without the banding
+		// a fixed sample pitch would leave behind.
+		float tLo = tFbPrev;
+		float tHi = tFbHit;
+
+		[unroll]
+		for (int bi = 0; bi < 5; ++bi)
+		{
+			float tMid    = (tLo + tHi) * 0.5f;
+			float3 rayMid = p0 + tMid * dP;
+			float sceneZ  = tex2Dlod(Gbuffer8Map, float4(rayMid.xy, 0.0f, 0.0f)).x;
+			float rayZ    = SSR_HiZViewDepth(rayMid.z);
+			float3 midNormal = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(rayMid.xy, 0.0f, 0.0f)));
+
+			if (sceneZ > SSR_HZB_EMPTY_DEPTH && rayZ >= sceneZ
+				&& dot(midNormal, -dirVS) > 0.05f && dot(midNormal, originNormalVS) <= 0.99f)
+				tHi = tMid;
+			else
+				tLo = tMid;
+		}
+
+		float tFinal = (tLo + tHi) * 0.5f;
+		float3 rayFinal = p0 + tFinal * dP;
+
+		float finalSceneZ = tex2Dlod(Gbuffer8Map, float4(rayFinal.xy, 0.0f, 0.0f)).x;
+		float finalRayZ   = SSR_HiZViewDepth(rayFinal.z);
+		float3 finalNormal = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(rayFinal.xy, 0.0f, 0.0f)));
+
+		if (finalSceneZ > SSR_HZB_EMPTY_DEPTH
+			&& abs(finalRayZ - finalSceneZ) < thicknessBase * 4.0f
+			&& dot(finalNormal, -dirVS) > 0.05f
+			&& dot(finalNormal, originNormalVS) <= 0.99f)
+		{
+			hitUV    = clamp(rayFinal.xy, 0.0f, 1.0f);
+			hitPosVS = SSR_HiZUnprojectScreen(rayFinal);
+			debugOut.z = 1.0f;
+			return true;
+		}
+	}
+
+	return false;
 }
 
 #endif // RAY_MMD_SSR_HIZ_FXSUB

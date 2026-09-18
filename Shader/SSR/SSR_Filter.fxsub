@@ -52,8 +52,12 @@ float4 SSR_FilterBlurPS(in float2 coord : TEXCOORD0, uniform sampler source, uni
 		float zTap = tex2Dlod(Gbuffer8Map, float4(uvTap, 0.0f, 0.0f)).r;
 		float3 nTap = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(uvTap, 0.0f, 0.0f)));
 
-		float wTap = tapWeight * BilateralDepthWeight(zTap, zCenter, zTolerance) * BilateralNormalWeight(nTap, nCenter);
-		blurred += tex2Dlod(source, float4(uvTap, 0.0f, 0.0f)) * wTap;
+		float4 tapColor = tex2Dlod(source, float4(uvTap, 0.0f, 0.0f));
+		// Miss pixels (alpha=0) must not bleed zero into the blur and create a seam.
+		// Multiplying by the hit predicate keeps this compatible with [unroll] in SM2.
+		float tapHit = (tapColor.a >= 1e-4f) ? 1.0f : 0.0f;
+		float wTap = tapWeight * BilateralDepthWeight(zTap, zCenter, zTolerance) * BilateralNormalWeight(nTap, nCenter) * tapHit;
+		blurred += tapColor * wTap;
 		totalWeight += wTap;
 	}
 

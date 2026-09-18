@@ -59,6 +59,21 @@ float mColBalanceBM : CONTROLOBJECT<string name="ray_controller.pmx"; string ite
 float mTemperatureP : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "Temperature+";>;
 float mTemperatureM : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "Temperature-";>;
 
+#if SSR_HIZ_DEBUG
+// HiZDebugController.pmx (SSR Hi-Z atlas debug overlay; see SSR_HiZDebug.fxsub)
+float mHiZDebugAll   : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZAll";>;
+float mHiZDebugAtlas : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZAtlas";>;
+float mHiZDebugTrace : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZTrace";>;
+float mHiZDebugBand1 : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZBand1";>;
+float mHiZDebugBand2 : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZBand2";>;
+float mHiZDebugBand3 : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZBand3";>;
+float mHiZDebugBand4 : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZBand4";>;
+float mHiZDebugBand5 : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZBand5";>;
+float mHiZDebugBand6 : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZBand6";>;
+float mHiZDebugBand7 : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZBand7";>;
+float mHiZDebugBand8 : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZBand8";>;
+#endif
+
 #if WATER_CAUSTICS_ENABLE
 // CausticsController.pmx (Dedicated separate controller)
 float mCstIntensityP1   : CONTROLOBJECT<string name="CausticsController.pmx"; string item = "Intensity+";>;
@@ -832,6 +847,10 @@ technique DeferredLighting<
 	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=PostProcessSharpen;"
 #endif
 #endif
+
+#if SSR_HIZ_DEBUG
+	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=SSR_HiZDebug;"
+#endif
 ;>
 {
 #if SUN_LIGHT_ENABLE && SUN_SHADOW_QUALITY
@@ -1115,6 +1134,14 @@ technique DeferredLighting<
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
 		PixelShader  = compile ps_3_0 SSR_ResolvePS();
 	}
+#if SSR_HIZ_DEBUG
+	pass SSR_HiZDebug<string Script= "Draw=Buffer;";>{
+		AlphaBlendEnable = false; AlphaTestEnable = false;
+		ZEnable = false; ZWriteEnable = false;
+		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
+		PixelShader  = compile ps_3_0 SSR_HiZDebugPS();
+	}
+#endif
 #endif
 #if GI_ENABLE
 	pass SSGI<string Script= "Draw=Buffer;";>{
