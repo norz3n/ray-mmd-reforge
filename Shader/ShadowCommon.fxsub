@@ -132,8 +132,4 @@ float2 ComputeMoments(float depth)
 	return moments;
 }
 
-// PCSS helpers (SearchRegionRadius / PenumbraRadius / ProjectToLight) were
-// removed with the never-enabled PCSS_SHADOW_ENABLE branches; recover them from
-// git history if percentage-closer soft shadows ever get wired up.
-
 #endif
