@@ -27,6 +27,11 @@ float4 SSR_ResolvePS(in float2 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1)
 	// Surface glossiness and continuous roughness LOD mapping (0 = mirror full-res, 3 = diffuse blur)
 	float gloss = saturate(surfaceMat.smoothness + mSSRSmoothness * 0.5f);
 	float roughness = saturate(1.0f - gloss);
+
+	// Receiver blur mask: selective blur boost per subset/material via SSRBlurMap (0.0 = base, 1.0 = max blur)
+	float blurMask = tex2Dlod(SSRBlurMapSamp, float4(coord, 0.0f, 0.0f)).a;
+	roughness = saturate(roughness + blurMask * (1.0f - roughness));
+
 	// Perceptual (pow 1.5) roughness-to-pyramid mapping: mid-gloss materials reach
 	// the coarser pyramid levels instead of hugging the sharp full-res one, so the
 	// reflected image softens in proportion to the material's microfacet spread.

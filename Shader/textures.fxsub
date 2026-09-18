@@ -285,6 +285,28 @@ sampler SSRSelfMapSamp = sampler_state {
 	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
+// Receiver-side blur mask: selective extra blur for screen-space reflections
+// on specific materials and subsets. Clears to 0 (default material PBR blur);
+// attaching "SSR blur N.fx" to a material's MME tab boosts the blur LOD.
+texture SSRBlurMap : OFFSCREENRENDERTARGET<
+	string Description = "SSR blur mask for ray";
+	float2 ViewportRatio = {1.0, 1.0};
+	string Format = "A8";
+	float4 ClearColor = { 0, 0, 0, 0 };
+	float ClearDepth = 1.0;
+	string DefaultEffect =
+		"self = hide;"
+		"*fog.pmx=hide;"
+		"*controller*.pmx=hide;"
+		"*editor*.pmx=hide;"
+		"Volumetric*.pmx=hide;"
+		"*.*=shadow/SSR blur 0.0.fx;";
+>;
+sampler SSRBlurMapSamp = sampler_state {
+	texture = <SSRBlurMap>;
+	MinFilter = POINT; MagFilter = POINT; MipFilter = NONE;
+	AddressU = CLAMP; AddressV = CLAMP;
+};
 #endif
 #if SKY_VISIBILITY_ENABLE
 shared texture SkyVisibilityMap : OFFSCREENRENDERTARGET<
