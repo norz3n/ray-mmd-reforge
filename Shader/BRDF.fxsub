@@ -527,6 +527,12 @@ float EnergyPreservingFullyRough(inout float3 specular, float roughness)
 #define SPEC_LIGHT_SIN_ALPHA 0
 #endif
 
+#if SUN_SPECULAR_DISK_ENABLE
+#	define EFFECTIVE_SPEC_SIN_ALPHA max(SPEC_LIGHT_SIN_ALPHA, mSunAngularRadius)
+#else
+#	define EFFECTIVE_SPEC_SIN_ALPHA SPEC_LIGHT_SIN_ALPHA
+#endif
+
 /**
  * [de Carpentier 2017, "Decima Engine: Advances in Lighting and AA"]
  * Specular highlight softening for sphere/area-like lights: picks the largest
@@ -880,17 +886,29 @@ float3 ClearCoatShading(MaterialParam material, float nh, float nl, float vh, fl
 }
 
 /**
- * [Steve McAuley 2011, "Energy-conserving wrapped diffuse"]
+ * [Steve McAuley 2011, "Energy-conserving wrapped diffuse" / Henyey-Greenstein forward phase]
  * Two-sided wrapped transmission for thin geometry (foliage, leaves, paper, cloth).
  */
 float3 SubsurfaceShadingTwoSided(MaterialParam material, float3 N, float3 L, float3 V)
 {
 	float wrapNoL = saturate((-dot(N, L) + 0.5f) / 2.25f);
 	float voL = dot(V, L);
+
+#if SUN_BACKLIGHT_TRANSLUCENCY
+	// Physical Henyey-Greenstein forward phase function for solar transmission:
+	// Light passing through thin translucent media scatters preferentially forward (-V . L -> 1)
+	float g = mSunBacklightAnisotropy;
+	float g2 = g * g;
+	float cosTheta = saturate(-voL);
+	float denom = 1.0f + g2 - 2.0f * g * cosTheta;
+	float hgPhase = (1.0f - g2) / (4.0f * PI * pow(max(denom, 0.01f), 1.5f));
+	float scatter = hgPhase * 2.0f;
+#else
 	float m2 = 0.36f; // roughness ~0.6
 	float nh = saturate(-voL);
 	float d = (nh * m2 - nh) * nh + 1.0f;
 	float scatter = m2 / (PI * d * d);
+#endif
 
 	float3 transColor = any(material.customDataB > 1e-4f) ? material.customDataB : material.albedo;
 	return transColor * (wrapNoL * scatter * saturate(material.customDataA));
@@ -953,8 +971,8 @@ float2x3 SurfaceEnergy(MaterialParam material, float3 N, float3 L, float3 V, flo
 	float vh = saturate(InvLenH + InvLenH * lv);
 
 	// [de Carpentier 2017] Optional sphere-light highlight softening / specular
-	// AA; identity no-op when SPEC_LIGHT_SIN_ALPHA = 0 (constant-folded)
-	SphereMaxNoH(nl, lv, nv, SPEC_LIGHT_SIN_ALPHA, nh, vh);
+	// AA; identity no-op when EFFECTIVE_SPEC_SIN_ALPHA = 0 (constant-folded)
+	SphereMaxNoH(nl, lv, nv, EFFECTIVE_SPEC_SIN_ALPHA, nh, vh);
 
 	float3 H = (material.lightModel == SHADINGMODELID_ANISOTROPY) ? ((V + L) * InvLenH) : 0;
 
@@ -1038,7 +1056,7 @@ float4 SurfaceEnergy(MaterialParam material, float3 N, float3 Ld, float3 Ls, flo
 
 	// [de Carpentier 2017] Optional sphere/area-light highlight softening;
 	// shaped by the specular direction Ls and a no-op when the knob is 0
-	SphereMaxNoH(nlUnclamped, vl, nv, SPEC_LIGHT_SIN_ALPHA, nh, vh);
+	SphereMaxNoH(nlUnclamped, vl, nv, EFFECTIVE_SPEC_SIN_ALPHA, nh, vh);
 	// Adopt the re-projected NoL (no-op when the knob is 0)
 	nl = saturate(max(nl, nlUnclamped));
 
