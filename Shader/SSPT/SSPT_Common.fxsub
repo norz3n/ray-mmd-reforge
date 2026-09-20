@@ -39,6 +39,14 @@
 #	define SSPT_SAMPLE_RADIUS 16.0f
 #endif
 
+#ifndef SSPT_MAX_DEPTH
+#	define SSPT_MAX_DEPTH 1500.0f
+#endif
+
+#ifndef SSPT_FAR_FADE_START
+#	define SSPT_FAR_FADE_START 800.0f
+#endif
+
 #ifndef SSPT_Z_THICKNESS
 #	define SSPT_Z_THICKNESS 1.0f
 #endif

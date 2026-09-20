@@ -25,7 +25,7 @@ float4 SSPTFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 		tex2Dlod(Gbuffer8Map, float4(uvCoord, 0.0f, 0.0f)),
 		mat);
 
-	if (!(zCenter > 1e-4f && zCenter < 200.0f))
+	if (!(zCenter > 1e-4f && zCenter < SSPT_MAX_DEPTH))
 		return 0.0f;
 
 	// Glass is a purely refractive/specular dielectric: no diffuse GI absorption or emission

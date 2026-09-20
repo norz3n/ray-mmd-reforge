@@ -33,7 +33,7 @@ float3 SampleSkyRadiance(float2 skyUv)
 float4 SSPTPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) : COLOR
 {
 	float zOrigin = GetSSPTLinearDepth(uvCoord.xy);
-	if (!(zOrigin > 0.0f && zOrigin < 200.0f))
+	if (!(zOrigin > 0.0f && zOrigin < SSPT_MAX_DEPTH))
 		clip(-1);
 
 	float4 projInfo = GetProjConstant();
@@ -49,8 +49,8 @@ float4 SSPTPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 		return 0.0f;
 	bool receiverIsSkin = (receiverModel == SHADINGMODELID_SKIN || receiverModel == SHADINGMODELID_SUBSURFACE);
 
-	// World gather radius and depth thickness scaling
-	float maxWorldDistance = max(mSSGIScale * SSPT_SAMPLE_RADIUS * 2.5f, 4.0f) * clamp(mSSGIConeAngle * 2.0f, 0.5f, 3.0f);
+	// World gather radius and depth thickness scaling (expanded for room corners and large stages)
+	float maxWorldDistance = max(mSSGIScale * SSPT_SAMPLE_RADIUS * 6.0f, 150.0f) * clamp(mSSGIConeAngle * 2.0f, 0.5f, 3.0f);
 	float invThickness = 1.0f / max((maxWorldDistance * 0.12f) * SSPT_Z_THICKNESS, 0.04f);
 
 	float2 screenPixel = uvCoord.xy * ViewportSize;
@@ -187,12 +187,12 @@ float4 SSPTPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 			}
 		}
 
-		// Seamless Environment / Sky IBL fallback for escaped or boundary rays (matching SSGI)
+		// Seamless Environment / Sky IBL fallback for escaped or boundary rays (prevents unlit corners)
 		if (intersected < 0.85f)
 		{
 			float2 skyUv = saturate(uvCoord.xy + deltaUV);
 			float skyDepth = GetSSPTLinearDepth(skyUv);
-			if (skyDepth <= 1e-4f)
+			if (skyDepth <= 1e-4f || skyDepth > SSPT_FAR_FADE_START || !insideScreen)
 			{
 				float NdotSky = saturate(dot(nOrigin, rayDir));
 				if (NdotSky > 0.0f)
@@ -218,7 +218,8 @@ float4 SSPTPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 	float giGain = PI * lerp(lerp(1.0f, 8.0f, mSSGIIntensityPlus), 0.0f, mSSGIIntensityMinus)
 		* SSPT_IL_AMOUNT * lerp(1.0f, 2.5f, mDbgSSGIModeGain);
 
-	float3 finalGi = avgRadiance * giGain;
+	float farFade = saturate((SSPT_MAX_DEPTH - zOrigin) / max(SSPT_MAX_DEPTH - SSPT_FAR_FADE_START, 1.0f));
+	float3 finalGi = avgRadiance * (giGain * farFade);
 
 	return float4(clamp(finalGi, 0.0f, 100.0f), saturate(avgOcclusion));
 }

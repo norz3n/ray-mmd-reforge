@@ -23,7 +23,7 @@ float4 SSPTOutlierRejectPS(
 	uniform sampler source) : COLOR
 {
 	float zCenter = GetSSPTLinearDepth(uvCoord);
-	if (!(zCenter > 0.0f && zCenter < 200.0f))
+	if (!(zCenter > 0.0f && zCenter < SSPT_MAX_DEPTH))
 		return float4(0.0f, 0.0f, 0.0f, 0.0f);
 
 	float4 projInfo = GetProjConstant();
@@ -48,7 +48,7 @@ float4 SSPTOutlierRejectPS(
 			float2 tapUv = uvCoord + float2(x, y) * tapStep;
 
 			float zTap = GetSSPTLinearDepth(tapUv);
-			if (!(zTap > 0.0f && zTap < 200.0f))
+			if (!(zTap > 0.0f && zTap < SSPT_MAX_DEPTH))
 				continue;
 
 			float3 pTap = GetViewPosition(projInfo, tapUv, zTap);
@@ -89,7 +89,7 @@ float4 SSPTBlurPS(
 	uniform float stepScale) : COLOR
 {
 	float zCenter = GetSSPTLinearDepth(uvCoord);
-	if (!(zCenter > 0.0f && zCenter < 200.0f))
+	if (!(zCenter > 0.0f && zCenter < SSPT_MAX_DEPTH))
 		return float4(0.0f, 0.0f, 0.0f, 0.0f);
 
 	float4 projInfo = GetProjConstant();
@@ -120,7 +120,7 @@ float4 SSPTBlurPS(
 		float zA = GetSSPTLinearDepth(uvA);
 		float zB = GetSSPTLinearDepth(uvB);
 
-		if (zA > 0.0f && zA < 200.0f)
+		if (zA > 0.0f && zA < SSPT_MAX_DEPTH)
 		{
 			float3 pA = GetViewPosition(projInfo, uvA, zA);
 			float planeDistA = abs(dot(nCenter, pA - pCenter));
@@ -136,7 +136,7 @@ float4 SSPTBlurPS(
 			totalW += wA;
 		}
 
-		if (zB > 0.0f && zB < 200.0f)
+		if (zB > 0.0f && zB < SSPT_MAX_DEPTH)
 		{
 			float3 pB = GetViewPosition(projInfo, uvB, zB);
 			float planeDistB = abs(dot(nCenter, pB - pCenter));
