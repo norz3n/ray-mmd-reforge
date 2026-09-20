@@ -115,22 +115,17 @@ inline float3 GetSSPTNormal(float2 uv)
 
 /**
  * Constructs an orthonormal tangent space basis matrix from surface normal.
- * Implements Marty McFly's projected axis algorithm for optimal stability and smooth transitions.
+ * Implements Duff et al. (Pixar, 2017) building an orthonormal basis algorithm.
  */
 inline float3x3 BuildTangentMatrix(float3 n)
 {
-	float3 e1proj = float3(1.0f, 0.0f, 0.0f) - n.x * n;
-	float3 e2proj = float3(0.0f, 1.0f, 0.0f) - n.y * n;
-	float3 e3proj = float3(0.0f, 0.0f, 1.0f) - n.z * n;
+	float sign = (n.z >= 0.0f) ? 1.0f : -1.0f;
+	float a = -1.0f / (sign + n.z);
+	float b = n.x * n.y * a;
+	float3 t = float3(1.0f + sign * n.x * n.x * a, sign * b, -sign * n.x);
+	float3 bitangent = float3(b, sign + n.y * n.y * a, -n.y);
 
-	float3 longest = dot(e1proj, e1proj) > dot(e2proj, e2proj) ? e1proj : e2proj;
-	longest = dot(longest, longest) > dot(e3proj, e3proj) ? longest : e3proj;
-	longest = normalize(longest);
-
-	float3 t = longest;
-	float3 b = cross(t, n);
-
-	return float3x3(t, b, n);
+	return float3x3(t, bitangent, n);
 }
 
 /**

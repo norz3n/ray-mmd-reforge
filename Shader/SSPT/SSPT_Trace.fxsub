@@ -86,9 +86,9 @@ float4 SSPTPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 		float cosTheta = sqrt(lerp(0.01f, 0.98f, rayProgress));
 		float sinTheta = sqrt(max(0.0f, 1.0f - cosTheta * cosTheta));
 
-		// Tangent space ray direction rotated to view space
+		// Tangent space ray direction rotated to view space (isometry preserves unit length)
 		float3 rayDirLocal = float3(sampleDir * sinTheta, cosTheta);
-		float3 rayDir = normalize(mul(rayDirLocal, tbn));
+		float3 rayDir = mul(rayDirLocal, tbn);
 
 		// Advance golden angle spiral for next ray
 		sampleDir = mul(sampleDir, SSPT_ROTX);
@@ -135,12 +135,13 @@ float4 SSPTPassPS(in float4 uvCoord : TEXCOORD0, in float3 viewDir : TEXCOORD1) 
 
 			if (zSample > 1e-3f && zSample < 1000.0f)
 			{
-				float3 pSample = GetViewPosition(projInfo, rayUV, zSample);
-				float3 delta = (pSample - pRay) * invThickness;
+				float deltaZ = (zSample - pRay.z) * invThickness;
 
-				// qUINT RTGI thickness collision condition
-				if (delta.z < 0.02f && delta.z > -1.0f)
+				// qUINT RTGI thickness collision condition with early-Z gating
+				if (deltaZ < 0.02f && deltaZ > -1.0f)
 				{
+					float3 pSample = GetViewPosition(projInfo, rayUV, zSample);
+					float3 delta = float3((pSample.xy - pRay.xy) * invThickness, deltaZ);
 					float distSq = dot(delta, delta);
 					if (distSq < 1.0f)
 					{
