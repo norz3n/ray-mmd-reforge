@@ -353,10 +353,10 @@ sampler SSGIVisibilityMapSamp = sampler_state {
 };
 #endif
 #if SUN_LIGHT_ENABLE && SUN_SHADOW_QUALITY
-shared texture PSSM1 : OFFSCREENRENDERTARGET<
+shared texture VSM1 : OFFSCREENRENDERTARGET<
 	string Description = "Cascade shadow map for ray";
 	int2 Dimensions = { SHADOW_MAP_SIZE, SHADOW_MAP_SIZE };
-	string Format = "R32F";
+	string Format = "G32R32F";
 	float4 ClearColor = { 0, 0, 0, 0 };
 	float ClearDepth = 1.0;
 	string DefaultEffect =
@@ -365,14 +365,14 @@ shared texture PSSM1 : OFFSCREENRENDERTARGET<
 		"*controller*.pmx=hide;"
 		"*editor*.pmx=hide;"
 		"Volumetric*.pmx=hide;"
-		"*.pmx=shadow/PSSM1.fx;"
-		"*.pmd=shadow/PSSM1.fx;"
+		"*.pmx=shadow/VSM1.fx;"
+		"*.pmd=shadow/VSM1.fx;"
 		"*.x=hide;";
 >;
-shared texture PSSM2 : OFFSCREENRENDERTARGET<
+shared texture VSM2 : OFFSCREENRENDERTARGET<
 	string Description = "Cascade shadow map for ray";
 	int2 Dimensions = { SHADOW_MAP_SIZE, SHADOW_MAP_SIZE };
-	string Format = "R32F";
+	string Format = "G32R32F";
 	float4 ClearColor = { 0, 0, 0, 0 };
 	float ClearDepth = 1.0;
 	string DefaultEffect =
@@ -381,14 +381,14 @@ shared texture PSSM2 : OFFSCREENRENDERTARGET<
 		"*controller*.pmx=hide;"
 		"*editor*.pmx=hide;"
 		"Volumetric*.pmx=hide;"
-		"*.pmx=shadow/PSSM2.fx;"
-		"*.pmd=shadow/PSSM2.fx;"
+		"*.pmx=shadow/VSM2.fx;"
+		"*.pmd=shadow/VSM2.fx;"
 		"*.x=hide;";
 >;
-shared texture PSSM3 : OFFSCREENRENDERTARGET<
+shared texture VSM3 : OFFSCREENRENDERTARGET<
 	string Description = "Cascade shadow map for ray";
 	int2 Dimensions = { SHADOW_MAP_SIZE, SHADOW_MAP_SIZE };
-	string Format = "R32F";
+	string Format = "G32R32F";
 	float4 ClearColor = { 0, 0, 0, 0 };
 	float ClearDepth = 1.0;
 	string DefaultEffect =
@@ -397,14 +397,14 @@ shared texture PSSM3 : OFFSCREENRENDERTARGET<
 		"*controller*.pmx=hide;"
 		"*editor*.pmx=hide;"
 		"Volumetric*.pmx=hide;"
-		"*.pmx=shadow/PSSM3.fx;"
-		"*.pmd=shadow/PSSM3.fx;"
+		"*.pmx=shadow/VSM3.fx;"
+		"*.pmd=shadow/VSM3.fx;"
 		"*.x=hide;";
 >;
-shared texture PSSM4 : OFFSCREENRENDERTARGET<
+shared texture VSM4 : OFFSCREENRENDERTARGET<
 	string Description = "Cascade shadow map for ray";
 	int2 Dimensions = { SHADOW_MAP_SIZE, SHADOW_MAP_SIZE };
-	string Format = "R32F";
+	string Format = "G32R32F";
 	float4 ClearColor = { 0, 0, 0, 0 };
 	float ClearDepth = 1.0;
 	string DefaultEffect =
@@ -413,30 +413,34 @@ shared texture PSSM4 : OFFSCREENRENDERTARGET<
 		"*controller*.pmx=hide;"
 		"*editor*.pmx=hide;"
 		"Volumetric*.pmx=hide;"
-		"*.pmx=shadow/PSSM4.fx;"
-		"*.pmd=shadow/PSSM4.fx;"
+		"*.pmx=shadow/VSM4.fx;"
+		"*.pmd=shadow/VSM4.fx;"
 		"*.x=hide;";
 >;
-sampler PSSM1Samp = sampler_state {
-	texture = <PSSM1>;
+sampler VSM1Samp = sampler_state {
+	texture = <VSM1>;
 	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
-sampler PSSM2Samp = sampler_state {
-	texture = <PSSM2>;
+sampler VSM2Samp = sampler_state {
+	texture = <VSM2>;
 	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
-sampler PSSM3Samp = sampler_state {
-	texture = <PSSM3>;
+sampler VSM3Samp = sampler_state {
+	texture = <VSM3>;
 	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
-sampler PSSM4Samp = sampler_state {
-	texture = <PSSM4>;
+sampler VSM4Samp = sampler_state {
+	texture = <VSM4>;
 	MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE;
 	AddressU = CLAMP; AddressV = CLAMP;
 };
+sampler PSSM1Samp = sampler_state { texture = <VSM1>; MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE; AddressU = CLAMP; AddressV = CLAMP; };
+sampler PSSM2Samp = sampler_state { texture = <VSM2>; MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE; AddressU = CLAMP; AddressV = CLAMP; };
+sampler PSSM3Samp = sampler_state { texture = <VSM3>; MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE; AddressU = CLAMP; AddressV = CLAMP; };
+sampler PSSM4Samp = sampler_state { texture = <VSM4>; MinFilter = LINEAR; MagFilter = LINEAR; MipFilter = NONE; AddressU = CLAMP; AddressV = CLAMP; };
 shared texture ShadowMap : RENDERCOLORTARGET<
 	float2 ViewportRatio = {1.0, 1.0};
 	string Format = "L8";

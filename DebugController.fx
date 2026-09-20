@@ -79,9 +79,9 @@ sampler SSGIMapSamp = sampler_state {
 #endif
 
 #if SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE
-shared texture PSSM1 : OFFSCREENRENDERTARGET;
-sampler PSSM1Samp = sampler_state {
-	texture = <PSSM1>;
+shared texture VSM1 : OFFSCREENRENDERTARGET;
+sampler VSM1Samp = sampler_state {
+	texture = <VSM1>;
 	MinFilter = NONE; MagFilter = NONE; MipFilter = NONE;
 	AddressU = BORDER; AddressV = BORDER; BorderColor = 0.0;
 };
@@ -184,7 +184,7 @@ float4 DebugControllerPS(in float2 coord : TEXCOORD0, in float3 viewdir : TEXCOO
 	#endif
 
 	#if SUN_SHADOW_QUALITY && SUN_LIGHT_ENABLE
-		float depth1 = tex2Dlod(PSSM1Samp, float4(coord * 2.0, 0, 0)).r;		
+		float depth1 = tex2Dlod(VSM1Samp, float4(coord * 2.0, 0, 0)).r;		
 		result += pow(saturate(depth1 / 1500), 2) * showPSSM;
 	#endif
 	

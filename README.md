@@ -56,9 +56,8 @@ Reforge Exclusive Features (through v1.20.22) :
 * **Contact Shadows**: screen-space contact shadows with depth-discontinuity artifact fixes and continuous penetration-based penumbra.
 
 **Lighting & Shadows**
-* **Percentage-Closer Soft Shadows (PCSS)**: contact-hardening soft shadows for cascaded directional sun lights with world-space continuity, dynamic blocker search, and soft penumbra filtering.
+* **Variance Shadow Maps (VSM)**: moment-filtered cascaded directional sun shadows using Chebyshev's inequality (Donnelly & Lauritzen 2006) with hardware moment filtering, seamless cascade blending, and tunable light bleeding reduction.
 * **Directional Water Caustics**: real-time focused underwater light bands and wave curvature flux concentration with chromatic dispersion and a dedicated controller (`CausticsController.pmx`).
-* **Variance Shadow Maps**: ultra-clean high-resolution sun shadows, completely grain-free on character faces, with rotated Vogel-disk PCF filtering to eliminate staircasing and acne.
 * **Screen-Space Global Shadows (SSGS)**: long-range directional raymarched shadows with distance-adaptive soft penumbra expansion, grounding characters and geometry without shadow map dependence.
 * **Volumetric Atmosphere & Dynamic Clouds 2.0**: SA_DirectX 3.0 cumulus cloudscapes with Frostbite/Nubis lighting, Beer-Powder scattering, Silver Lining, planetary horizon curvature, and **Adaptive Empty Space Skipping** (2.25x stride with 0.75x boundary refinement) for high-framerate rendering in clear sky regions without edge slicing or visual quality loss.
 
@@ -194,7 +193,7 @@ Credits :
 * Energy-Preserving Oren-Nayar (EON) diffuse BRDF based on Jamie Portsmouth, Peter Kutz & Stephen Hill (JCGT 2025).
 * Practical Real-Time Hex-Tiling based on Morten S. Mikkelsen (JCGT 2022).
 * Hashed Alpha Testing based on Chris Wyman & Morgan McGuire (I3D 2017).
-* Percentage-Closer Soft Shadows (PCSS) based on Randima Fernando (NVIDIA 2005).
+* Variance Shadow Maps (VSM) based on William Donnelly & Andrew Lauritzen (SI3D 2006).
 * Ground-Truth Ambient Occlusion (GTAO) based on Jorge Jimenez, Xian-Chun Wu, Angelo Pesce, Adrian Jarabo (Activision 2016).
 * Subpixel Morphological Anti-Aliasing (SMAA 1x Ultra+) based on Jorge Jimenez, Jose I. Echevarria et al. (2012).
 * Directionally Adaptive Anti-Aliasing (DLAA / G-DLAA) based on Dmitry Andreev (LucasArts / Game Developer 2011).
@@ -212,7 +211,7 @@ References :
 * Hashed Alpha Testing (Wyman & McGuire) \[[link](https://research.nvidia.com/publication/2017-02_hashed-alpha-testing)\].
 * Ultrafast Screen-Space Refractions and Caustics via Newton's Method \[[link](https://jcgt.org/published/0015/01/03/)\].
 * Efficient GPU Screen-Space Ray Tracing (McGuire & Mara) \[[link](https://jcgt.org/published/0003/03/04/)\].
-* Percentage-Closer Soft Shadows (Fernando, NVIDIA) \[[link](https://developer.download.nvidia.com/shaderlibrary/docs/shadow_PCSS.pdf)\].
+* Variance Shadow Maps (Donnelly & Lauritzen) \[[link](https://www.cs.unc.edu/~geom/technical_reports/variance_shadow_maps.pdf) | [PDF](./ref-docs/vsm_paper.pdf)\].
 * Practical Real-Time Strategies for Accurate Indirect Occlusion (GTAO, Jimenez et al.) \[[link](https://www.activision.com/cdn/research/Practical_Real_Time_Strategies_for_Accurate_Indirect_Occlusion_NEW%20VERSION_一提.pdf)\].
 * Directionally Adaptive Anti-Aliasing (Andreev) \[[link](https://www.gamedeveloper.com/programming/directionally-adaptive-anti-aliasing-dlaa-)\].
 * Real-Time Volumetric Cloudscapes (Nubis / Decima) \[[link](https://advances.realtimerendering.com/s2017/Nubis%20-%20Authoring%20Realtime%20Volumetric%20Cloudscapes%20with%20the%20Decima%20Engine%20-%20Final%20.pdf)\].
