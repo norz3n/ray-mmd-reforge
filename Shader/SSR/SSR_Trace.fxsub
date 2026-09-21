@@ -35,7 +35,6 @@ float SSR_HitConfidence(
 	in float3 rayOriginVS,
 	in float3 hitPosVS,
 	in float traceDistance,
-	in float lobeAlign,
 	in float2 hitUV,
 	in float3 reflectRayVS,
 	in MaterialParam surfaceMat)
@@ -43,9 +42,9 @@ float SSR_HitConfidence(
 	float travelDist = length(hitPosVS - rayOriginVS);
 	float travelFade = 1.0f - smoothstep(traceDistance * mSSRFadeStart, traceDistance, travelDist);
 
-	// angleFade: keep sideways reflections (lobeAlign near 0) at full weight;
-	// only fade rays going fully backward (lobeAlign deeply negative).
-	float angleFade = smoothstep(-0.3f, 0.0f, lobeAlign);
+	// Backward ray fade: rays reflecting back toward the camera plane (reflectRayVS.z < 0)
+	// smoothly fade out. Rays traveling forward into the scene (reflectRayVS.z >= 0) retain 100% confidence.
+	float angleFade = smoothstep(-0.35f, 0.0f, reflectRayVS.z);
 
 	float depthFade = 1.0f - smoothstep(mSSRRangeMax * 0.5f, mSSRRangeMax, surfaceMat.linearDepth);
 
@@ -87,12 +86,6 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	float NdotV = saturate(dot(viewVector, surfaceMat.normal));
 	float traceDistance = mSSRRangeScale * (max(100.0f, mSSRRangeMax - surfaceMat.linearDepth) + surfaceMat.linearDepth);
 
-	// Discard rays going strongly backward (into the camera). Sideways reflections
-	// (lobeAlign near 0) are valid for floors looking at side walls.
-	static const float kMinLobeAlign = -0.3f;
-	float lobeAlign = dot(reflectRayVS, -viewVector);
-	clip(lobeAlign - kMinLobeAlign);
-
 	float normalBias = 0.05f + mSSROffset * 0.15f * (1.0f - NdotR);
 	float directionBias = 0.05f + mSSROffset * 0.1f;
 	float3 rayOriginVS = positionVS + surfaceMat.normal * normalBias + reflectRayVS * directionBias;
@@ -114,10 +107,10 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 			rayOriginVS, reflectRayVS, traceDistance, mSSRThickness, surfaceMat.normal, dbgUV, dbgPos, dbg);
 
 		if (dbgHit)
-			return float4(0.25f + 0.75f * saturate(1.0f - dbg.y / SSR_HZB_MAX_LEVEL), 1.0f - 0.7f * dbg.z, 0.3f, 1.0f);
+			return float4(0.1f, 1.0f, 0.25f, 1.0f);
 		if (dbg.x < 0.0f)
 			return float4(0.6f, 0.0f, 1.0f, 1.0f);
-		if (dbg.x >= (float)SSR_HZB_ITERATIONS - 0.5f)
+		if (dbg.x >= (float)SSR_HZB_ITERATIONS - 4.5f)
 			return float4(1.0f, 0.05f, 0.05f, 1.0f);
 		return float4(1.0f, 1.0f, 0.1f, 1.0f);
 	}
@@ -139,7 +132,7 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 		return 0.0f;
 
 	float confidence = SSR_HitConfidence(
-		rayOriginVS, hitPosVS, traceDistance, lobeAlign, hitUV, reflectRayVS, surfaceMat);
+		rayOriginVS, hitPosVS, traceDistance, hitUV, reflectRayVS, surfaceMat);
 
 
 	// Self-reflection suppression (SSRSelfMap): flagged materials never bounce
@@ -155,10 +148,8 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	// confidence so fully hidden materials fall back to the env/IBL specular cleanly.
 	float reflectVis = tex2Dlod(SSRReflectMapSamp, float4(hitUV, 0.0f, 0.0f)).a;
 
-	// Point sampling at the hit: linear filtering bleeds the neighbouring
-	// background (floor/wall gray) across the reflected silhouette and smears
-	// it into a flat gray patch after the roughness pyramid.
-	float4 hitRadiance = tex2Dlod(ShadingMapPointSamp, float4(hitUV, 0.0f, 0.0f));
+	// Bilinear sampling at the hit: smooth, continuous, anti-aliased reflection radiance
+	float4 hitRadiance = tex2Dlod(ShadingMapSamp, float4(hitUV, 0.0f, 0.0f));
 
 	// FP16 radiance buffer: reject NaN/Inf/negative garbage from long or
 	// numerically degenerate rays instead of rendering it as gray/white blobs.

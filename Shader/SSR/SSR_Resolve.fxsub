@@ -2,7 +2,7 @@
  * Ray-MMD ReForge: Screen-Space Reflections (SSR) Resolve & PBR Composite
  *
  * Module: SSR_Resolve.fxsub
- * Roughness-aware multi-scale prefiltered radiance resolve (Karis 2013 / Unreal Engine 4 Split-Sum BRDF).
+ * Roughness-aware multi-scale prefiltered radiance resolve (Karis 2013 Split-Sum BRDF).
  * Reconstructs pre-filtered reflection radiance across continuous roughness LOD and applies Split-Sum PBR BRDF.
  */
 
@@ -59,7 +59,7 @@ float4 SSR_ResolvePS(in float2 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1)
 
 	float NdotV = abs(dot(normalVS, viewVector));
 
-	// Split-sum environmental specular BRDF (Karis / Unreal Engine 4 PBR)
+	// Split-sum environmental specular BRDF (Karis 2013)
 	float3 pbrSpecularColor = EnvironmentSpecularUnreal4(NdotV, gloss, specularF0);
 
 	// User intensity modulation, material visibility & Fresnel factor

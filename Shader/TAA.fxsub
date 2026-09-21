@@ -54,7 +54,7 @@ float3 ClipAABB(float3 history, float3 boxMin, float3 boxMax, float3 center)
 	return lerp(center, history, t);
 }
 
-// 5-tap Catmull-Rom bicubic texture filter for pin-sharp history reconstruction (Unreal Engine standard)
+// 5-tap Catmull-Rom bicubic texture filter for pin-sharp history reconstruction
 float3 SampleHistoryCatmullRom5Tap(sampler2D historySamp, float2 uv, float2 texelSize)
 {
 	float2 samplePos = uv / texelSize;
