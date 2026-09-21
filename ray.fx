@@ -59,19 +59,13 @@ float mColBalanceBM : CONTROLOBJECT<string name="ray_controller.pmx"; string ite
 float mTemperatureP : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "Temperature+";>;
 float mTemperatureM : CONTROLOBJECT<string name="ray_controller.pmx"; string item = "Temperature-";>;
 
-#if SSR_HIZ_DEBUG
-// HiZDebugController.pmx (SSR Hi-Z atlas debug overlay; see SSR_HiZDebug.fxsub)
-float mHiZDebugAll   : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZAll";>;
-float mHiZDebugAtlas : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZAtlas";>;
-float mHiZDebugTrace : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZTrace";>;
-float mHiZDebugBand1 : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZBand1";>;
-float mHiZDebugBand2 : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZBand2";>;
-float mHiZDebugBand3 : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZBand3";>;
-float mHiZDebugBand4 : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZBand4";>;
-float mHiZDebugBand5 : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZBand5";>;
-float mHiZDebugBand6 : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZBand6";>;
-float mHiZDebugBand7 : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZBand7";>;
-float mHiZDebugBand8 : CONTROLOBJECT<string name="HiZDebugController.pmx"; string item = "HiZBand8";>;
+#if SSR_DEBUG
+// SSRDebugController.pmx (Dedicated SSR debug controller)
+float mSSRDebugTrace      : CONTROLOBJECT<string name="SSRDebugController.pmx"; string item = "SSRTrace";>;
+float mSSRDebugConfidence : CONTROLOBJECT<string name="SSRDebugController.pmx"; string item = "SSRConfidence";>;
+float mSSRDebugDistance   : CONTROLOBJECT<string name="SSRDebugController.pmx"; string item = "SSRDistance";>;
+float mSSRDebugNormal     : CONTROLOBJECT<string name="SSRDebugController.pmx"; string item = "SSRNormal";>;
+float mSSRDebugRoughness  : CONTROLOBJECT<string name="SSRDebugController.pmx"; string item = "SSRRoughness";>;
 #endif
 
 #if WATER_CAUSTICS_ENABLE
@@ -669,17 +663,6 @@ technique DeferredLighting<
 #endif
 
 #if SSR_QUALITY
-	// Hi-Z pyramid: per-level min/max depth mips packed into the trace atlas.
-	"RenderColorTarget=SSRHiZMap1; Pass=SSR_HiZBuild1;"
-	"RenderColorTarget=SSRHiZMap2; Pass=SSR_HiZBuild2;"
-	"RenderColorTarget=SSRHiZMap3; Pass=SSR_HiZBuild3;"
-	"RenderColorTarget=SSRHiZMap4; Pass=SSR_HiZBuild4;"
-	"RenderColorTarget=SSRHiZMap5; Pass=SSR_HiZBuild5;"
-	"RenderColorTarget=SSRHiZMap6; Pass=SSR_HiZBuild6;"
-	"RenderColorTarget=SSRHiZMap7; Pass=SSR_HiZBuild7;"
-	"RenderColorTarget=SSRHiZMap8; Pass=SSR_HiZBuild8;"
-	"RenderColorTarget=SSRHiZAtlas; Pass=SSR_HiZCombine;"
-
 	"RenderColorTarget=SSRLightX1Map;"
 	"Clear=Color;"
 	"Pass=SSR_Trace;"
@@ -848,9 +831,6 @@ technique DeferredLighting<
 #endif
 #endif
 
-#if SSR_HIZ_DEBUG
-	"RenderColorTarget=; RenderDepthStencilTarget=; Pass=SSR_HiZDebug;"
-#endif
 ;>
 {
 #if SUN_LIGHT_ENABLE && SUN_SHADOW_QUALITY
@@ -1019,60 +999,6 @@ technique DeferredLighting<
 #endif
 
 #if SSR_QUALITY
-	pass SSR_HiZBuild1<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSR_HiZBuild1PS();
-	}
-	pass SSR_HiZBuild2<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSR_HiZBuildNPS(SSRHiZMap1Samp, kSSRHiZLevelSize[0], kSSRHiZLevelSize[1]);
-	}
-	pass SSR_HiZBuild3<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSR_HiZBuildNPS(SSRHiZMap2Samp, kSSRHiZLevelSize[1], kSSRHiZLevelSize[2]);
-	}
-	pass SSR_HiZBuild4<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSR_HiZBuildNPS(SSRHiZMap3Samp, kSSRHiZLevelSize[2], kSSRHiZLevelSize[3]);
-	}
-	pass SSR_HiZBuild5<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSR_HiZBuildNPS(SSRHiZMap4Samp, kSSRHiZLevelSize[3], kSSRHiZLevelSize[4]);
-	}
-	pass SSR_HiZBuild6<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSR_HiZBuildNPS(SSRHiZMap5Samp, kSSRHiZLevelSize[4], kSSRHiZLevelSize[5]);
-	}
-	pass SSR_HiZBuild7<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSR_HiZBuildNPS(SSRHiZMap6Samp, kSSRHiZLevelSize[5], kSSRHiZLevelSize[6]);
-	}
-	pass SSR_HiZBuild8<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSR_HiZBuildNPS(SSRHiZMap7Samp, kSSRHiZLevelSize[6], kSSRHiZLevelSize[7]);
-	}
-	pass SSR_HiZCombine<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSR_HiZCombinePS();
-	}
 	pass SSR_Trace<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
@@ -1134,14 +1060,6 @@ technique DeferredLighting<
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
 		PixelShader  = compile ps_3_0 SSR_ResolvePS();
 	}
-#if SSR_HIZ_DEBUG
-	pass SSR_HiZDebug<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSR_HiZDebugPS();
-	}
-#endif
 #endif
 #if GI_ENABLE
 	pass SSGI<string Script= "Draw=Buffer;";>{

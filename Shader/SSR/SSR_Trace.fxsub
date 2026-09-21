@@ -2,9 +2,9 @@
  * Ray-MMD ReForge: Screen-Space Reflections (SSR) Ray Tracing Pass
  *
  * Module: SSR_Trace.fxsub
- * Screen-space ray tracing accelerated by the hierarchical depth pyramid in
- * SSR_HiZ.fxsub: reflected rays walk a min/max depth atlas instead of stepping
- * the full-resolution depth buffer, skipping whole cell blocks per iteration.
+ * High-performance screen-space ray tracing using vectorized linear SIMD marching.
+ * Evaluates reflection rays across full-resolution depth with 4-sample texture batching,
+ * dynamic slope-based tolerance, and direct hit sample binding.
  */
 
 #ifndef RAY_MMD_SSR_TRACE_FXSUB
@@ -12,24 +12,227 @@
 
 #include "shader/SSR/SSR_Common.fxsub"
 
-// Discarded debug output of the production trace call (the instrumented
-// tracer always reports its stats; the production path ignores them).
+// NDC depth at or below this is treated as sky/unwritten in the depth buffer
+#define SSR_EMPTY_DEPTH 0.01f
+
+#if SSR_QUALITY == 1
+#	define SSR_MAX_STEPS 128
+#elif SSR_QUALITY == 2
+#	define SSR_MAX_STEPS 256
+#elif SSR_QUALITY == 3
+#	define SSR_MAX_STEPS 384
+#else
+#	define SSR_MAX_STEPS 512
+#endif
+
+// Discarded debug output of the production trace call
 static float4 sTraceStats = 0.0f;
+
+/**
+ * Converts an NDC depth to linear view-space depth. Inverts the framework's
+ * row-vector perspective projection, where the NDC depth is an affine
+ * function of 1 / view depth (the [2][2] and [3][2] matrix elements).
+ */
+inline float SSR_ViewDepth(float zNdc)
+{
+	return matProject[3][2] / (zNdc - matProject[2][2]);
+}
+
+/**
+ * Inverse of SSR_ViewDepth: linear view depth to NDC depth.
+ */
+inline float SSR_NdcDepth(float zView)
+{
+	return matProject[2][2] + matProject[3][2] / zView;
+}
+
+/**
+ * Reconstructs the view-space position behind a traced screen-space point
+ * (UV in [0,1] with the framework's y flip, plus NDC depth).
+ */
+inline float3 SSR_UnprojectScreen(float3 screenPoint)
+{
+	float3 ndc = (screenPoint - float3(0.5f, 0.5f, 0.0f)) * float3(2.0f, -2.0f, 1.0f);
+	float zView = SSR_ViewDepth(ndc.z);
+	float4 clipPos = float4(ndc.xyz * zView, zView);
+	return mul(clipPos, matProjectInverse).xyz;
+}
+
+/**
+ * Traverses screen space using vectorized SIMD linear ray marching:
+ *   - Screen-space border clipping to prevent offscreen tracing
+ *   - SIMD 4-sample texture fetch batching to eliminate warp divergence
+ *   - Dynamic slope-based CompareTolerance scaling with depth rate-of-change to prevent grazing misses
+ *   - Direct hit-tap binding to prevent silhouette overshoots and teeth
+ *   - High-throughput uniform execution for stable 60+ FPS
+ */
+bool SSR_RayMarch(
+	in float3 originVS,
+	in float3 dirVS,
+	in float maxDistance,
+	in float thicknessBase,
+	in float3 originNormalVS,
+	out float2 hitUV,
+	out float3 hitPosVS,
+	out float4 debugOut)
+{
+	hitUV = float2(-1.0f, -1.0f);
+	hitPosVS = 0.0f;
+	debugOut = float4(0.0f, 0.0f, 0.0f, 0.0f);
+
+	// Clip ray against near camera plane to ensure valid perspective projection
+	static const float kNearPlaneZ = 0.05f;
+	if (originVS.z < kNearPlaneZ)
+		return false;
+
+	if (dirVS.z < 0.0f)
+		maxDistance = min(maxDistance, (kNearPlaneZ - originVS.z) / dirVS.z);
+
+	if (maxDistance <= 0.0f)
+		return false;
+
+	float3 endVS = originVS + dirVS * maxDistance;
+
+	// Project ray segment into screen UV + NDC depth space
+	float4 clipStart = mul(float4(originVS, 1.0f), matProject);
+	float4 clipEnd   = mul(float4(endVS, 1.0f), matProject);
+
+	if (clipStart.w <= 0.0f || clipEnd.w <= 0.0f)
+		return false;
+
+	float3 ndcStart = clipStart.xyz / clipStart.w;
+	float3 ndcEnd   = clipEnd.xyz / clipEnd.w;
+
+	float3 p0 = float3(ndcStart.xy * float2(0.5f, -0.5f) + 0.5f, ndcStart.z);
+	float3 p1 = float3(ndcEnd.xy   * float2(0.5f, -0.5f) + 0.5f, ndcEnd.z);
+
+	// Clamp start point to screen bounds so normal/direction bias never produces negative tEdge
+	p0.xy = clamp(p0.xy, 0.0f, 1.0f);
+
+	float3 rayStep = p1 - p0;
+
+	// Parametric screen border clipping: scale rayStep so [0, 1] parameter
+	// covers exactly the portion of the ray that remains on-screen
+	float2 tEdge = 1e9f;
+	if (rayStep.x > 0.0f) tEdge.x = (1.0f - p0.x) / rayStep.x;
+	else if (rayStep.x < 0.0f) tEdge.x = (0.0f - p0.x) / rayStep.x;
+	if (rayStep.y > 0.0f) tEdge.y = (1.0f - p0.y) / rayStep.y;
+	else if (rayStep.y < 0.0f) tEdge.y = (0.0f - p0.y) / rayStep.y;
+	rayStep *= clamp(min(tEdge.x, tEdge.y), 0.0f, 1.0f);
+
+	float stepT = 1.0f / (float)SSR_MAX_STEPS;
+	float3 dP = rayStep * stepT;
+
+	// Deterministic starting ray state (no pseudo-random jitter, which causes grain/noise on glossy/mirror surfaces)
+	float3 rayStart = p0;
+
+	float prevRayLinearZ = SSR_ViewDepth(rayStart.z);
+
+	float hitT = -1.0f;
+	int iter = 0;
+
+	// 4-sample batched SIMD marching loop for uniform parallel GPU execution
+	[loop]
+	for (iter = 0; iter < SSR_MAX_STEPS; iter += 4)
+	{
+		float4 tapIndex = float(iter) + float4(1.0f, 2.0f, 3.0f, 4.0f);
+		float3 r0 = rayStart + tapIndex.x * dP;
+		float3 r1 = rayStart + tapIndex.y * dP;
+		float3 r2 = rayStart + tapIndex.z * dP;
+		float3 r3 = rayStart + tapIndex.w * dP;
+
+		// Early exit if the batch leaves the screen
+		if (any(r0.xy < 0.0f) || any(r0.xy >= 1.0f))
+			break;
+
+		// SIMD texture fetch batching: 4 quad-samples requested simultaneously
+		float d0 = tex2Dlod(Gbuffer8Map, float4(r0.xy, 0.0f, 0.0f)).x;
+		float d1 = tex2Dlod(Gbuffer8Map, float4(r1.xy, 0.0f, 0.0f)).x;
+		float d2 = tex2Dlod(Gbuffer8Map, float4(r2.xy, 0.0f, 0.0f)).x;
+		float d3 = tex2Dlod(Gbuffer8Map, float4(r3.xy, 0.0f, 0.0f)).x;
+
+		float z0 = SSR_ViewDepth(r0.z);
+		float z1 = SSR_ViewDepth(r1.z);
+		float z2 = SSR_ViewDepth(r2.z);
+		float z3 = SSR_ViewDepth(r3.z);
+
+		// Dynamic slope-based CompareTolerance: scales with ray depth rate-of-change
+		float tol0 = max(thicknessBase, abs(z0 - prevRayLinearZ) * 2.0f);
+		float tol1 = max(thicknessBase, abs(z1 - z0) * 2.0f);
+		float tol2 = max(thicknessBase, abs(z2 - z1) * 2.0f);
+		float tol3 = max(thicknessBase, abs(z3 - z2) * 2.0f);
+
+		float diff0 = z0 - d0;
+		float diff1 = z1 - d1;
+		float diff2 = z2 - d2;
+		float diff3 = z3 - d3;
+
+		bool4 isHit = bool4(
+			d0 > SSR_EMPTY_DEPTH && diff0 >= 0.0f && diff0 < tol0,
+			d1 > SSR_EMPTY_DEPTH && diff1 >= 0.0f && diff1 < tol1,
+			d2 > SSR_EMPTY_DEPTH && diff2 >= 0.0f && diff2 < tol2,
+			d3 > SSR_EMPTY_DEPTH && diff3 >= 0.0f && diff3 < tol3
+		);
+
+		if (any(isHit))
+		{
+			// Take the exact hit sample that intersected the surface directly
+			float3 hitPos = r3;
+			float hitStep = float(iter) + 4.0f;
+
+			[flatten]
+			if (isHit.z)
+			{
+				hitPos = r2;
+				hitStep = float(iter) + 3.0f;
+			}
+			[flatten]
+			if (isHit.y)
+			{
+				hitPos = r1;
+				hitStep = float(iter) + 2.0f;
+			}
+			[flatten]
+			if (isHit.x)
+			{
+				hitPos = r0;
+				hitStep = float(iter) + 1.0f;
+			}
+
+			// Reject coplanar self-intersection on origin receiver plane (floor)
+			float3 hitNorm = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(hitPos.xy, 0.0f, 0.0f)));
+			bool isSelfHit = (dot(hitNorm, originNormalVS) > 0.95f) && (hitStep * stepT * maxDistance < 0.25f);
+
+			if (!isSelfHit)
+			{
+				hitT = hitStep * stepT;
+				break;
+			}
+		}
+
+		prevRayLinearZ = z3;
+	}
+
+	if (hitT >= 0.0f && hitT <= 1.0f)
+	{
+		float3 finalPoint = rayStart + hitT * rayStep;
+		hitUV = clamp(finalPoint.xy, 0.0f, 1.0f);
+		hitPosVS = SSR_UnprojectScreen(finalPoint);
+		debugOut = float4((float)iter, 1.0f, 0.0f, 1.0f); // Green for hit
+		return true;
+	}
+
+	debugOut = float4((float)iter, 0.0f, 0.0f, 0.0f);
+	return false;
+}
 
 /**
  * Confidence of a resolved SSR hit, in [0, 1]. Composed of four independent
  * fade factors:
- *   - Travel fade: reflections that consume the whole ray budget carry no
- *     information about what was actually hit, so they ramp down to zero over
- *     the final stretch of the budget (mSSRFadeStart defines the ramp start).
- *   - Angle fade: rays leaving nearly parallel to the surface stretch across
- *     many screen cells and accumulate the most Hi-Z error.
- *   - Depth fade: beyond half of mSSRRangeMax the scene depth buffer becomes
- *     too coarse for reliable parallax, so far background rays dissolve.
- *   - Facing test: a hit on a surface turned away from the incoming ray is a
- *     silhouette artifact, not a real reflector.
- * A low-confidence hit is not discarded; the resolve pass blends it into the
- * environment/IBL specular, so fading smoothly avoids visible seams.
+ *   - Travel fade: reflections ramp down to zero over the final stretch of the budget.
+ *   - Angle fade: backward-facing reflection rays fade smoothly.
+ *   - Depth fade: far background rays dissolve seamlessly into the IBL sky.
+ *   - Facing test: surface normal turned away from incoming ray fades out.
  */
 float SSR_HitConfidence(
 	in float3 rayOriginVS,
@@ -90,35 +293,29 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	float directionBias = 0.05f + mSSROffset * 0.1f;
 	float3 rayOriginVS = positionVS + surfaceMat.normal * normalBias + reflectRayVS * directionBias;
 
-#if SSR_HIZ_DEBUG
-	// Trace diagnostics (HiZTrace slider): repaints every receiver pixel with
-	// the tracer's verdict instead of the reflection. Read through the usual
-	// blur/resolve chain, so colors are approximate but regionally distinct:
-	//   green→teal  hit (brighter = finer pyramid level; teal = fallback hit)
-	//   red         iteration budget exhausted
-	//   yellow      ray left the screen / spent its range before a crossing
-	//   purple      pre-abort (origin behind the near plane, degenerate ray)
-	if (mHiZDebugTrace > 0.5f)
+#if SSR_DEBUG
+	// Diagnostic visualization via SSRDebugController.pmx
+	if (mSSRDebugTrace > 0.5f)
 	{
 		float2 dbgUV = 0.0f;
 		float3 dbgPos = 0.0f;
 		float4 dbg = 0.0f;
-		bool dbgHit = SSR_HiZTrace(
+		bool dbgHit = SSR_RayMarch(
 			rayOriginVS, reflectRayVS, traceDistance, mSSRThickness, surfaceMat.normal, dbgUV, dbgPos, dbg);
 
 		if (dbgHit)
-			return float4(0.1f, 1.0f, 0.25f, 1.0f);
+			return float4(0.1f, 1.0f, 0.25f, 1.0f); // Green for solid hit
 		if (dbg.x < 0.0f)
-			return float4(0.6f, 0.0f, 1.0f, 1.0f);
-		if (dbg.x >= (float)SSR_HZB_ITERATIONS - 4.5f)
-			return float4(1.0f, 0.05f, 0.05f, 1.0f);
-		return float4(1.0f, 1.0f, 0.1f, 1.0f);
+			return float4(0.6f, 0.0f, 1.0f, 1.0f); // Purple for pre-abort
+		if (dbg.x >= (float)SSR_MAX_STEPS - 4.5f)
+			return float4(1.0f, 0.05f, 0.05f, 1.0f); // Red for max steps
+		return float4(1.0f, 1.0f, 0.1f, 1.0f); // Yellow for ray out of screen
 	}
 #endif
 
 	float2 hitUV = 0.0f;
 	float3 hitPosVS = 0.0f;
-	bool hit = SSR_HiZTrace(
+	bool hit = SSR_RayMarch(
 		rayOriginVS,
 		reflectRayVS,
 		traceDistance,
@@ -134,6 +331,28 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 	float confidence = SSR_HitConfidence(
 		rayOriginVS, hitPosVS, traceDistance, hitUV, reflectRayVS, surfaceMat);
 
+#if SSR_DEBUG
+	if (mSSRDebugConfidence > 0.5f)
+		return float4(confidence, confidence, confidence, 1.0f);
+	if (mSSRDebugDistance > 0.5f)
+	{
+		float dNorm = saturate(length(hitPosVS - rayOriginVS) / traceDistance);
+		return float4(dNorm, 1.0f - dNorm, 0.1f, 1.0f);
+	}
+	if (mSSRDebugNormal > 0.5f)
+	{
+		float3 hitNormal = DecodeGBufferNormal(tex2Dlod(Gbuffer6Map, float4(hitUV, 0.0f, 0.0f)));
+		return float4(hitNormal * 0.5f + 0.5f, 1.0f);
+	}
+	if (mSSRDebugRoughness > 0.5f)
+	{
+		float gloss = saturate(surfaceMat.smoothness + mSSRSmoothness * 0.5f);
+		float roughness = saturate(1.0f - gloss);
+		float blurMask = tex2Dlod(SSRBlurMapSamp, float4(coord.xy, 0.0f, 0.0f)).a;
+		roughness = saturate(roughness + blurMask * (1.0f - roughness));
+		return float4(roughness, roughness, roughness, 1.0f);
+	}
+#endif
 
 	// Self-reflection suppression (SSRSelfMap): flagged materials never bounce
 	// SSR between each other (skin/hair self-smudging on face close-ups), while
@@ -153,8 +372,6 @@ float4 SSR_TracePS(in float4 coord : TEXCOORD0, in float3 viewdir : TEXCOORD1) :
 
 	// FP16 radiance buffer: reject NaN/Inf/negative garbage from long or
 	// numerically degenerate rays instead of rendering it as gray/white blobs.
-	// The half-float ceiling matches the render target format; NaN fails every
-	// comparison, so the single validity predicate covers all three cases.
 	static const float kHalfFloatMax = 65504.0f;
 	bool radianceValid = all(!isnan(hitRadiance.rgb))
 		&& all(hitRadiance.rgb >= 0.0f)

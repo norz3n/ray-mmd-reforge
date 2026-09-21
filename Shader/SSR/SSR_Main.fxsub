@@ -9,12 +9,8 @@
 #define RAY_MMD_SSR_MAIN_FXSUB
 
 #include "shader/SSR/SSR_Common.fxsub"
-#include "shader/SSR/SSR_HiZ.fxsub"
 #include "shader/SSR/SSR_Trace.fxsub"
 #include "shader/SSR/SSR_Filter.fxsub"
 #include "shader/SSR/SSR_Resolve.fxsub"
-#if SSR_HIZ_DEBUG
-#include "shader/SSR/SSR_HiZDebug.fxsub"
-#endif
 
 #endif // RAY_MMD_SSR_MAIN_FXSUB
