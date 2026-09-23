@@ -9,7 +9,7 @@
 #ifndef RAY_MMD_SSR_COMMON_FXSUB
 #define RAY_MMD_SSR_COMMON_FXSUB
 
-// Ray tracing budgets (Hi-Z iteration counts) live in SSR_HiZ.fxsub.
+// Ray tracing budget (step count) lives in SSR_Trace.fxsub.
 
 // Multi-resolution roughness pyramid render targets (Full, 1/2, 1/4, 1/8)
 shared texture SSRLightX1Map : RENDERCOLORTARGET<float2 ViewportRatio = {1.0, 1.0}; string Format = "A16B16G16R16F";>;
