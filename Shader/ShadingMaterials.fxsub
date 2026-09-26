@@ -169,13 +169,16 @@ void ShadingMaterial(MaterialParam material, float3 V, float3 L, float2 coord, o
 #endif
 
 #if SSDO_QUALITY
-	float3 bentNormal = tex2Dlod(SSDOMapSamp, float4(coord, 0, 0)).xyz * 2 - 1;
+	float4 ssdoData = tex2Dlod(SSDOMapSamp, float4(coord, 0, 0));
+	float3 bentNormal = ssdoData.xyz * 2 - 1;
 	float ssdo = pow(saturate(1.0f - dot(bentNormal, L) * 0.85f), max(mSSDOScale, 0.1f));
+	float ssao = min(ssdoData.w, material.visibility);
 	bool isSkin = (material.lightModel == SHADINGMODELID_SKIN || material.lightModel == SHADINGMODELID_SUBSURFACE);
 	// Toon ramps drive their terminator from the geometry shadow alone;
 	// screen-space AO would smear the band edges
 	bool isToonMat = (material.lightModel == SHADINGMODELID_CEL || material.lightModel == SHADINGMODELID_TONEBASED);
-	shadow *= isSkin ? lerp(1.0f, ssdo, SKIN_AO_STRENGTH) : (isToonMat ? 1.0f : lerp(1.0f, ssdo, 0.85f));
+	float occTerm = min(ssdo, ssao);
+	shadow *= isSkin ? lerp(1.0f, occTerm, SKIN_AO_STRENGTH) : (isToonMat ? 1.0f : lerp(1.0f, occTerm, 0.85f));
 #endif
 
 	float3 lightColor = SunColor * mSunIntensity * any(material.visibility);
@@ -262,7 +265,7 @@ void ShadingImageBasedLighting(sampler source, MaterialParam material, float4 sc
 	// Specular occlusion still uses bent normal + AO (applied now, before SSR overlays)
 	float ssao        = min(ssdoData.w, material.visibility);
 	float skinAO      = lerp(1.0f, ssao, SKIN_AO_STRENGTH);
-	float effectiveAO = isSkin ? skinAO : ssao;
+	float effectiveAO = isSkin ? skinAO : (ssao * ssao);
 	float baseSpecOcc = ComputeSpecularOcclusion(NdotV, effectiveAO, material.smoothness);
 	float dirSpecOcc  = ComputeDirectionalSpecularOcclusion(R, bentNormal, effectiveAO, roughness);
 	float gtso        = saturate(pow(NdotV + effectiveAO, roughness * roughness) - 1.0f + effectiveAO);
@@ -278,7 +281,8 @@ void ShadingImageBasedLighting(sampler source, MaterialParam material, float4 sc
 		float3 aBounce   = 2.0404f * material.albedo - 0.3324f;
 		float3 bBounce   = -4.7951f * material.albedo + 0.6417f;
 		float3 cBounce   = 2.7552f * material.albedo + 0.6903f;
-		float3 coloredAO = max(effectiveAO, ((effectiveAO * aBounce + bBounce) * effectiveAO + cBounce) * effectiveAO);
+		float3 multiBounceAO = saturate(((effectiveAO * aBounce + bBounce) * effectiveAO + cBounce) * effectiveAO);
+		float3 coloredAO = lerp(effectiveAO, multiBounceAO, 0.5f);
 		diffuse *= coloredAO;
 	}
 #else

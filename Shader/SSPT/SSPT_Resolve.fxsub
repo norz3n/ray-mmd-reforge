@@ -40,9 +40,15 @@ float4 SSPTFinalCombinePS(in float2 uvCoord : TEXCOORD0, in float3 viewDir : TEX
 
 	bool isSkin = (mat.lightModel == SHADINGMODELID_SKIN || mat.lightModel == SHADINGMODELID_SUBSURFACE);
 
-	// AO is computed before shading and applied in-material (ShadingMaterials),
-	// so it already darkens direct/IBL light before the GI composite adds bounce.
+#if SSDO_QUALITY > 0
+	float rawAO = tex2Dlod(SSDOMapSamp, float4(uvCoord, 0.0f, 0.0f)).w;
+	float occlusion = (mat.lightModel == SHADINGMODELID_GLASS) ? 1.0f : rawAO;
+	occlusion = pow(saturate(occlusion), SSPT_AO_AMOUNT);
+	// Skin SSS diffuses light into cavities, receiving softened linear AO instead of quadratic crevice absorption
+	occlusion = isSkin ? lerp(1.0f, occlusion, SKIN_AO_STRENGTH) : (occlusion * occlusion);
+#else
 	float occlusion = 1.0f;
+#endif
 
 	float3 camDir = normalize(viewDir);
 	float NdV = saturate(dot(mat.normal, camDir));

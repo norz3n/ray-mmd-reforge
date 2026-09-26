@@ -147,7 +147,7 @@ float4 ScreenSpaceDirOccPassPS(in float4 uv : TEXCOORD0, in float2 screen : SV_P
 	const float pixelTooCloseThreshold = 1.3f;
 	float minS = pixelTooCloseThreshold / max(screenspaceRadius, 1e-4f);
 
-#if AA_QUALITY == 6 || AO_TEMPORAL_DENOISE
+#if AA_QUALITY == 6
 	int frameCounter = (int)fmod(time * 60.0f, 16.0f);
 #else
 	int frameCounter = 0;
@@ -362,104 +362,4 @@ float4 ScreenSpaceDirOccBlurPS(
 	return blurred;
 }
 
-#if AO_TEMPORAL_DENOISE
-struct SSDOTemporalOutput
-{
-	float4 color0 : COLOR0;
-	float4 color1 : COLOR1;
-};
-
-SSDOTemporalOutput SSDOTemporalDenoisePS(in float2 uv : TEXCOORD0)
-{
-	SSDOTemporalOutput output;
-	float curDepth = linearizeDepth(uv);
-	float4 curAO = tex2Dlod(SSDOMapSamp, float4(uv, 0, 0));
-
-	if (curDepth > 999.0f || curDepth <= 1e-4f)
-	{
-		output.color0 = curAO;
-		output.color1 = curAO;
-		return output;
-	}
-
-	float4 projInfo = GetProjConstant();
-	float3 viewPosition = GetViewPosition(projInfo, uv, curDepth);
-	float3 worldPosition = mul(float4(viewPosition, 1.0), matViewInverse).xyz;
-
-	float4x4 matViewProjectPrev = GetPrevViewProject();
-	float4 prevClipPos = mul(float4(worldPosition, 1.0), matViewProjectPrev);
-	float2 prevUV = (prevClipPos.xy / max(prevClipPos.w, 1e-5)) * float2(0.5, -0.5) + 0.5;
-
-	if (any(prevUV < 0.0f) || any(prevUV > 1.0f))
-	{
-		output.color0 = curAO;
-		output.color1 = curAO;
-		return output;
-	}
-
-	float prevDepth = linearizeDepth(prevUV);
-	if (abs(prevDepth - curDepth) > max(0.10f, curDepth * 0.03f))
-	{
-		output.color0 = curAO;
-		output.color1 = curAO;
-		return output;
-	}
-
-	float4 historyAO = tex2Dlod(SSDOMapHistorySamp, float4(prevUV, 0, 0));
-
-	// Bent-normal history validation: the depth gate above compares the CURRENT
-	// depth at prevUV, so on depth-continuous surfaces (camera pans across a
-	// wall, limbs sliding over the body) it accepts history that belongs to a
-	// different surface point. The reprojected bent normal - which the history
-	// buffer already stores in xyz - flags exactly those cases.
-	float3 curBent = curAO.xyz * 2.0f - 1.0f;
-	float3 histBent = historyAO.xyz * 2.0f - 1.0f;
-	float bentReject = saturate((1.0f - saturate(dot(curBent, histBent))) * 4.0f);
-
-	// Motion-adaptive blend: a fixed high history weight turns any validation
-	// leak into a dark trail on the composite, so hand control to the current
-	// frame as soon as the surface moves in screen space.
-	float2 pixelMotion = (uv - prevUV) * ViewportSize;
-	float alphaCurrent = max(lerp(0.15f, 1.0f, saturate(length(pixelMotion) / 8.0f)), bentReject);
-
-	// Strict 3x3 Neighborhood Box Clamping: history is strictly bounded by current neighborhood to prevent temporal dark bleeding
-	float2 texelSize = ViewportOffset2;
-	float4 minAO = curAO;
-	float4 maxAO = curAO;
-
-	[unroll]
-	for (int x = -1; x <= 1; ++x)
-	{
-		[unroll]
-		for (int y = -1; y <= 1; ++y)
-		{
-			if (x != 0 || y != 0)
-			{
-				float4 sampleNeighbor = tex2Dlod(SSDOMapSamp, float4(uv + float2(x, y) * texelSize, 0, 0));
-				minAO = min(minAO, sampleNeighbor);
-				maxAO = max(maxAO, sampleNeighbor);
-			}
-		}
-	}
-
-	historyAO = clamp(historyAO, minAO, maxAO);
-
-	float4 denoised = lerp(curAO, historyAO, 1.0f - alphaCurrent);
-
-	// Re-normalize bent normal after temporal blending to prevent vector length drift
-	float3 bn = denoised.xyz * 2.0f - 1.0f;
-	float bnLen = length(bn);
-	if (bnLen > 1e-4f)
-		denoised.xyz = (bn / bnLen) * 0.5f + 0.5f;
-
-	output.color0 = denoised;
-	output.color1 = denoised;
-	return output;
-}
-
-float4 SSDOCopyTemporalPS(in float2 uv : TEXCOORD0) : COLOR
-{
-	return tex2Dlod(SSDOMapSampTemp, float4(uv, 0, 0));
-}
-#endif
 

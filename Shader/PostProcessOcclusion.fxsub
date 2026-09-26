@@ -310,8 +310,7 @@ float4 ScreenSpaceDirOccPassPS(
 #endif
 
 	sh.w = sh.w * tex2Dlod(SSAOMapSamp, float4(coord.xy, 0, 0)).a;
-	sh.w = 1 - sh.w;
-	sh.w = pow(sh.w, mSSAOScale);
+	sh.w = pow(saturate(1.0f - sh.w), mSSAOScale);
 
 	return sh;
 }
@@ -358,4 +357,4 @@ float4 ScreenSpaceDirOccBlurPS(
 	}
 
 	return total_c / total_w;
-}
+}

@@ -424,7 +424,7 @@ static float mCausticsDispScale  = lerp(lerp(1.0f, 3.0f, mCstDispersionP), 0.0f,
 #include "shader/math.fxsub"
 #include "shader/common.fxsub"
 #include "shader/textures.fxsub"
-#if (AA_QUALITY == 6) || POST_MOTION_BLUR_ENABLE || AO_TEMPORAL_DENOISE || (GI_ENABLE > 0)
+#if (AA_QUALITY == 6) || POST_MOTION_BLUR_ENABLE || (GI_ENABLE > 0)
 #	include "shader/PostProcessMatrix.fxsub"
 #endif
 #include "shader/gbuffer.fxsub"
@@ -587,11 +587,6 @@ technique DeferredLighting<
 	"RenderColorTarget=SSDOMapTemp; Pass=SSDOBlurX;"
 	"RenderColorTarget=SSDOMap;     Pass=SSDOBlurY;"
 #endif
-#if AO_TEMPORAL_DENOISE
-	"RenderColorTarget0=SSDOMapTemp; RenderColorTarget1=SSDOMapHistory; Pass=SSDOTemporalDenoise;"
-	"RenderColorTarget1=;"
-	"RenderColorTarget=SSDOMap; Pass=SSDOCopyTemporal;"
-#endif
 #endif
 #endif
 
@@ -609,11 +604,6 @@ technique DeferredLighting<
 #if SSDO_BLUR_RADIUS
 	"RenderColorTarget=SSDOMapTemp; Pass=SSDOBlurX;"
 	"RenderColorTarget=SSDOMap;     Pass=SSDOBlurY;"
-#endif
-#if AO_TEMPORAL_DENOISE
-	"RenderColorTarget0=SSDOMapTemp; RenderColorTarget1=SSDOMapHistory; Pass=SSDOTemporalDenoise;"
-	"RenderColorTarget1=;"
-	"RenderColorTarget=SSDOMap; Pass=SSDOCopyTemporal;"
 #endif
 #endif
 #endif
@@ -823,7 +813,7 @@ technique DeferredLighting<
 	"RenderColorTarget=TAAMatrixMap; Pass=TAAMatrixUpdatePass;"
 #endif
 #else
-#if AA_QUALITY == 6 || AO_TEMPORAL_DENOISE || (GI_ENABLE > 0)
+#if AA_QUALITY == 6 || (GI_ENABLE > 0)
 	"RenderColorTarget=TAAMatrixMap; Pass=TAAMatrixUpdatePass;"
 #endif
 #if POST_SHARPEN_ENABLE
@@ -876,20 +866,6 @@ technique DeferredLighting<
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
 		PixelShader  = compile ps_3_0 ScreenSpaceDirOccBlurPS(SSDOMapSampTemp, float2(0.0f, ViewportOffset2.y));
 	}
-#if AO_TEMPORAL_DENOISE
-	pass SSDOTemporalDenoise<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSDOTemporalDenoisePS();
-	}
-	pass SSDOCopyTemporal<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSDOCopyTemporalPS();
-	}
-#endif
 #endif
 #endif
 	pass ShadingOpacity<string Script= "Draw=Buffer;";>{
@@ -1131,20 +1107,6 @@ technique DeferredLighting<
 		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
 		PixelShader  = compile ps_3_0 ScreenSpaceDirOccBlurPS(SSDOMapSampTemp, float2(0.0f, ViewportOffset2.y));
 	}
-#if AO_TEMPORAL_DENOISE
-	pass SSDOTemporalDenoise<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSDOTemporalDenoisePS();
-	}
-	pass SSDOCopyTemporal<string Script= "Draw=Buffer;";>{
-		AlphaBlendEnable = false; AlphaTestEnable = false;
-		ZEnable = false; ZWriteEnable = false;
-		VertexShader = compile vs_3_0 ScreenSpaceQuadVS();
-		PixelShader  = compile ps_3_0 SSDOCopyTemporalPS();
-	}
-#endif
 #endif
 #endif
 #if BOKEH_MODE == 1
@@ -1562,7 +1524,7 @@ technique DeferredLighting<
 		PixelShader  = compile ps_3_0 TAAPS(ShadingMapTempSamp);
 	}
 #endif
-#if AA_QUALITY == 6 || POST_MOTION_BLUR_ENABLE || AO_TEMPORAL_DENOISE || (GI_ENABLE > 0)
+#if AA_QUALITY == 6 || POST_MOTION_BLUR_ENABLE || (GI_ENABLE > 0)
 	pass TAAMatrixUpdatePass<string Script= "Draw=Buffer;";>{
 		AlphaBlendEnable = false; AlphaTestEnable = false;
 		ZEnable = false; ZWriteEnable = false;
